@@ -857,6 +857,9 @@ Private Sub pvDoNotify(ByVal wParam As Long, ByVal lParam As Long)
             Case ucsSfdRead
                 If Not IOCtl(FIONREAD, lBytes) Then
                     RaiseEvent OnError(m_lLastError, eEvent)
+                    If m_hSocket = INVALID_SOCKET Then
+                        GoTo QH
+                    End If
                 End If
                 If lBytes <> 0 Then
                     m_lLastError = 0
@@ -880,6 +883,7 @@ Private Sub pvDoNotify(ByVal wParam As Long, ByVal lParam As Long)
             End Select
         End If
     End If
+QH:
 End Sub
 
 Private Sub pvDoResolve(ByVal wParam As Long, ByVal lParam As Long)
@@ -903,6 +907,9 @@ Private Sub pvDoResolve(ByVal wParam As Long, ByVal lParam As Long)
             Erase m_uGetHostByName.Buffer
             m_lLastError = 0
             RaiseEvent OnResolve(pvToString(ws_inet_ntoa(uAddr.sin_addr)))
+            If m_hSocket = INVALID_SOCKET Then
+                GoTo QH
+            End If
             If SockOpt(ucsSsoType) = ucsSckStream Then
                 uAddr.sin_family = AF_INET
                 uAddr.sin_port = ws_htons(m_uGetHostByName.Port)
@@ -919,6 +926,7 @@ Private Sub pvDoResolve(ByVal wParam As Long, ByVal lParam As Long)
             End If
         End If
     End If
+QH:
 End Sub
 
 Private Function pvToSockAddr( _
@@ -1169,9 +1177,15 @@ Public Function SyncWaitForEvent( _
             If PeekMessage(uMsg, 0, 0, 0, PM_NOREMOVE) <> 0 Then
                 bHandled = False
                 RaiseEvent OnMessagePending(bHandled)
+                If m_hSocket = INVALID_SOCKET Then
+                    GoTo QH
+                End If
                 If Not bHandled Then
                     If PeekMessage(uMsg, 0, WM_PAINT, WM_PAINT, PM_REMOVE) <> 0 Then
                         Call DispatchMessage(uMsg)
+                        If m_hSocket = INVALID_SOCKET Then
+                            GoTo QH
+                        End If
                     End If
                 End If
                 bPeek = False
