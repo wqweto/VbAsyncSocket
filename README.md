@@ -56,4 +56,6 @@ Produces debug output in `Immediate Window` similar to this:
 - Allow client to assign client certificate for connection
 - Provide UI for end-user to choose suitable certificates from Personal certificate store
 - Add wrappers for http and ftp protocols
+- Add WinSock control replacement
 - Add more samples (incl. `vbcurl.exe` utility)
+- Refactor subclassing thunk to use msg queue not to re-enter IDE in debug mode
