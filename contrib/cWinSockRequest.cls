@@ -52,6 +52,8 @@ End Enum
 ' API
 '=========================================================================
 
+Private Const ERR_TIMEOUT                   As Long = &H800705B4
+
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 #If Not ImplUseShared Then
     Private Declare Function GetSystemTimeAsFileTime Lib "kernel32" (lpSystemTimeAsFileTime As Currency) As Long
@@ -61,7 +63,6 @@ Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination
 ' Constants and member variables
 '=========================================================================
 
-Private Const ERR_TIMEOUT           As Long = -1
 Private Const STR_ERR_SYNC_NOT_IMPL As String = "Synchronous operations not implemented"
 
 Private m_sHostAddress          As String
