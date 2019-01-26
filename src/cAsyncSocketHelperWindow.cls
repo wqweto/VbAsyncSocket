@@ -43,7 +43,8 @@ Private Const PAGE_EXECUTE_READWRITE        As Long = &H40
 Private Const MEM_COMMIT                    As Long = &H1000
 Private Const MEM_RELEASE                   As Long = &H8000
 '--- for Get/SetWindowLong
-Private Const GWL_USERDATA                  As Long = (-21)
+Private Const GWL_USERDATA                  As Long = -21
+Private Const HWND_MESSAGE                  As Long = -3
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function CreateWindowEx Lib "user32" Alias "CreateWindowExA" (ByVal dwExStyle As Long, ByVal lpClassName As String, ByVal lpWindowName As String, ByVal dwStyle As Long, ByVal X As Long, ByVal Y As Long, ByVal nWidth As Long, ByVal nHeight As Long, ByVal hWndParent As Long, ByVal hMenu As Long, ByVal hInstance As Long, lpParam As Any) As Long
@@ -219,7 +220,7 @@ End Function
 Private Sub Class_Initialize()
     If WSAStartup(&H101, m_uWsaData) = 0 Then
         m_hWnd = CreateWindowEx(0, STR_HELPER_CLASS, App.hInstance & ":" & App.ThreadID & ":" & STR_HELPER_CAPTION, _
-            0, 0, 0, 0, 0, 0, 0, App.hInstance, ByVal 0)
+            0, 0, 0, 0, 0, HWND_MESSAGE, 0, App.hInstance, ByVal 0)
         If m_hWnd <> 0 Then
             Call SetWindowLong(m_hWnd, GWL_USERDATA, ObjPtr(Me))
             m_hSubclassThunk = sc_Subclass(m_hWnd)
