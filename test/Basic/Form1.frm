@@ -1,14 +1,30 @@
 VERSION 5.00
 Begin VB.Form Form1 
    Caption         =   "Form1"
-   ClientHeight    =   4152
+   ClientHeight    =   5220
    ClientLeft      =   108
    ClientTop       =   456
    ClientWidth     =   5400
    LinkTopic       =   "Form1"
-   ScaleHeight     =   4152
+   ScaleHeight     =   5220
    ScaleWidth      =   5400
    StartUpPosition =   3  'Windows Default
+   Begin VB.CommandButton Command9 
+      Caption         =   "wss:// protocol"
+      Height          =   432
+      Left            =   168
+      TabIndex        =   10
+      Top             =   4452
+      Width           =   2364
+   End
+   Begin VB.CommandButton Command8 
+      Caption         =   "expired.badssl.com"
+      Height          =   432
+      Left            =   168
+      TabIndex        =   9
+      Top             =   3948
+      Width           =   2364
+   End
    Begin VB.CommandButton Command7 
       Caption         =   "SMTP with STARTTLS"
       Height          =   432
@@ -113,6 +129,50 @@ Private Sub Command1_Click()
     Exit Sub
 EH:
     MsgBox Err.Description, vbCritical
+End Sub
+
+Private Sub Command8_Click()
+    Dim sResponse       As String
+    Dim sUrl            As String
+    
+'    sUrl = "https://www.howsmyssl.com/a/check"
+    sUrl = "https://expired.badssl.com/"
+    With pvInitHttpRequest(sUrl)
+        DoEvents: DoEvents: DoEvents
+        sResponse = sResponse & .ReadText
+    End With
+    Debug.Print sResponse
+End Sub
+
+Private Sub Command9_Click()
+    Dim oTlsClient      As cTlsClient
+    Dim baBuffer()      As Byte
+    
+    Screen.MousePointer = vbHourglass
+    Debug.Print Format$(DateTimer, "0.000"), "Connect secure socket to port 443"
+    Set oTlsClient = New cTlsClient
+    oTlsClient.SetTimeouts 0, 5000, 5000, 5000
+    If Not oTlsClient.Connect("connect-bot.classic.blizzard.com", 443, UseTls:=True) Then
+        GoTo QH
+    End If
+    Debug.Print Format$(DateTimer, "0.000"), "TLS handshake complete: " & oTlsClient.TlsHostAddress
+    If Not oTlsClient.WriteText("GET /v1/rpc/chat HTTP/1.1" & vbCrLf & _
+                "Host: connect-bot.classic.blizzard.com" & vbCrLf & _
+                "Upgrade: websocket" & vbCrLf & _
+                "Connection: Upgrade" & vbCrLf & _
+                "Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==" & vbCrLf & _
+                "Sec-WebSocket-Protocol: chat, superchat" & vbCrLf & _
+                "Sec-WebSocket-Version: 13" & vbCrLf & _
+                "Origin: http://connect-bot.classic.blizzard.com/v1/rpc/chat" & vbCrLf & vbCrLf) Then
+        GoTo QH
+    End If
+    Debug.Print Format$(DateTimer, "0.000"), "->", "(HTTP request)"
+    If Not oTlsClient.ReadArray(baBuffer) Then
+        GoTo QH
+    End If
+    Debug.Print Format$(DateTimer, "0.000"), "<-", FromUtf8Array(baBuffer)
+QH:
+    Screen.MousePointer = vbDefault
 End Sub
 
 Private Sub m_oSocket_OnConnect()
@@ -451,7 +511,7 @@ Private Function pvGetExternalIP() As String
     
     With New cTlsClient
         .Connect "ifconfig.co", 80
-        .WriteText "GET / HTTP/1.1" & vbCrLf & "Host: ifconfig.co" & vbCrLf & "User-Agent: curl" & vbCrLf & vbCrLf
+        .WriteText "GET /ip HTTP/1.1" & vbCrLf & "Host: ifconfig.co" & vbCrLf & vbCrLf
         Do
             sResponse = sResponse & .ReadText()
             If InStr(sResponse, vbCrLf & vbCrLf) > 0 Then
