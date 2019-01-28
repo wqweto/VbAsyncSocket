@@ -56,7 +56,8 @@ Private Const ERR_TIMEOUT                   As Long = &H800705B4
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 #If Not ImplUseShared Then
-    Private Declare Function GetSystemTimeAsFileTime Lib "kernel32" (lpSystemTimeAsFileTime As Currency) As Long
+    Private Declare Function QueryPerformanceCounter Lib "kernel32" (lpPerformanceCount As Currency) As Long
+    Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
 #End If
 
 '=========================================================================
@@ -262,10 +263,10 @@ Private Function pvWaitForEvent( _
     Dim dblTimer        As Double
     Dim lRestTimeout    As Long
     
-    dblTimer = DateTimer
+    dblTimer = TimerEx
     Do While ReadyState < eReadyState
         If lTimeout > 0 Then
-            lRestTimeout = lTimeout - (DateTimer - dblTimer) * 1000
+            lRestTimeout = lTimeout - (TimerEx - dblTimer) * 1000
             If lRestTimeout < 0 Then
                 pvSetStatus ERR_TIMEOUT
                 GoTo QH
@@ -310,11 +311,13 @@ End Sub
 '= shared ================================================================
 
 #If Not ImplUseShared Then
-Private Property Get DateTimer() As Double
-    Dim cDateTime       As Currency
+Public Property Get TimerEx() As Double
+    Dim cFreq           As Currency
+    Dim cValue          As Currency
     
-    Call GetSystemTimeAsFileTime(cDateTime)
-    DateTimer = CDbl(cDateTime - 9435304800000@) / 1000#
+    Call QueryPerformanceFrequency(cFreq)
+    Call QueryPerformanceCounter(cValue)
+    TimerEx = cValue / cFreq
 End Property
 
 Private Function At(vArray As Variant, ByVal lIdx As Long) As Variant
@@ -378,7 +381,7 @@ Private Sub m_oSocket_OnSend()
         pvSetReadyState ucsRdsLoaded
         If m_lPacketTimeout > 0 Then
             m_eNextState = ucsRdsInteractive
-            m_dblResponseTimer = DateTimer
+            m_dblResponseTimer = TimerEx
             m_dblPacketTimer = m_dblResponseTimer
         Else
             pvSetReadyState ucsRdsCompleted
@@ -409,11 +412,11 @@ Private Sub m_oSocket_OnReceive()
         pvSetReadyState ucsRdsInteractive
         m_eNextState = ucsRdsCompleted
         RaiseEvent OnResponseDataAvailable(baBuffer)
-        m_dblPacketTimer = DateTimer
-    ElseIf m_lPacketTimeout > 0 And m_lPacketTimeout < (DateTimer - m_dblPacketTimer) * 1000 Then
+        m_dblPacketTimer = TimerEx
+    ElseIf m_lPacketTimeout > 0 And m_lPacketTimeout < (TimerEx - m_dblPacketTimer) * 1000 Then
         pvSetReadyState ucsRdsCompleted
         GoTo QH
-    ElseIf m_lReceiveTimeout > 0 And m_lReceiveTimeout < (DateTimer - m_dblResponseTimer) * 1000 Then
+    ElseIf m_lReceiveTimeout > 0 And m_lReceiveTimeout < (TimerEx - m_dblResponseTimer) * 1000 Then
         pvSetStatus ERR_TIMEOUT
         GoTo QH
     End If

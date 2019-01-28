@@ -119,13 +119,13 @@ Private Sub Command1_Click()
     On Error GoTo EH
     Set m_oSocket = New cAsyncSocket
     m_oSocket.GetLocalHost sName, sAddr
-    Debug.Print "GetLocalHost=" & sName & ", " & sAddr, Format$(DateTimer, "0.000")
+    Debug.Print "GetLocalHost=" & sName & ", " & sAddr, Format$(TimerEx, "0.000")
     m_oSocket.Create EventMask:=ucsSfdConnect Or ucsSfdRead
     m_oSocket.Connect "www.bgdev.org", 80
     m_oSocket.GetPeerName sAddr, lPort
-    Debug.Print "GetPeerName=" & sAddr & ":" & lPort, Format$(DateTimer, "0.000")
+    Debug.Print "GetPeerName=" & sAddr & ":" & lPort, Format$(TimerEx, "0.000")
     m_oSocket.GetSockName sAddr, lPort
-    Debug.Print "GetSockName=" & sAddr & ":" & lPort, Format$(DateTimer, "0.000")
+    Debug.Print "GetSockName=" & sAddr & ":" & lPort, Format$(TimerEx, "0.000")
     Exit Sub
 EH:
     MsgBox Err.Description, vbCritical
@@ -149,13 +149,13 @@ Private Sub Command9_Click()
     Dim baBuffer()      As Byte
     
     Screen.MousePointer = vbHourglass
-    Debug.Print Format$(DateTimer, "0.000"), "Connect secure socket to port 443"
+    Debug.Print Format$(TimerEx, "0.000"), "Connect secure socket to port 443"
     Set oTlsClient = New cTlsClient
     oTlsClient.SetTimeouts 0, 5000, 5000, 5000
     If Not oTlsClient.Connect("connect-bot.classic.blizzard.com", 443, UseTls:=True) Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "TLS handshake complete: " & oTlsClient.TlsHostAddress
+    Debug.Print Format$(TimerEx, "0.000"), "TLS handshake complete: " & oTlsClient.TlsHostAddress
     If Not oTlsClient.WriteText("GET /v1/rpc/chat HTTP/1.1" & vbCrLf & _
                 "Host: connect-bot.classic.blizzard.com" & vbCrLf & _
                 "Upgrade: websocket" & vbCrLf & _
@@ -166,11 +166,11 @@ Private Sub Command9_Click()
                 "Origin: http://connect-bot.classic.blizzard.com/v1/rpc/chat" & vbCrLf & vbCrLf) Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "->", "(HTTP request)"
+    Debug.Print Format$(TimerEx, "0.000"), "->", "(HTTP request)"
     If Not oTlsClient.ReadArray(baBuffer) Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "<-", FromUtf8Array(baBuffer)
+    Debug.Print Format$(TimerEx, "0.000"), "<-", FromUtf8Array(baBuffer)
 QH:
     Screen.MousePointer = vbDefault
 End Sub
@@ -185,29 +185,29 @@ Private Sub m_oSocket_OnConnect()
 '    Do
 '        lBytes = lBytes + m_oSocket.SendPtr(VarPtr(baBuffer(lBytes)), UBound(baBuffer) + 1 - lBytes)
 '    Loop While lBytes <= UBound(baBuffer)
-    Debug.Print "OnConnect", Format$(DateTimer, "0.000")
+    Debug.Print "OnConnect", Format$(TimerEx, "0.000")
     m_oSocket.SendArray ToUtf8Array("GET / HTTP/1.0" & vbCrLf & _
         "Host: www.bgdev.org" & vbCrLf & _
         "Connection: close" & vbCrLf & vbCrLf)
 End Sub
 
 Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
-    Debug.Print "OnError, ErrorCode=" & ErrorCode & ", EventMask=" & EventMask & ", Desc=" & m_oSocket.GetErrorDescription(ErrorCode), Format$(DateTimer, "0.000"), Format$(DateTimer, "0.000")
+    Debug.Print "OnError, ErrorCode=" & ErrorCode & ", EventMask=" & EventMask & ", Desc=" & m_oSocket.GetErrorDescription(ErrorCode), Format$(TimerEx, "0.000"), Format$(TimerEx, "0.000")
 End Sub
 
 Private Sub m_oSocket_OnResolve(Address As String)
-    Debug.Print "OnResolve, Address=" & Address, Format$(DateTimer, "0.000")
+    Debug.Print "OnResolve, Address=" & Address, Format$(TimerEx, "0.000")
 End Sub
 
 Private Sub m_oSocket_OnSend()
-    Debug.Print "OnSend", Format$(DateTimer, "0.000")
+    Debug.Print "OnSend", Format$(TimerEx, "0.000")
 End Sub
 
 Private Sub m_oSocket_OnReceive()
     Dim baBuffer()      As Byte
     Dim lBytes          As Long
     
-    Debug.Print "OnReceive", Format$(DateTimer, "0.000")
+    Debug.Print "OnReceive", Format$(TimerEx, "0.000")
     lBytes = m_oSocket.AvailableBytes
     If lBytes > 0 Then
         ReDim baBuffer(0 To lBytes - 1) As Byte
@@ -222,11 +222,11 @@ Private Sub m_oSocket_OnReceive()
 End Sub
 
 Private Sub m_oSocket_OnClose()
-    Debug.Print "OnClose", Format$(DateTimer, "0.000")
+    Debug.Print "OnClose", Format$(TimerEx, "0.000")
 End Sub
 
 Private Sub m_oSocket_OnAccept()
-    Debug.Print "OnAccept", Format$(DateTimer, "0.000")
+    Debug.Print "OnAccept", Format$(TimerEx, "0.000")
 End Sub
 
 Private Sub Command2_Click()
@@ -253,7 +253,7 @@ Private Sub m_oRequest_OnReadyStateChange()
     If m_oRequest.ReadyState = ucsRdsCompleted Then
         Debug.Print Replace(m_oRequest.ResponseText, vbCrLf, "\n")
     End If
-    Debug.Print "OnReadyStateChange, ReadyState=" & m_oRequest.ReadyState, Format$(DateTimer, "0.000")
+    Debug.Print "OnReadyStateChange, ReadyState=" & m_oRequest.ReadyState, Format$(TimerEx, "0.000")
 End Sub
 
 Private Sub Command3_Click()
@@ -280,26 +280,26 @@ Private Sub Command4_Click()
     Dim baBuffer()      As Byte
 
     Screen.MousePointer = vbHourglass
-    Debug.Print Format$(DateTimer, "0.000"), "Connect secure socket to port 465"
+    Debug.Print Format$(TimerEx, "0.000"), "Connect secure socket to port 465"
     Set oTlsClient = New cTlsClient
     oTlsClient.SetTimeouts 0, 5000, 5000, 5000
     If Not oTlsClient.Connect("smtp.gmail.com", 465, UseTls:=True) Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "TLS handshake complete: " & oTlsClient.TlsHostAddress
+    Debug.Print Format$(TimerEx, "0.000"), "TLS handshake complete: " & oTlsClient.TlsHostAddress
     If Not oTlsClient.ReadArray(baBuffer) Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "->", FromUtf8Array(baBuffer);
+    Debug.Print Format$(TimerEx, "0.000"), "->", FromUtf8Array(baBuffer);
     Debug.Assert Left$(FromUtf8Array(baBuffer), 3) = "220"
-    Debug.Print Format$(DateTimer, "0.000"), "<-", "QUIT"
+    Debug.Print Format$(TimerEx, "0.000"), "<-", "QUIT"
     If Not oTlsClient.WriteArray(ToUtf8Array("QUIT" & vbCrLf)) Then
         GoTo QH
     End If
     If Not oTlsClient.ReadArray(baBuffer) Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "->", FromUtf8Array(baBuffer);
+    Debug.Print Format$(TimerEx, "0.000"), "->", FromUtf8Array(baBuffer);
     Screen.MousePointer = vbDefault
     Exit Sub
 QH:
@@ -319,7 +319,7 @@ Private Sub Command5_Click()
 
     Screen.MousePointer = vbHourglass
     sUrl = "https://www.google.com"
-    Debug.Print Format$(DateTimer, "0.000"), "Open " & sUrl
+    Debug.Print Format$(TimerEx, "0.000"), "Open " & sUrl
 Repeat:
     Set oTlsClient = pvInitHttpRequest(sUrl)
     If oTlsClient Is Nothing Then
@@ -340,19 +340,19 @@ Repeat:
         End If
     Loop
     If IsArray(vSplit) Then
-        Debug.Print Format$(DateTimer, "0.000"), Join(vSplit, vbCrLf & vbTab & vbTab & vbTab & vbTab & vbTab & vbTab & vbTab)
+        Debug.Print Format$(TimerEx, "0.000"), Join(vSplit, vbCrLf & vbTab & vbTab & vbTab & vbTab & vbTab & vbTab & vbTab)
         If Mid$(sHeaders, 10, 3) = "302" Then
             For lIdx = 0 To UBound(vSplit)
                 If Left$(vSplit(lIdx), 9) = "Location:" Then
                     sUrl = Trim$(Mid$(vSplit(lIdx), 10))
-                    Debug.Print Format$(DateTimer, "0.000"), "Redirect to " & sUrl
+                    Debug.Print Format$(TimerEx, "0.000"), "Redirect to " & sUrl
                     GoTo Repeat
                 End If
             Next
         End If
     End If
     oTlsClient.Close_
-    Debug.Print Format$(DateTimer, "0.000"), "Done"
+    Debug.Print Format$(TimerEx, "0.000"), "Done"
     Screen.MousePointer = vbDefault
     Exit Sub
 QH:
@@ -379,19 +379,19 @@ Private Function pvInitHttpRequest(sUrl As String) As cTlsClient
     If Not oRetVal.Connect(sHost, lPort) Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "Connected to " & sHost & ":" & lPort
+    Debug.Print Format$(TimerEx, "0.000"), "Connected to " & sHost & ":" & lPort
     If LCase$(sProto) = "https" Then
         If Not oRetVal.StartTls(sHost) Then
             GoTo QH
         End If
-        Debug.Print Format$(DateTimer, "0.000"), "TLS handshake complete"
+        Debug.Print Format$(TimerEx, "0.000"), "TLS handshake complete"
     End If
     If Not oRetVal.WriteText("GET " & sPath & " HTTP/1.0" & vbCrLf & _
             "Host: " & sHost & vbCrLf & _
             "Connection: close" & vbCrLf & vbCrLf) Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "Request sent"
+    Debug.Print Format$(TimerEx, "0.000"), "Request sent"
     Set pvInitHttpRequest = oRetVal
 QH:
 End Function
@@ -429,14 +429,14 @@ Private Sub Command6_Click()
     Dim oTlsClient      As cTlsClient
     
     sUrl = "https://server.cryptomix.com/secure/"
-    Debug.Print Format$(DateTimer, "0.000"), "Open " & sUrl
+    Debug.Print Format$(TimerEx, "0.000"), "Open " & sUrl
     Set oTlsClient = pvInitHttpRequest(sUrl)
     If oTlsClient Is Nothing Then
         GoTo QH
     End If
     Debug.Print oTlsClient.ReadText()
     Debug.Print oTlsClient.ReadText()
-    Debug.Print Format$(DateTimer, "0.000"), "Done"
+    Debug.Print Format$(TimerEx, "0.000"), "Done"
     Exit Sub
 QH:
     If Not oTlsClient Is Nothing Then
@@ -452,7 +452,7 @@ Private Sub Command7_Click()
     Dim sRequest        As String
 
     Screen.MousePointer = vbHourglass
-    Debug.Print Format$(DateTimer, "0.000"), "Connect to port 587"
+    Debug.Print Format$(TimerEx, "0.000"), "Connect to port 587"
     Set oTlsClient = New cTlsClient
     oTlsClient.SetTimeouts 0, 5000, 5000, 5000
     If Not oTlsClient.Connect("smtp.gmail.com", 587) Then
@@ -462,41 +462,41 @@ Private Sub Command7_Click()
     If LenB(sResponse) = 0 Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "->", sResponse;
+    Debug.Print Format$(TimerEx, "0.000"), "->", sResponse;
     sRequest = "HELO " & pvGetExternalIP & vbCrLf
     If Not oTlsClient.WriteText(sRequest) Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "<-", sRequest;
+    Debug.Print Format$(TimerEx, "0.000"), "<-", sRequest;
     sResponse = oTlsClient.ReadText()
     If LenB(sResponse) = 0 Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "->", sResponse;
+    Debug.Print Format$(TimerEx, "0.000"), "->", sResponse;
     sRequest = "STARTTLS" & vbCrLf
     If Not oTlsClient.WriteText(sRequest) Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "<-", sRequest;
+    Debug.Print Format$(TimerEx, "0.000"), "<-", sRequest;
     sResponse = oTlsClient.ReadText()
     If LenB(sResponse) = 0 Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "->", sResponse;
+    Debug.Print Format$(TimerEx, "0.000"), "->", sResponse;
     If Not oTlsClient.StartTls("smtp.gmail.com") Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "TLS handshake complete: " & oTlsClient.TlsHostAddress
+    Debug.Print Format$(TimerEx, "0.000"), "TLS handshake complete: " & oTlsClient.TlsHostAddress
     sRequest = "QUIT" & vbCrLf
     If Not oTlsClient.WriteText(sRequest) Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "<-", sRequest;
+    Debug.Print Format$(TimerEx, "0.000"), "<-", sRequest;
     sResponse = oTlsClient.ReadText()
     If LenB(sResponse) = 0 Then
         GoTo QH
     End If
-    Debug.Print Format$(DateTimer, "0.000"), "->", sResponse
+    Debug.Print Format$(TimerEx, "0.000"), "->", sResponse
     Screen.MousePointer = vbDefault
     Exit Sub
 QH:
