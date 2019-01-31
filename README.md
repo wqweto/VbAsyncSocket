@@ -1,6 +1,6 @@
 ## VbAsyncSocket
 
-Simple and thin WinSock API wrappers for VB6
+Simple and thin WinSock API wrappers for VB6 loosly based on the original `CAsyncSocket` wrapper in [`MFC`](https://docs.microsoft.com/en-us/cpp/mfc/mfc-and-atl?view=vs-2017).
 
 ### Description
 
