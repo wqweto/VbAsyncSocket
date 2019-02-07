@@ -4,19 +4,19 @@ Begin VB.Form Form1
    ClientHeight    =   5544
    ClientLeft      =   108
    ClientTop       =   456
-   ClientWidth     =   5700
+   ClientWidth     =   5436
    LinkTopic       =   "Form1"
    ScaleHeight     =   5544
-   ScaleWidth      =   5700
+   ScaleWidth      =   5436
    StartUpPosition =   3  'Windows Default
    Begin VB.TextBox txtProxy 
       Height          =   288
-      Left            =   3780
+      Left            =   2688
       TabIndex        =   8
-      Text            =   "2.55.92.93:1080"
+      Text            =   "user:pass@80.252.241.107:1080"
       ToolTipText     =   "SOCKS5 Proxy Address"
-      Top             =   3024
-      Width           =   1608
+      Top             =   3360
+      Width           =   2616
    End
    Begin VB.CheckBox chkProxy 
       Caption         =   "Use proxy:"
@@ -289,12 +289,16 @@ Private Sub Command5_Click()
     Dim vSplit          As Variant
     Dim lIdx            As Long
     Dim sUrl            As String
+    Dim sProxy          As String
 
     Screen.MousePointer = vbHourglass
     sUrl = "https://www.google.com"
+    If chkProxy.Value = vbChecked Then
+        sProxy = "socks5://" & txtProxy.Text
+    End If
     Debug.Print Format$(TimerEx, "0.000"), "Open " & sUrl
 Repeat:
-    Set oTlsClient = pvInitHttpRequest(sUrl, IIf(chkProxy.Value = vbChecked, "socks5://" & txtProxy.Text, vbNullString))
+    Set oTlsClient = pvInitHttpRequest(sUrl, sProxy)
     If oTlsClient Is Nothing Then
         GoTo QH
     End If
@@ -354,7 +358,7 @@ Private Function pvInitHttpRequest(sUrl As String, Optional sProxyUrl As String)
     End If
     Set oRetVal = New cTlsClient
     oRetVal.SetTimeouts 0, 5000, 5000, 5000
-    If Not pvParseUrl(sProxyUrl, vbNullString, sProxyHost, lProxyPort, vbNullString) Then
+    If Not pvParseUrl(sProxyUrl, vbNullString, sProxyHost, lProxyPort, vbNullString, sProxyUser, sProxyPass) Then
         If Not oRetVal.Connect(sHost, lPort) Then
             GoTo QH
         End If
@@ -440,16 +444,29 @@ QH:
     End If
 End Function
 
-Private Function pvParseUrl(sUrl As String, sProto As String, sHost As String, lPort As Long, sPath As String) As Boolean
+Private Function pvParseUrl( _
+            sUrl As String, _
+            sProto As String, _
+            sHost As String, _
+            lPort As Long, _
+            sPath As String, _
+            Optional sUser As String, _
+            Optional sPass As String) As Boolean
     With CreateObject("VBScript.RegExp")
         .Global = True
-        .Pattern = "^(.*)://([A-Za-z0-9\-\.]+)(:[0-9]+)?(.*)$"
+        .Pattern = "^(.*)://(?:(?:([^:]*):)?([^@]*)@)?([A-Za-z0-9\-\.]+)(:[0-9]+)?(.*)$"
         With .Execute(sUrl)
             If .Count > 0 Then
                 With .Item(0).SubMatches
                     sProto = .Item(0)
-                    sHost = .Item(1)
-                    lPort = Val(.Item(2))
+                    sUser = .Item(1)
+                    If LenB(sUser) = 0 Then
+                        sUser = .Item(2)
+                    Else
+                        sPass = .Item(2)
+                    End If
+                    sHost = .Item(3)
+                    lPort = Val(Mid$(.Item(4), 2))
                     If lPort = 0 Then
                         Select Case LCase$(sProto)
                         Case "https"
@@ -460,7 +477,7 @@ Private Function pvParseUrl(sUrl As String, sProto As String, sHost As String, l
                             lPort = 80
                         End Select
                     End If
-                    sPath = .Item(3)
+                    sPath = .Item(5)
                     If LenB(sPath) = 0 Then
                         sPath = "/"
                     End If
@@ -484,11 +501,15 @@ End Function
 
 Private Sub Command6_Click()
     Dim sUrl            As String
+    Dim sProxy          As String
     Dim oTlsClient      As cTlsClient
     
     sUrl = "https://server.cryptomix.com/secure/"
+    If chkProxy.Value = vbChecked Then
+        sProxy = "socks5://" & txtProxy.Text
+    End If
     Debug.Print Format$(TimerEx, "0.000"), "Open " & sUrl
-    Set oTlsClient = pvInitHttpRequest(sUrl, IIf(chkProxy.Value = vbChecked, "socks5://" & txtProxy.Text, vbNullString))
+    Set oTlsClient = pvInitHttpRequest(sUrl, sProxy)
     If oTlsClient Is Nothing Then
         GoTo QH
     End If
@@ -594,10 +615,14 @@ End Function
 Private Sub Command8_Click()
     Dim sResponse       As String
     Dim sUrl            As String
+    Dim sProxy          As String
     
 '    sUrl = "https://www.howsmyssl.com/a/check"
     sUrl = "https://expired.badssl.com/"
-    With pvInitHttpRequest(sUrl, IIf(chkProxy.Value = vbChecked, "socks5://" & txtProxy.Text, vbNullString))
+    If chkProxy.Value = vbChecked Then
+        sProxy = "socks5://" & txtProxy.Text
+    End If
+    With pvInitHttpRequest(sUrl, sProxy)
         DoEvents: DoEvents: DoEvents
         sResponse = sResponse & .ReadText
     End With
