@@ -156,7 +156,7 @@ Private m_baTlsExtra()          As Byte
 '=========================================================================
 
 Private Sub PrintError(sFunction As String)
-    Debug.Print "Critical: " & Err.Description & " (" & MODULE_NAME & "." & sFunction & ")"
+    Debug.Print "Critical error: " & Err.Description & " [" & MODULE_NAME & "." & sFunction & "]"
 End Sub
 
 '=========================================================================
