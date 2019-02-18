@@ -9,13 +9,21 @@ Begin VB.Form Form1
    ScaleHeight     =   5544
    ScaleWidth      =   5436
    StartUpPosition =   3  'Windows Default
+   Begin VB.CommandButton Command10 
+      Caption         =   "Sync operations"
+      Height          =   432
+      Left            =   2688
+      TabIndex        =   13
+      Top             =   252
+      Width           =   2364
+   End
    Begin VB.TextBox txtProxy 
       Height          =   288
       Left            =   2688
       TabIndex        =   8
       Text            =   "user:pass@80.252.241.107:1080"
       ToolTipText     =   "SOCKS5 Proxy Address"
-      Top             =   3360
+      Top             =   3696
       Width           =   2616
    End
    Begin VB.CheckBox chkProxy 
@@ -23,7 +31,7 @@ Begin VB.Form Form1
       Height          =   276
       Left            =   2688
       TabIndex        =   7
-      Top             =   3024
+      Top             =   3360
       Width           =   1104
    End
    Begin VB.CommandButton Command9 
@@ -31,7 +39,7 @@ Begin VB.Form Form1
       Height          =   432
       Left            =   168
       TabIndex        =   12
-      Top             =   4452
+      Top             =   4788
       Width           =   2364
    End
    Begin VB.CommandButton Command8 
@@ -39,7 +47,7 @@ Begin VB.Form Form1
       Height          =   432
       Left            =   168
       TabIndex        =   11
-      Top             =   3948
+      Top             =   4284
       Width           =   2364
    End
    Begin VB.CommandButton Command7 
@@ -55,7 +63,7 @@ Begin VB.Form Form1
       Height          =   432
       Left            =   168
       TabIndex        =   9
-      Top             =   3444
+      Top             =   3780
       Width           =   2364
    End
    Begin VB.CommandButton Command5 
@@ -63,7 +71,7 @@ Begin VB.Form Form1
       Height          =   432
       Left            =   168
       TabIndex        =   6
-      Top             =   2940
+      Top             =   3276
       Width           =   2364
    End
    Begin VB.CommandButton Command4 
@@ -135,14 +143,16 @@ Private Sub Command1_Click()
     
     On Error GoTo EH
     Set m_oSocket = New cAsyncSocket
-    m_oSocket.GetLocalHost sName, sAddr
-    Debug.Print "GetLocalHost=" & sName & ", " & sAddr, Format$(TimerEx, "0.000")
-    m_oSocket.Create EventMask:=ucsSfdConnect Or ucsSfdRead
-    m_oSocket.Connect "www.bgdev.org", 80
-    m_oSocket.GetPeerName sAddr, lPort
-    Debug.Print "GetPeerName=" & sAddr & ":" & lPort, Format$(TimerEx, "0.000")
-    m_oSocket.GetSockName sAddr, lPort
-    Debug.Print "GetSockName=" & sAddr & ":" & lPort, Format$(TimerEx, "0.000")
+    With m_oSocket
+        .GetLocalHost sName, sAddr
+        Debug.Print "GetLocalHost=" & sName & ", " & sAddr, Format$(TimerEx, "0.000")
+        .Create EventMask:=ucsSfdConnect Or ucsSfdRead
+        .Connect "www.bgdev.org", 80
+        .GetPeerName sAddr, lPort
+        Debug.Print "GetPeerName=" & sAddr & ":" & lPort, Format$(TimerEx, "0.000")
+        .GetSockName sAddr, lPort
+        Debug.Print "GetSockName=" & sAddr & ":" & lPort, Format$(TimerEx, "0.000")
+    End With
     Exit Sub
 EH:
     MsgBox Err.Description, vbCritical
@@ -200,6 +210,48 @@ End Sub
 
 Private Sub m_oSocket_OnAccept()
     Debug.Print "OnAccept", Format$(TimerEx, "0.000")
+End Sub
+
+Private Sub Command10_Click()
+    Const LNG_TIMEOUT   As Long = 5000
+    Dim sRequest        As String
+    Dim baBuffer()      As Byte
+    Dim sResponse       As String
+    
+    With New cAsyncSocket
+        If Not .SyncConnect("bgdev.org", 80) Then
+            GoTo QH
+        End If
+        Debug.Print Format$(TimerEx, "0.000"), "Connected"
+        sRequest = "GET / HTTP/1.0" & vbCrLf & _
+            "Host: www.bgdev.org" & vbCrLf & _
+            "Connection: close" & vbCrLf & vbCrLf
+        If Not .SyncSendText(sRequest, Timeout:=LNG_TIMEOUT) Then
+            GoTo QH
+        End If
+        Debug.Print Format$(TimerEx, "0.000"), "->", sRequest
+        If Rnd < 0.5 Then
+            sResponse = .SyncReceiveText(10000, Timeout:=LNG_TIMEOUT)
+            If LenB(sResponse) <> 0 Then
+                Debug.Print Format$(TimerEx, "0.000"), "<-", sResponse
+                Debug.Print Format$(TimerEx, "0.000"), "Size", Len(sResponse) & " chars"
+            Else
+                GoTo QH
+            End If
+        Else
+            If Not .SyncReceiveArray(baBuffer, 10000, Timeout:=LNG_TIMEOUT) Then
+                If UBound(baBuffer) >= 0 Then
+                    Debug.Print Format$(TimerEx, "0.000"), "<-", FromUtf8Array(baBuffer)
+                    Debug.Print Format$(TimerEx, "0.000"), "Trimmed", UBound(baBuffer) + 1 & " bytes"
+                End If
+                GoTo QH
+            End If
+            Debug.Print Format$(TimerEx, "0.000"), "<-", FromUtf8Array(baBuffer)
+        End If
+        Exit Sub
+QH:
+        Debug.Print Format$(TimerEx, "0.000"), "Error", .GetErrorDescription(.LastError)
+    End With
 End Sub
 
 Private Sub Command2_Click()
