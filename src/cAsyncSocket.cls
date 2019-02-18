@@ -13,7 +13,7 @@ Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
 '
-' VbAsyncSocket Project (c) 2018 by wqweto@gmail.com
+' VbAsyncSocket Project (c) 2018-2019 by wqweto@gmail.com
 '
 ' Simple and thin WinSock API wrappers for VB6
 '
