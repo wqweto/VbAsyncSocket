@@ -145,13 +145,13 @@ Private Sub Command1_Click()
     Set m_oSocket = New cAsyncSocket
     With m_oSocket
         .GetLocalHost sName, sAddr
-        Debug.Print "GetLocalHost=" & sName & ", " & sAddr, Format$(TimerEx, "0.000")
+        Debug.Print Format$(TimerEx, "0.000"), "GetLocalHost=" & sName & ", " & sAddr
         .Create EventMask:=ucsSfdConnect Or ucsSfdRead
         .Connect "www.bgdev.org", 80
         .GetPeerName sAddr, lPort
-        Debug.Print "GetPeerName=" & sAddr & ":" & lPort, Format$(TimerEx, "0.000")
+        Debug.Print Format$(TimerEx, "0.000"), "GetPeerName=" & sAddr & ":" & lPort
         .GetSockName sAddr, lPort
-        Debug.Print "GetSockName=" & sAddr & ":" & lPort, Format$(TimerEx, "0.000")
+        Debug.Print Format$(TimerEx, "0.000"), "GetSockName=" & sAddr & ":" & lPort
     End With
     Exit Sub
 EH:
@@ -168,29 +168,29 @@ Private Sub m_oSocket_OnConnect()
 '    Do
 '        lBytes = lBytes + m_oSocket.SendPtr(VarPtr(baBuffer(lBytes)), UBound(baBuffer) + 1 - lBytes)
 '    Loop While lBytes <= UBound(baBuffer)
-    Debug.Print "OnConnect", Format$(TimerEx, "0.000")
+    Debug.Print Format$(TimerEx, "0.000"), "OnConnect"
     m_oSocket.SendArray ToUtf8Array("GET / HTTP/1.0" & vbCrLf & _
         "Host: www.bgdev.org" & vbCrLf & _
         "Connection: close" & vbCrLf & vbCrLf)
 End Sub
 
 Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
-    Debug.Print "OnError, ErrorCode=" & ErrorCode & ", EventMask=" & EventMask & ", Desc=" & m_oSocket.GetErrorDescription(ErrorCode), Format$(TimerEx, "0.000"), Format$(TimerEx, "0.000")
+    Debug.Print Format$(TimerEx, "0.000"), "OnError, ErrorCode=" & ErrorCode & ", EventMask=" & EventMask & ", Desc=" & m_oSocket.GetErrorDescription(ErrorCode)
 End Sub
 
 Private Sub m_oSocket_OnResolve(Address As String)
-    Debug.Print "OnResolve, Address=" & Address, Format$(TimerEx, "0.000")
+    Debug.Print Format$(TimerEx, "0.000"), "OnResolve, Address=" & Address
 End Sub
 
 Private Sub m_oSocket_OnSend()
-    Debug.Print "OnSend", Format$(TimerEx, "0.000")
+    Debug.Print Format$(TimerEx, "0.000"), "OnSend"
 End Sub
 
 Private Sub m_oSocket_OnReceive()
     Dim baBuffer()      As Byte
     Dim lBytes          As Long
     
-    Debug.Print "OnReceive", Format$(TimerEx, "0.000")
+    Debug.Print Format$(TimerEx, "0.000"), "OnReceive"
     lBytes = m_oSocket.AvailableBytes
     If lBytes > 0 Then
         ReDim baBuffer(0 To lBytes - 1) As Byte
@@ -200,16 +200,16 @@ Private Sub m_oSocket_OnReceive()
     lBytes = m_oSocket.Receive(VarPtr(baBuffer(0)), UBound(baBuffer) + 1)
     If lBytes > 0 Then
         ReDim Preserve baBuffer(0 To lBytes - 1) As Byte
-        Debug.Print Replace(FromUtf8Array(baBuffer), vbCrLf, "\n")
+        Debug.Print Format$(TimerEx, "0.000"), Replace(FromUtf8Array(baBuffer), vbCrLf, "\n")
     End If
 End Sub
 
 Private Sub m_oSocket_OnClose()
-    Debug.Print "OnClose", Format$(TimerEx, "0.000")
+    Debug.Print Format$(TimerEx, "0.000"), "OnClose"
 End Sub
 
 Private Sub m_oSocket_OnAccept()
-    Debug.Print "OnAccept", Format$(TimerEx, "0.000")
+    Debug.Print Format$(TimerEx, "0.000"), "OnAccept"
 End Sub
 
 Private Sub Command10_Click()
@@ -219,7 +219,7 @@ Private Sub Command10_Click()
     Dim sResponse       As String
     
     With New cAsyncSocket
-        If Not .SyncConnect("bgdev.org", 80) Then
+        If Not .SyncConnect("bgdev.org", 80, Timeout:=LNG_TIMEOUT) Then
             GoTo QH
         End If
         Debug.Print Format$(TimerEx, "0.000"), "Connected"
@@ -266,7 +266,7 @@ Private Sub Command2_Click()
 '    If Check1.Value = vbChecked Then
 '        m_oRequest.WaitForResponse 5000
 '    End If
-'    Debug.Print Replace(m_oRequest.ResponseText, vbCrLf, "\n")
+'    Debug.Print Format$(TimerEx, "0.000"), Replace(m_oRequest.ResponseText, vbCrLf, "\n")
     Screen.MousePointer = vbDefault
     Exit Sub
 EH:
@@ -276,9 +276,9 @@ End Sub
 
 Private Sub m_oRequest_OnReadyStateChange()
     If m_oRequest.ReadyState = ucsRdsCompleted Then
-        Debug.Print Replace(m_oRequest.ResponseText, vbCrLf, "\n")
+        Debug.Print Format$(TimerEx, "0.000"), Replace(m_oRequest.ResponseText, vbCrLf, "\n")
     End If
-    Debug.Print "OnReadyStateChange, ReadyState=" & m_oRequest.ReadyState, Format$(TimerEx, "0.000")
+    Debug.Print Format$(TimerEx, "0.000"), "OnReadyStateChange, ReadyState=" & m_oRequest.ReadyState
 End Sub
 
 Private Sub Command3_Click()
@@ -293,7 +293,7 @@ Private Sub Command3_Click()
 '    If Check1.Value = vbChecked Then
 '        m_oRequest.WaitForResponse 5000
 '    End If
-'    Debug.Print m_oRequest.ResponseText
+'    Debug.Print Format$(TimerEx, "0.000"), m_oRequest.ResponseText
     Exit Sub
 EH:
     MsgBox Err.Description, vbCritical
@@ -329,7 +329,7 @@ Private Sub Command4_Click()
     Exit Sub
 QH:
     With oTlsClient.LastError
-        Debug.Print Hex$(.Number) & ": " & .Description & " at " & .Source
+        Debug.Print Format$(TimerEx, "0.000"), Hex$(.Number) & ": " & .Description & " at " & .Source
     End With
     Screen.MousePointer = vbDefault
 End Sub
@@ -387,7 +387,7 @@ Repeat:
 QH:
     If Not oTlsClient Is Nothing Then
         With oTlsClient.LastError
-            Debug.Print Hex$(.Number) & ": " & .Description & " at " & .Source
+            Debug.Print Format$(TimerEx, "0.000"), Hex$(.Number) & ": " & .Description & " at " & .Source
         End With
     End If
     Screen.MousePointer = vbDefault
@@ -565,14 +565,14 @@ Private Sub Command6_Click()
     If oTlsClient Is Nothing Then
         GoTo QH
     End If
-    Debug.Print oTlsClient.ReadText()
-    Debug.Print oTlsClient.ReadText()
+    Debug.Print Format$(TimerEx, "0.000"), oTlsClient.ReadText()
+    Debug.Print Format$(TimerEx, "0.000"), oTlsClient.ReadText()
     Debug.Print Format$(TimerEx, "0.000"), "Done"
     Exit Sub
 QH:
     If Not oTlsClient Is Nothing Then
         With oTlsClient.LastError
-            Debug.Print Hex$(.Number) & ": " & .Description & " at " & .Source
+            Debug.Print Format$(TimerEx, "0.000"), Hex$(.Number) & ": " & .Description & " at " & .Source
         End With
     End If
 End Sub
@@ -632,7 +632,7 @@ Private Sub Command7_Click()
     Exit Sub
 QH:
     With oTlsClient.LastError
-        Debug.Print Hex$(.Number) & ": " & .Description & " at " & .Source
+        Debug.Print Format$(TimerEx, "0.000"), Hex$(.Number) & ": " & .Description & " at " & .Source
     End With
     Screen.MousePointer = vbDefault
 End Sub
@@ -678,7 +678,7 @@ Private Sub Command8_Click()
         DoEvents: DoEvents: DoEvents
         sResponse = sResponse & .ReadText
     End With
-    Debug.Print sResponse
+    Debug.Print Format$(TimerEx, "0.000"), sResponse
 End Sub
 
 Private Sub Command9_Click()
