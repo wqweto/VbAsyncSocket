@@ -311,6 +311,7 @@ Public Function Create( _
         GoTo QH
     End If
     '--- success
+    m_lLastError = 0
     Create = True
 QH:
     Exit Function
@@ -325,6 +326,7 @@ Public Function Attach( _
 
     On Error GoTo EH
     If m_hSocket <> INVALID_SOCKET Then
+        m_lLastError = WSAEALREADY
         GoTo QH
     End If
     m_hSocket = SocketHandle
@@ -337,6 +339,7 @@ Public Function Attach( _
         GoTo QH
     End If
     '--- success
+    m_lLastError = 0
     Attach = True
 QH:
     Exit Function
@@ -348,6 +351,7 @@ Public Function Detach() As Long
     Const FUNC_NAME     As String = "Detach"
 
     On Error GoTo EH
+    m_lLastError = 0
     Detach = m_hSocket
     m_oHelperWindow.frRemoveSocket Me, m_lIndex
     m_hSocket = INVALID_SOCKET
@@ -367,6 +371,7 @@ Public Function GetPeerName(PeerAddress As String, PeerPort As Long) As Boolean
     End If
     pvFromSockAddr uAddr, PeerAddress, PeerPort
     '--- success
+    m_lLastError = 0
     GetPeerName = True
 QH:
     Exit Function
@@ -385,6 +390,7 @@ Public Function GetSockName(SocketAddress As String, SocketPort As Long) As Bool
     End If
     pvFromSockAddr uAddr, SocketAddress, SocketPort
     '--- success
+    m_lLastError = 0
     GetSockName = True
 QH:
     Exit Function
@@ -407,6 +413,7 @@ Public Function GetLocalHost(HostName As String, HostAddress As String) As Boole
     pvToSockAddr HostName, 0, uAddr
     pvFromSockAddr uAddr, HostAddress, 0
     '--- success
+    m_lLastError = 0
     GetLocalHost = True
 QH:
     Exit Function
@@ -435,6 +442,7 @@ Public Function Accept(ConnectedSocket As cAsyncSocket, Optional SocketAddress A
         GoTo QH
     End If
     '--- success
+    m_lLastError = 0
     Accept = True
 QH:
     Exit Function
@@ -451,6 +459,7 @@ Public Function AsyncSelect(Optional ByVal EventMask As UcsAsyncSocketEventMaskE
         GoTo QH
     End If
     '--- success
+    m_lLastError = 0
     AsyncSelect = True
 QH:
     Exit Function
@@ -471,6 +480,7 @@ Public Function Bind(Optional SocketAddress As String, Optional ByVal SocketPort
         GoTo QH
     End If
     '--- success
+    m_lLastError = 0
     Bind = True
 QH:
     Exit Function
@@ -479,6 +489,7 @@ EH:
 End Function
 
 Public Sub Close_()
+    m_lLastError = 0
     '--- note: used in terminate -> no error handling
     If m_uGetHostByName.Handle <> 0 Then
         Call ws_WSACancelAsyncRequest(m_uGetHostByName.Handle)
@@ -528,6 +539,7 @@ Public Function Connect(HostAddress As String, ByVal HostPort As Long) As Boolea
         End If
     End If
     '--- success
+    m_lLastError = 0
     Connect = True
 QH:
     Exit Function
@@ -544,6 +556,7 @@ Public Function IOCtl(ByVal Command As Long, Argument As Long) As Boolean
         GoTo QH
     End If
     '--- success
+    m_lLastError = 0
     IOCtl = True
 QH:
     Exit Function
@@ -560,6 +573,7 @@ Public Function Listen(Optional ByVal ConnectionBacklog As Long = 5) As Boolean
         GoTo QH
     End If
     '--- success
+    m_lLastError = 0
     Listen = True
 QH:
     Exit Function
@@ -612,6 +626,7 @@ Public Function ReceiveArray( _
         End If
     End If
     '--- success
+    m_lLastError = 0
     ReceiveArray = True
 QH:
     Exit Function
@@ -641,6 +656,8 @@ Public Function Receive( _
     If uAddr.sin_family <> 0 Then
         pvFromSockAddr uAddr, HostAddress, HostPort
     End If
+    '--- success
+    m_lLastError = 0
 QH:
     Exit Function
 EH:
@@ -690,6 +707,7 @@ Public Function SendArray( _
         lBytes = lBytes + lResult
     Loop While lBytes <= UBound(Buffer)
     '--- success
+    m_lLastError = 0
     SendArray = True
 QH:
     Exit Function
@@ -720,7 +738,10 @@ Public Function Send( _
     End If
     If Send = SOCKET_ERROR Then
         m_lLastError = Err.LastDllError
+        GoTo QH
     End If
+    '--- success
+    m_lLastError = 0
 QH:
     Exit Function
 EH:
@@ -736,6 +757,7 @@ Public Function ShutDown(Optional ByVal How As Long = 1) As Boolean
         GoTo QH
     End If
     '--- success
+    m_lLastError = 0
     ShutDown = True
 QH:
     Exit Function
@@ -908,6 +930,7 @@ Private Sub pvDoResolve(ByVal wParam As Long, ByVal lParam As Long)
             m_lLastError = 0
             RaiseEvent OnResolve(pvToString(ws_inet_ntoa(uAddr.sin_addr)))
             If m_hSocket = INVALID_SOCKET Then
+                m_lLastError = WSAEINTR
                 GoTo QH
             End If
             If SockOpt(ucsSsoType) = ucsSckStream Then
@@ -997,6 +1020,7 @@ Public Function SyncConnect(HostAddress As String, ByVal HostPort As Long, Optio
         GoTo QH
     End If
     '--- success
+    m_lLastError = 0
     SyncConnect = True
 QH:
     Exit Function
@@ -1039,6 +1063,8 @@ Public Function SyncReceiveText( _
             GoTo QH
         End If
     Loop While Len(SyncReceiveText) < NeedLen And NeedLen > 0
+    '--- success
+    m_lLastError = 0
 QH:
     Exit Function
 EH:
@@ -1109,6 +1135,7 @@ Public Function SyncReceiveArray( _
         End If
     Loop
     '--- success
+    m_lLastError = 0
     SyncReceiveArray = True
 QH:
     If UBound(Buffer) + 1 <> lBytes Then
@@ -1162,6 +1189,7 @@ Public Function SyncReceive( _
         End If
     Loop
     '--- success
+    m_lLastError = 0
     SyncReceive = True
 QH:
     Exit Function
@@ -1249,6 +1277,7 @@ Public Function SyncSend( _
         BufLen = BufLen - lResult
     Loop
     '--- success
+    m_lLastError = 0
     SyncSend = True
 QH:
     Exit Function
@@ -1272,6 +1301,7 @@ Public Function SyncWaitForEvent( _
     If (EventMask And [_ucsSfdResolve]) <> 0 Then
         If m_uGetHostByName.Handle = 0 Then
             '--- success
+            m_lLastError = 0
             SyncWaitForEvent = True
             GoTo QH
         End If
@@ -1293,6 +1323,7 @@ Public Function SyncWaitForEvent( _
                     m_cMsgQueue.Add Array(WM_SOCKET_NOTIFY, uMsg.wParam, uMsg.lParam)
                     If (uMsg.lParam And EventMask) <> 0 Then
                         '--- success
+                        m_lLastError = 0
                         SyncWaitForEvent = True
                         Exit Do
                     End If
@@ -1309,6 +1340,7 @@ Public Function SyncWaitForEvent( _
                 pvDoResolve uMsg.wParam, uMsg.lParam
                 If (EventMask And [_ucsSfdResolve]) <> 0 Then
                     '--- success
+                    m_lLastError = 0
                     SyncWaitForEvent = True
                     Exit Do
                 End If
@@ -1320,6 +1352,7 @@ Public Function SyncWaitForEvent( _
             Exit Do
         End If
         If Not m_bBlocking Then
+            m_lLastError = WSAEINTR
             Exit Do
         End If
         If bPeek Then
@@ -1327,12 +1360,14 @@ Public Function SyncWaitForEvent( _
                 bHandled = False
                 RaiseEvent OnMessagePending(bHandled)
                 If m_hSocket = INVALID_SOCKET Then
+                    m_lLastError = WSAEINTR
                     GoTo QH
                 End If
                 If Not bHandled Then
                     If PeekMessage(uMsg, 0, WM_PAINT, WM_PAINT, PM_REMOVE) <> 0 Then
                         Call DispatchMessage(uMsg)
                         If m_hSocket = INVALID_SOCKET Then
+                            m_lLastError = WSAEINTR
                             GoTo QH
                         End If
                     End If
@@ -1366,6 +1401,7 @@ End Function
 
 Public Sub SyncCancelWait()
     m_bBlocking = False
+    m_lLastError = 0
 End Sub
 
 Public Sub SyncProcessMsgQueue()
@@ -1383,6 +1419,7 @@ Public Sub SyncProcessMsgQueue()
             pvDoResolve vElem(1), vElem(2)
         End Select
     Loop
+    m_lLastError = 0
     Exit Sub
 EH:
     PrintError FUNC_NAME
