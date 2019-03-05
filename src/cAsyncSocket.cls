@@ -489,7 +489,6 @@ EH:
 End Function
 
 Public Sub Close_()
-    m_lLastError = 0
     '--- note: used in terminate -> no error handling
     If m_uGetHostByName.Handle <> 0 Then
         Call ws_WSACancelAsyncRequest(m_uGetHostByName.Handle)
@@ -1401,7 +1400,6 @@ End Function
 
 Public Sub SyncCancelWait()
     m_bBlocking = False
-    m_lLastError = 0
 End Sub
 
 Public Sub SyncProcessMsgQueue()
@@ -1419,7 +1417,6 @@ Public Sub SyncProcessMsgQueue()
             pvDoResolve vElem(1), vElem(2)
         End Select
     Loop
-    m_lLastError = 0
     Exit Sub
 EH:
     PrintError FUNC_NAME
