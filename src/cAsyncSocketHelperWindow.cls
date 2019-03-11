@@ -46,7 +46,6 @@ Private Const MEM_RELEASE                   As Long = &H8000
 Private Const GWL_USERDATA                  As Long = -21
 Private Const HWND_MESSAGE                  As Long = -3
 
-Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function CreateWindowEx Lib "user32" Alias "CreateWindowExA" (ByVal dwExStyle As Long, ByVal lpClassName As String, ByVal lpWindowName As String, ByVal dwStyle As Long, ByVal X As Long, ByVal Y As Long, ByVal nWidth As Long, ByVal nHeight As Long, ByVal hWndParent As Long, ByVal hMenu As Long, ByVal hInstance As Long, lpParam As Any) As Long
 Private Declare Function DestroyWindow Lib "user32" (ByVal hWnd As Long) As Long
 Private Declare Function WSAStartup Lib "ws2_32" (ByVal wVersionRequired As Long, lpWSAData As WSADATA) As Long
@@ -61,6 +60,7 @@ Private Declare Sub GetMem4 Lib "msvbvm60" (ByVal lpAddress As Long, ByRef RetVa
 Private Declare Sub PutMem4 Lib "msvbvm60" (ByVal lpAddress As Long, ByVal NewVal As Long)
 Private Declare Sub PutMem8 Lib "msvbvm60" (ByVal lpAddress As Long, ByVal NewVal As Currency)
 Private Declare Function SetWindowLong Lib "user32" Alias "SetWindowLongA" (ByVal hWnd As Long, ByVal nIndex As Long, ByVal dwNewLong As Long) As Long
+Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
 
 Private Type WSADATA
    wVersion             As Integer
@@ -88,7 +88,7 @@ Private m_lPos                  As Long
 Private m_lCount                As Long
 
 Private Type UcsSocketDataType
-    Socket          As cAsyncSocket
+    SocketPtr           As Long
 End Type
 
 '=========================================================================
@@ -121,7 +121,7 @@ Friend Function frAddSocket(Socket As cAsyncSocket, Index As Long) As Boolean
     
     On Error GoTo EH
     If Index <> -1 Then
-        Debug.Assert m_uData(Index).Socket Is Socket
+        Debug.Assert m_uData(Index).SocketPtr = ObjPtr(Socket)
         '--- success
         frAddSocket = True
         Exit Function
@@ -136,9 +136,9 @@ Friend Function frAddSocket(Socket As cAsyncSocket, Index As Long) As Boolean
     End If
     For lIdx = 0 To UBound(m_uData)
         Index = (m_lPos + lIdx) Mod lSize
-        If m_uData(Index).Socket Is Nothing Then
+        If m_uData(Index).SocketPtr = 0 Then
             '--- note: weak reference
-            Call CopyMemory(m_uData(Index).Socket, Socket, 4)
+            m_uData(Index).SocketPtr = ObjPtr(Socket)
             m_lPos = Index + 1
             m_lCount = m_lCount + 1
             '--- success
@@ -159,8 +159,8 @@ Friend Function frRemoveSocket(Socket As cAsyncSocket, Index As Long) As Boolean
     
     On Error GoTo EH
     If Index <> -1 Then
-        Debug.Assert m_uData(Index).Socket Is Socket
-        Call CopyMemory(m_uData(Index).Socket, 0&, 4)
+        Debug.Assert m_uData(Index).SocketPtr = ObjPtr(Socket)
+        m_uData(Index).SocketPtr = 0
         Index = -1
         m_lCount = m_lCount - 1
     End If
@@ -182,8 +182,8 @@ Private Function pvHandleNotify(ByVal wMsg As Long, ByVal wParam As Long, ByVal 
     Case WM_USER + 1
         For lIdx = 0 To UBound(m_uData)
             With m_uData(lIdx)
-                If Not .Socket Is Nothing Then
-                    If .Socket.frNotifyGetHostByName(wParam, lParam) Then
+                If .SocketPtr <> 0 Then
+                    If pvToSocket(.SocketPtr).frNotifyGetHostByName(wParam, lParam) Then
                         GoTo QH
                     End If
                 End If
@@ -191,10 +191,9 @@ Private Function pvHandleNotify(ByVal wMsg As Long, ByVal wParam As Long, ByVal 
         Next
     Case WM_SOCKET_NOTIFY To WM_SOCKET_NOTIFY + UBound(m_uData)
         With m_uData(wMsg - WM_SOCKET_NOTIFY)
-            If .Socket Is Nothing Or wParam = INVALID_SOCKET Then
-                GoTo QH
+            If .SocketPtr <> 0 And wParam <> INVALID_SOCKET Then
+                pvToSocket(.SocketPtr).frNotifyEvent wParam, lParam
             End If
-            .Socket.frNotifyEvent wParam, lParam
         End With
     End Select
 QH:
@@ -202,6 +201,10 @@ QH:
 EH:
     PrintError FUNC_NAME
     GoTo QH
+End Function
+
+Private Function pvToSocket(ByVal lPtr As Long) As cAsyncSocket
+    Call vbaObjSetAddref(pvToSocket, lPtr)
 End Function
 
 '= shared ================================================================
@@ -230,14 +233,6 @@ Private Sub Class_Initialize()
 End Sub
 
 Private Sub Class_Terminate()
-    Dim lIdx            As Long
-    
-    For lIdx = 0 To UBound(m_uData)
-        If Not m_uData(lIdx).Socket Is Nothing Then
-            '--- note: clear weak ref
-            Call CopyMemory(m_uData(lIdx).Socket, 0&, 4)
-        End If
-    Next
     If m_hWnd <> 0 Then
         Call SetWindowLong(m_hWnd, GWL_USERDATA, 0)
         sc_Terminate m_hSubclassThunk
