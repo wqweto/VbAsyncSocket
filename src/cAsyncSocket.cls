@@ -173,9 +173,9 @@ Private Declare Function ws_setsockopt Lib "ws2_32" Alias "setsockopt" (ByVal s 
 Private Declare Function ws_inet_addr Lib "ws2_32" Alias "inet_addr" (ByVal cp As String) As Long
 Private Declare Function ws_gethostbyname Lib "ws2_32" Alias "gethostbyname" (ByVal host_name As String) As Long
 Private Declare Function ws_gethostname Lib "ws2_32" Alias "gethostname" (ByVal host_name As String, ByVal namelen As Long) As Long
-Private Declare Function ws_WSAAsyncGetHostByName Lib "ws2_32" Alias "WSAAsyncGetHostByName" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal strHostName As String, buf As Any, ByVal BufLen As Long) As Long
-Private Declare Function ws_WSAAsyncSelect Lib "ws2_32" Alias "WSAAsyncSelect" (ByVal s As Long, ByVal hWnd As Long, ByVal wMsg As Long, ByVal lEvent As Long) As Long
-Private Declare Function ws_WSACancelAsyncRequest Lib "ws2_32" Alias "WSACancelAsyncRequest" (ByVal hAsyncTaskHandle As Long) As Long
+Private Declare Function WSAAsyncGetHostByName Lib "ws2_32" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal strHostName As String, buf As Any, ByVal BufLen As Long) As Long
+Private Declare Function WSAAsyncSelect Lib "ws2_32" (ByVal s As Long, ByVal hWnd As Long, ByVal wMsg As Long, ByVal lEvent As Long) As Long
+Private Declare Function WSACancelAsyncRequest Lib "ws2_32" (ByVal hAsyncTaskHandle As Long) As Long
 #If ImplSync Then
     Private Declare Function PeekMessage Lib "user32" Alias "PeekMessageA" (lpMsg As APIMSG, ByVal hWnd As Long, ByVal wMsgFilterMin As Long, ByVal wMsgFilterMax As Long, ByVal wRemoveMsg As Long) As Long
     Private Declare Function DispatchMessage Lib "user32" Alias "DispatchMessageA" (lpMsg As APIMSG) As Long
@@ -454,7 +454,7 @@ Public Function AsyncSelect(Optional ByVal EventMask As UcsAsyncSocketEventMaskE
     Const FUNC_NAME     As String = "AsyncSelect"
     
     On Error GoTo EH
-    If ws_WSAAsyncSelect(m_hSocket, m_oHelperWindow.hWnd, WM_SOCKET_NOTIFY + m_lIndex, EventMask) = SOCKET_ERROR Then
+    If WSAAsyncSelect(m_hSocket, m_oHelperWindow.hWnd, WM_SOCKET_NOTIFY + m_lIndex, EventMask) = SOCKET_ERROR Then
         m_lLastError = Err.LastDllError
         GoTo QH
     End If
@@ -491,12 +491,12 @@ End Function
 Public Sub Close_()
     '--- note: used in terminate -> no error handling
     If m_uGetHostByName.Handle <> 0 Then
-        Call ws_WSACancelAsyncRequest(m_uGetHostByName.Handle)
+        Call WSACancelAsyncRequest(m_uGetHostByName.Handle)
         m_uGetHostByName.Handle = 0
         Erase m_uGetHostByName.Buffer
     End If
     If m_hSocket <> INVALID_SOCKET Then
-        Call ws_WSAAsyncSelect(m_hSocket, m_oHelperWindow.hWnd, 0, 0)
+        Call WSAAsyncSelect(m_hSocket, m_oHelperWindow.hWnd, 0, 0)
         Call ws_shutdown(m_hSocket, 1)
         Call ws_closesocket(m_hSocket)
         m_oHelperWindow.frRemoveSocket Me, m_lIndex
@@ -516,7 +516,7 @@ Public Function Connect(HostAddress As String, ByVal HostPort As Long) As Boolea
         ReDim m_uGetHostByName.Buffer(0 To MAXGETHOSTSTRUCT) As Byte
         m_uGetHostByName.Port = HostPort
         '--- note: concat "" to prevent passing NULL for HostAddress
-        m_uGetHostByName.Handle = ws_WSAAsyncGetHostByName(m_oHelperWindow.hWnd, WM_SOCKET_RESOLVE, HostAddress & "", m_uGetHostByName.Buffer(0), MAXGETHOSTSTRUCT)
+        m_uGetHostByName.Handle = WSAAsyncGetHostByName(m_oHelperWindow.hWnd, WM_SOCKET_RESOLVE, HostAddress & "", m_uGetHostByName.Buffer(0), MAXGETHOSTSTRUCT)
         If m_uGetHostByName.Handle = 0 Then
             m_lLastError = Err.LastDllError
             Erase m_uGetHostByName.Buffer
@@ -764,13 +764,13 @@ EH:
     PrintError FUNC_NAME
 End Function
 
-Public Function GetErrorDescription(ByVal ErrorNumber As Long) As String
+Public Function GetErrorDescription(ByVal ErrorCode As Long) As String
     Const FUNC_NAME     As String = "GetErrorDescription"
     Dim lSize           As Long
     
     On Error GoTo EH
     GetErrorDescription = Space$(2000)
-    lSize = FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM Or FORMAT_MESSAGE_IGNORE_INSERTS, 0&, ErrorNumber, 0, GetErrorDescription, Len(GetErrorDescription) + 1, 0)
+    lSize = FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM Or FORMAT_MESSAGE_IGNORE_INSERTS, 0&, ErrorCode, 0, GetErrorDescription, Len(GetErrorDescription) + 1, 0)
     If lSize > 2 Then
         If Mid$(GetErrorDescription, lSize - 1, 2) = vbCrLf Then
             lSize = lSize - 2
