@@ -183,6 +183,10 @@ Private Declare Function WSACancelAsyncRequest Lib "ws2_32" (ByVal hAsyncTaskHan
     Private Declare Function KillTimer Lib "user32" (ByVal hWnd As Long, ByVal nIDEvent As Long) As Long
     Private Declare Function WaitMessage Lib "user32" () As Long
 #End If
+#If Not ImplUseShared Then
+    Private Declare Function QueryPerformanceCounter Lib "kernel32" (lpPerformanceCount As Currency) As Long
+    Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
+#End If
 
 Private Type SOCKADDR_IN
     sin_family          As Integer
@@ -1434,6 +1438,15 @@ Private Function UnsignedAdd(ByVal lUnsignedPtr As Long, ByVal lSignedOffset As 
     '--- note: safely add *signed* offset to *unsigned* ptr for *unsigned* retval w/o overflow in LARGEADDRESSAWARE processes
     UnsignedAdd = ((lUnsignedPtr Xor &H80000000) + lSignedOffset) Xor &H80000000
 End Function
+
+Private Property Get TimerEx() As Double
+    Dim cFreq           As Currency
+    Dim cValue          As Currency
+    
+    Call QueryPerformanceFrequency(cFreq)
+    Call QueryPerformanceCounter(cValue)
+    TimerEx = cValue / cFreq
+End Property
 #End If
 
 '=========================================================================
