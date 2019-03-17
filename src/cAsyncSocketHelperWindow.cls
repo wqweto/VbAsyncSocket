@@ -46,9 +46,9 @@ Private Declare Function CreateWindowEx Lib "user32" Alias "CreateWindowExA" (By
 Private Declare Function DestroyWindow Lib "user32" (ByVal hWnd As Long) As Long
 Private Declare Function WSAStartup Lib "ws2_32" (ByVal wVersionRequired As Long, lpWSAData As WSADATA) As Long
 Private Declare Function WSACleanup Lib "ws2_32" () As Long
-'--- for subclassing
 Private Declare Function SetWindowLong Lib "user32" Alias "SetWindowLongA" (ByVal hWnd As Long, ByVal nIndex As Long, ByVal dwNewLong As Long) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
+'--- for subclassing
 Private Declare Function VirtualAlloc Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As Long
 Private Declare Function CryptStringToBinary Lib "crypt32" Alias "CryptStringToBinaryA" (ByVal pszString As String, ByVal cchString As Long, ByVal dwFlags As Long, ByVal pbBinary As Long, pcbBinary As Long, Optional ByVal pdwSkip As Long, Optional ByVal pdwFlags As Long) As Long
 Private Declare Function CallWindowProc Lib "user32" Alias "CallWindowProcA" (ByVal lpPrevWndFunc As Long, ByVal hWnd As Long, ByVal Msg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
@@ -101,9 +101,6 @@ End Sub
 
 Friend Property Get hWnd() As Long
     hWnd = m_hWnd
-    #If False Then '--- touch function (silence MZ-Tools->Review Source Code)
-        sc_WndProc 0, 0, 0, 0, 0
-    #End If
 End Property
 
 '=========================================================================
