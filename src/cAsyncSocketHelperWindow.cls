@@ -35,13 +35,9 @@ Private Const INVALID_SOCKET                As Long = -1
 '--- for WSADATA
 Private Const WSADESCRIPTION_LEN            As Long = 257
 Private Const WSASYS_STATUS_LEN             As Long = 129
-'--- Windows messages
+'--- Windows Messages
 Private Const WM_USER                       As Long = &H400
 Private Const WM_SOCKET_NOTIFY              As Long = WM_USER + 2
-'--- for VirtualAlloc/Free
-Private Const PAGE_EXECUTE_READWRITE        As Long = &H40
-Private Const MEM_COMMIT                    As Long = &H1000
-Private Const MEM_RELEASE                   As Long = &H8000
 '--- for Get/SetWindowLong
 Private Const GWL_USERDATA                  As Long = -21
 Private Const HWND_MESSAGE                  As Long = -3
@@ -50,17 +46,17 @@ Private Declare Function CreateWindowEx Lib "user32" Alias "CreateWindowExA" (By
 Private Declare Function DestroyWindow Lib "user32" (ByVal hWnd As Long) As Long
 Private Declare Function WSAStartup Lib "ws2_32" (ByVal wVersionRequired As Long, lpWSAData As WSADATA) As Long
 Private Declare Function WSACleanup Lib "ws2_32" () As Long
-Private Declare Function SetWindowSubclass Lib "comctl32" Alias "#410" (ByVal hWnd As Long, ByVal pfnSubclass As Long, ByVal uIdSubclass As Long, ByVal dwRefData As Long) As Long
-Private Declare Function RemoveWindowSubclass Lib "comctl32" Alias "#412" (ByVal hWnd As Long, ByVal pfnSubclass As Long, ByVal uIdSubclass As Long) As Long
-Private Declare Function IsBadCodePtr Lib "kernel32" (ByVal lpfn As Long) As Long
-Private Declare Function VirtualAlloc Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As Long
-Private Declare Function VirtualFree Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal dwFreeType As Long) As Long
-Private Declare Sub GetMem1 Lib "msvbvm60" (ByVal lpAddress As Long, ByRef RetVal As Byte)
-Private Declare Sub GetMem4 Lib "msvbvm60" (ByVal lpAddress As Long, ByRef RetVal As Long)
-Private Declare Sub PutMem4 Lib "msvbvm60" (ByVal lpAddress As Long, ByVal NewVal As Long)
-Private Declare Sub PutMem8 Lib "msvbvm60" (ByVal lpAddress As Long, ByVal NewVal As Currency)
+'--- for subclassing
 Private Declare Function SetWindowLong Lib "user32" Alias "SetWindowLongA" (ByVal hWnd As Long, ByVal nIndex As Long, ByVal dwNewLong As Long) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
+Private Declare Function VirtualAlloc Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As Long
+Private Declare Function CryptStringToBinary Lib "crypt32" Alias "CryptStringToBinaryA" (ByVal pszString As String, ByVal cchString As Long, ByVal dwFlags As Long, ByVal pbBinary As Long, pcbBinary As Long, Optional ByVal pdwSkip As Long, Optional ByVal pdwFlags As Long) As Long
+Private Declare Function CallWindowProc Lib "user32" Alias "CallWindowProcA" (ByVal lpPrevWndFunc As Long, ByVal hWnd As Long, ByVal Msg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
+Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleA" (ByVal lpModuleName As String) As Long
+Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
+Private Declare Function GetProcAddressByOrdinal Lib "kernel32" Alias "GetProcAddress" (ByVal hModule As Long, ByVal lpProcOrdinal As Long) As Long
+Private Declare Function CoTaskMemAlloc Lib "ole32" (ByVal cb As Long) As Long
+Private Declare Function DefSubclassProc Lib "comctl32" Alias "#413" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
 
 Private Type WSADATA
    wVersion             As Integer
@@ -82,7 +78,7 @@ Private Const STR_HELPER_CAPTION    As String = "AsyncSocket Helper Window"
 
 Private m_uWsaData              As WSADATA
 Private m_hWnd                  As Long
-Private m_hSubclassThunk        As Long
+Private m_oSubclassThunk        As Object
 Private m_uData()               As UcsSocketDataType
 Private m_lPos                  As Long
 Private m_lCount                As Long
@@ -195,6 +191,7 @@ Private Function pvHandleNotify(ByVal wMsg As Long, ByVal wParam As Long, ByVal 
                 pvToSocket(.SocketPtr).frNotifyEvent wParam, lParam
             End If
         End With
+        pvHandleNotify = &HDEADBEEF
     End Select
 QH:
     Exit Function
@@ -207,14 +204,53 @@ Private Function pvToSocket(ByVal lPtr As Long) As cAsyncSocket
     Call vbaObjSetAddref(pvToSocket, lPtr)
 End Function
 
-'= shared ================================================================
+'= subclassing ===========================================================
 
-#If Not ImplUseShared Then
-Private Function UnsignedAdd(ByVal lUnsignedPtr As Long, ByVal lSignedOffset As Long) As Long
-    '--- note: safely add *signed* offset to *unsigned* ptr for *unsigned* retval w/o overflow in LARGEADDRESSAWARE processes
-    UnsignedAdd = ((lUnsignedPtr Xor &H80000000) + lSignedOffset) Xor &H80000000
+Private Function pvInitMethodIndexer(Optional ByVal MethodParamCount As Long = 5) As cAsyncSocketHelperWindow
+    Const STR_THUNK     As String = "6AAAAABag+oFV4v6ge9AEBQAgccsERQAuP9EJAi5/QMAAPOruLgABACruAArRCSruAiLVCSri0QkDMHgAgUIiQIzq4tEJAzB4BIFwMIIAKuJOsdCBAEAAACLRCQQiUIIgepAEBQAi8IF5BAUAKuLwgX4EBQAq4vCBQgRFACri8IFLBEUALn9AwAAq4PABOL6i8dfgcJAEBQAi0wkEIkRK8LCEACLVCQE/0IEi0QkDIkQM8DCDABmkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEg/gAfgPCBABZWotCCGgAgAAAagBSUf/g"
+    Const THUNK_SIZE    As Long = 8436
+    Const MEM_COMMIT    As Long = &H1000, PAGE_EXECUTE_READWRITE As Long = &H40, CRYPT_STRING_BASE64 As Long = 1
+    Dim hThunk          As Long
+    Dim lSize           As Long
+    
+    hThunk = VirtualAlloc(0, THUNK_SIZE, MEM_COMMIT, PAGE_EXECUTE_READWRITE)
+    Call CryptStringToBinary(STR_THUNK, Len(STR_THUNK), CRYPT_STRING_BASE64, hThunk, THUNK_SIZE)
+    lSize = CallWindowProc(hThunk, 0, MethodParamCount, GetProcAddress(GetModuleHandle("kernel32"), "VirtualFree"), VarPtr(pvInitMethodIndexer))
+    Debug.Assert lSize = THUNK_SIZE
 End Function
-#End If
+
+Private Function pvInitSubclassingThunk(ByVal hWnd As Long, ByVal lObjPtr As Long, ByVal lMethodIndex As Long, Optional ByVal dwRefData As Long) As Object
+    Const STR_THUNK     As String = "6A8AAAAPHwCNREABjURAAY1EQAFag+oFgepQECcAV1aL+oHHWBAnAIvCBegQJwCri8IF/BAnAKuLwgUMEScAq4t0JBSti/iLwgVYECcAq7gBAAAAq4tEJAyrrauLCK2NBIGLAKulpaWlpaWLwgU0EScAq4PvMGoAV/93LP93CP9XHItEJBiJOF5fuIARJwAtUBAnAMIQAJCLVCQE/0IEi0QkDIkQM8DCDABmkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEg/gAfxRS/3Is/3II/1Igi1QkBFL/UhgzwMIEAGaQi1QkFItCKIXAdAlS/9Bag/gBdSIzwFBUjUIUUP90JBz/dCQc/3QkHP90JBz/cgz/UhBYwhgA/3QkEP90JBD/dCQQ/3QkEP9SJMIYAA=="
+    Const THUNK_SIZE    As Long = 304, INSTANCE_SIZE = 48
+    Const MEM_COMMIT    As Long = &H1000, PAGE_EXECUTE_READWRITE As Long = &H40, CRYPT_STRING_BASE64 As Long = 1
+    Static hThunk       As Long
+    Dim aParams(0 To 8) As Long
+    Dim lSize           As Long
+    
+    If hThunk = 0 Then
+        hThunk = VirtualAlloc(0, THUNK_SIZE, MEM_COMMIT, PAGE_EXECUTE_READWRITE)
+        Call CryptStringToBinary(STR_THUNK, Len(STR_THUNK), CRYPT_STRING_BASE64, hThunk, THUNK_SIZE)
+        Call DefSubclassProc(0, 0, 0, 0)                                        '--- load comctl32
+    End If
+    aParams(0) = CoTaskMemAlloc(INSTANCE_SIZE)
+    aParams(1) = lObjPtr
+    aParams(2) = lMethodIndex
+    aParams(3) = dwRefData
+    aParams(4) = GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemFree")
+    aParams(5) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 410)      '--- 410 = SetWindowSubclass ordinal
+    aParams(6) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 412)      '--- 412 = RemoveWindowSubclass ordinal
+    aParams(7) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 413)      '--- 413 = DefSubclassProc ordinal
+    aParams(8) = GetProcAddress(GetModuleHandle("vba6"), "EbMode")
+    lSize = CallWindowProc(hThunk, hWnd, 0, VarPtr(aParams(0)), VarPtr(pvInitSubclassingThunk))
+    Debug.Assert lSize = THUNK_SIZE
+End Function
+
+Public Function SubclassProc(ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long, dwRefData As Long) As Long
+Attribute SubclassProc.VB_MemberFlags = "40"
+    #If hWnd And dwRefData Then  '--- touch args (silence MZ-Tools->Review Source Code)
+    #End If
+    SubclassProc = pvHandleNotify(wMsg, wParam, lParam)
+End Function
 
 '=========================================================================
 ' Base class events
@@ -226,7 +262,7 @@ Private Sub Class_Initialize()
             0, 0, 0, 0, 0, HWND_MESSAGE, 0, App.hInstance, ByVal 0)
         If m_hWnd <> 0 Then
             Call SetWindowLong(m_hWnd, GWL_USERDATA, ObjPtr(Me))
-            m_hSubclassThunk = sc_Subclass(m_hWnd)
+            Set m_oSubclassThunk = pvInitSubclassingThunk(m_hWnd, ObjPtr(Me), pvInitMethodIndexer.SubclassProc(0, 0, 0, 0, 0))
         End If
     End If
     ReDim m_uData(0 To 511) As UcsSocketDataType
@@ -235,81 +271,10 @@ End Sub
 Private Sub Class_Terminate()
     If m_hWnd <> 0 Then
         Call SetWindowLong(m_hWnd, GWL_USERDATA, 0)
-        sc_Terminate m_hSubclassThunk
+        Set m_oSubclassThunk = Nothing
         Call DestroyWindow(m_hWnd)
     End If
     If m_uWsaData.wVersion <> 0 Then
         Call WSACleanup
     End If
 End Sub
-
-'=========================================================================
-' Self-subclassing
-'=========================================================================
-
-'Based on [Simple SelfSub code by Paul Caton](http://www.planet-source-code.com/vb/scripts/ShowCode.asp?txtCodeId=73803&lngWId=1)
-
-Private Function sc_Subclass(ByVal hWnd As Long, Optional ByVal dwRefData As Long) As Long
-    Dim lVtbl           As Long
-    Dim lPtr            As Long
-    Dim bytOrig         As Byte
-    Dim bytJmp          As Byte
-    Dim lIdx            As Long
-    Dim hThunk          As Long
-
-    GetMem4 ObjPtr(Me), lVtbl                       'get address of the usercontrol's vtable
-'    lVtbl = UnsignedAdd(lVtbl, &H7A4)               'bump to the user part of the usercontrol's vtable
-    lVtbl = UnsignedAdd(lVtbl, 7 * 4)               '--- skip IDispatch methods
-    GetMem4 lVtbl, lPtr                             'read the address of the first entry point
-    GetMem1 lPtr, bytOrig                           'read the jump opcode at the first entry point [&H33 for psuedo code, &HE9 for native code]
-    For lIdx = 1 To 512                             'scan a reasonable number of vtable entries
-        lVtbl = UnsignedAdd(lVtbl, 4)               'next entry address
-        GetMem4 lVtbl, lPtr                         'read the address of the entry point
-        If IsBadCodePtr(lPtr) Then                  'is the entry point address valid code?
-            Exit For
-        End If
-        GetMem1 lPtr, bytJmp                        'read the jump opcode at the entry point
-        If bytJmp <> bytOrig Then                   'does the jump opcode match that of the first vtable entry?
-            Exit For
-        End If
-    Next
-    If lIdx > 512 Then
-        GoTo QH                                     'last vtable entry not found... increase the For limit?
-    End If
-    GetMem4 UnsignedAdd(lVtbl, -4), lPtr            'back one entry to the last private method
-    hThunk = VirtualAlloc(0, 48, MEM_COMMIT, PAGE_EXECUTE_READWRITE) 'allocate executable memory
-    If hThunk = 0 Then
-        GoTo QH
-    End If
-    PutMem4 hThunk, hWnd                            'copy the subclass thunk to memory
-    PutMem8 UnsignedAdd(hThunk, 4), -854782363258311.4703@
-    PutMem8 UnsignedAdd(hThunk, 12), 205082594635713.8405@
-    PutMem8 UnsignedAdd(hThunk, 20), 850253272047553.4847@
-    PutMem8 UnsignedAdd(hThunk, 28), -518126163307069.4644@
-    PutMem4 UnsignedAdd(hThunk, 36), lPtr           'call address
-    PutMem8 UnsignedAdd(hThunk, 40), -802991802926118.8865@
-    If SetWindowSubclass(hWnd, UnsignedAdd(hThunk, 4), ObjPtr(Me), dwRefData) = 0 Then
-        Call VirtualFree(hThunk, 0, MEM_RELEASE)
-        GoTo QH
-    End If
-    '--- success
-    sc_Subclass = hThunk
-QH:
-End Function
-
-Private Sub sc_Terminate(hThunk As Long)
-    Dim hWnd            As Long
-    
-    If hThunk <> 0 Then
-        GetMem4 hThunk, hWnd
-        Call RemoveWindowSubclass(hWnd, UnsignedAdd(hThunk, 4), ObjPtr(Me))
-        Call VirtualFree(hThunk, 0, MEM_RELEASE)
-        hThunk = 0
-    End If
-End Sub
-
-Private Function sc_WndProc(ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long, ByVal dwRefData As Long) As Long
-    #If hWnd And dwRefData Then  '--- touch args (silence MZ-Tools->Review Source Code)
-    #End If
-    sc_WndProc = pvHandleNotify(wMsg, wParam, lParam)
-End Function

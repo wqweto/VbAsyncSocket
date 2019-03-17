@@ -150,6 +150,8 @@ Private Declare Function FormatMessage Lib "kernel32" Alias "FormatMessageA" (By
 Private Declare Function PostMessage Lib "user32" Alias "PostMessageA" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
 Private Declare Function WideCharToMultiByte Lib "kernel32" (ByVal CodePage As Long, ByVal dwFlags As Long, ByVal lpWideCharStr As Long, ByVal cchWideChar As Long, lpMultiByteStr As Any, ByVal cchMultiByte As Long, ByVal lpDefaultChar As Long, ByVal lpUsedDefaultChar As Long) As Long
 Private Declare Function MultiByteToWideChar Lib "kernel32" (ByVal CodePage As Long, ByVal dwFlags As Long, lpMultiByteStr As Any, ByVal cchMultiByte As Long, ByVal lpWideCharStr As Long, ByVal cchWideChar As Long) As Long
+Private Declare Function SendMessage Lib "user32" Alias "SendMessageA" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, lParam As Any) As Long
+Private Declare Function DestroyWindow Lib "user32" (ByVal hWnd As Long) As Long
 Private Declare Function ws_connect Lib "ws2_32" Alias "connect" (ByVal s As Long, ByRef Name As SOCKADDR_IN, ByVal namelen As Long) As Long
 Private Declare Function ws_socket Lib "ws2_32" Alias "socket" (ByVal af As Long, ByVal s_type As Long, ByVal Protocol As Long) As Long
 Private Declare Function ws_closesocket Lib "ws2_32" Alias "closesocket" (ByVal s As Long) As Long
@@ -1004,6 +1006,14 @@ End Function
 
 Private Function pvGetHelperWindow() As Long
     pvGetHelperWindow = FindWindow(STR_HELPER_CLASS, App.hInstance & ":" & App.ThreadID & ":" & STR_HELPER_CAPTION)
+    If pvGetHelperWindow <> 0 Then
+        '--- note: On End in VBIDE the helper window leaks but is unsubclassed and does not respond to WM_SOCKET_NOTIFY
+        '---       with expected retval. Make sure to destroy this leaked window in current debug session
+        If SendMessage(pvGetHelperWindow, WM_SOCKET_NOTIFY, INVALID_SOCKET, ByVal 0) <> &HDEADBEEF Then
+            Call DestroyWindow(pvGetHelperWindow)
+            pvGetHelperWindow = 0
+        End If
+    End If
 End Function
 
 '= sync ==================================================================
