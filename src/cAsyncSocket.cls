@@ -1333,6 +1333,9 @@ Public Function SyncWaitForEvent( _
         If PeekMessage(uMsg, hWnd, WM_SOCKET_NOTIFY + m_lIndex, WM_SOCKET_NOTIFY + m_lIndex, PM_REMOVE) <> 0 Then
             If uMsg.wParam <> INVALID_SOCKET And uMsg.lParam <> 0 Then
                 If uMsg.wParam = m_hSocket Then
+                    If m_cMsgQueue Is Nothing Then
+                        Set m_cMsgQueue = New Collection
+                    End If
                     m_cMsgQueue.Add Array(WM_SOCKET_NOTIFY, uMsg.wParam, uMsg.lParam)
                     If (uMsg.lParam And EventMask) <> 0 Then
                         '--- success
@@ -1404,8 +1407,10 @@ Public Function SyncWaitForEvent( _
     End If
 QH:
     m_bBlocking = bBlocking
-    If m_cMsgQueue.Count > 0 Then
-        Call PostMessage(hWnd, WM_SOCKET_NOTIFY + m_lIndex, INVALID_SOCKET, 0)
+    If Not m_cMsgQueue Is Nothing Then
+        If m_cMsgQueue.Count > 0 Then
+            Call PostMessage(hWnd, WM_SOCKET_NOTIFY + m_lIndex, INVALID_SOCKET, 0)
+        End If
     End If
     Exit Function
 EH:
@@ -1421,16 +1426,18 @@ Public Sub SyncProcessMsgQueue()
     Dim vElem           As Variant
     
     On Error GoTo EH
-    Do While m_cMsgQueue.Count > 0
-        vElem = m_cMsgQueue.Item(1)
-        m_cMsgQueue.Remove 1
-        Select Case vElem(0)
-        Case WM_SOCKET_NOTIFY
-            pvDoNotify vElem(1), vElem(2)
-        Case WM_SOCKET_RESOLVE
-            pvDoResolve vElem(1), vElem(2)
-        End Select
-    Loop
+    If Not m_cMsgQueue Is Nothing Then
+        Do While m_cMsgQueue.Count > 0
+            vElem = m_cMsgQueue.Item(1)
+            m_cMsgQueue.Remove 1
+            Select Case vElem(0)
+            Case WM_SOCKET_NOTIFY
+                pvDoNotify vElem(1), vElem(2)
+            Case WM_SOCKET_RESOLVE
+                pvDoResolve vElem(1), vElem(2)
+            End Select
+        Loop
+    End If
     Exit Sub
 EH:
     PrintError FUNC_NAME
@@ -1477,7 +1484,6 @@ Private Sub Class_Initialize()
     End If
     m_hSocket = INVALID_SOCKET
     m_lIndex = -1
-    Set m_cMsgQueue = New Collection
 End Sub
 
 Private Sub Class_Terminate()
