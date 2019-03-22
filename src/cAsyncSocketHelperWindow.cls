@@ -221,7 +221,7 @@ End Function
 
 #If Not ImplUseShared Then
 Private Function InitAddressOfMethod(pObj As Object, ByVal MethodParamCount As Long) As Object
-    Const STR_THUNK     As String = "6AAAAABag+oFV4v6ge9QEJIAgcekEZIAuP9EJAS5+QcAAPOri8LB4AgFuQAAAKuLwsHoGAUAjYEAq7gIAAArq7hEJASLq7hJCIsEq7iBi1Qkq4tEJAzB4AIFCIkCM6uLRCQMweASBcDCCACriTrHQgQBAAAAi0QkCIsAiUIIi0QkEIlCDIHqUBCSAIvCBTwRkgCri8IFUBGSAKuLwgVgEZIAq4vCBYQRkgCri8IFjBGSAKuLwgWUEZIAq4vCBZwRkgCri8IFpBGSALn5BwAAq4PABOL6i8dfgcJQEJIAi0wkEIkRK8LCEAAPHwCLVCQE/0IEi0QkDIkQM8DCDABmkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEg/gAfgPCBABZWotCDGgAgAAAagBSUf/gZpC4AUAAgMIIALgBQACAwhAAuAFAAIDCGAC4AUAAgMIkAA=="
+    Const STR_THUNK     As String = "6AAAAABag+oFV4v6ge9QECkAgcekESkAuP9EJAS5+QcAAPOri8LB4AgFuQAAAKuLwsHoGAUAjYEAq7gIAAArq7hEJASLq7hJCIsEq7iBi1Qkq4tEJAzB4AIFCIkCM6uLRCQMweASBcDCCACriTrHQgQBAAAAi0QkCIsAiUIIi0QkEIlCDIHqUBApAIvCBTwRKQCri8IFUBEpAKuLwgVgESkAq4vCBYQRKQCri8IFjBEpAKuLwgWUESkAq4vCBZwRKQCri8IFpBEpALn5BwAAq4PABOL6i8dfgcJQECkAi0wkEIkRK8LCEAAPHwCLVCQE/0IEi0QkDIkQM8DCDABmkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEg/gAfgPCBABZWotCDGgAgAAAagBSUf/gZpC4AUAAgMIIALgBQACAwhAAuAFAAIDCGAC4AUAAgMIkAA==" ' 22.3.2019 10:17:01
     Const THUNK_SIZE    As Long = 16728
     Dim hThunk          As Long
     Dim lSize           As Long
@@ -232,14 +232,14 @@ Private Function InitAddressOfMethod(pObj As Object, ByVal MethodParamCount As L
     Debug.Assert lSize = THUNK_SIZE
 End Function
 
-Private Function InitSubclassingThunk(ByVal hWnd As Long, ByVal lThisPtr As Long, ByVal pfnCallback As Long) As IUnknown
-    Const STR_THUNK     As String = "6AAAAABag+oFgepQELUAV1aLdCQUg8YIgz4AdC+L+oHHxBG1AIvCBeQQtQCri8IFIBG1AKuLwgUwEbUAq4vCBVwRtQCruQkAAADzpYHCxBG1AFJqFP9SEFqL+IvCq7gBAAAAq4tEJAyri3QkFKWlg+8UagBX/3IM/3cI/1IYi0QkGIk4Xl+4+BG1AC1QELUAwhAAkItEJAiDOAB1KoN4BAB1JIF4CMAAAAB1G4F4DAAAAEZ1EotUJAT/QgSLRCQMiRAzwMIMALgCQACAwgwAkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEg/gAfxiLClL/cQz/cgj/URyLVCQEiwpS/1EUM8DCBABmkFWL7ItVGIsKi0EshcB0J1L/0FqD+AF1N4sKUv9RMFqFwHUsiwpSavD/cST/UShaqQAAAAh1GTPAUFT/dRT/dRD/dQz/dQj/cgz/UhBY6xGLCv91FP91EP91DP91CP9RIIvlXcIYAGaQ"
-    Const THUNK_SIZE    As Long = 424
+Private Function InitSubclassingThunk(ByVal hWnd As Long, pObj As Object, ByVal pfnCallback As Long) As IUnknown
+    Const STR_THUNK     As String = "6AAAAABag+oFgepwENQAV1aLdCQUg8YIgz4AdC+L+oHH4BHUAIvCBQQR1ACri8IFQBHUAKuLwgVQEdQAq4vCBXwR1ACruQkAAADzpYHC4BHUAFJqFP9SEFqL+IvCq7gBAAAAq4tEJAyri3QkFKWlg+8UagBX/3IM/3cI/1IYi0QkGIk4Xl+4FBLUAC1wENQAwhAAkItEJAiDOAB1KoN4BAB1JIF4CMAAAAB1G4F4DAAAAEZ1EotUJAT/QgSLRCQMiRAzwMIMALgCQACAwgwAkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEg/gAfxiLClL/cQz/cgj/URyLVCQEiwpS/1EUM8DCBABmkFWL7ItVGIsKi0EshcB0J1L/0FqD+AF1N4sKUv9RMFqFwHUsiwpSavD/cST/UShaqQAAAAh1GTPAUFT/dRT/dRD/dQz/dQj/cgz/UhBY6xGLCv91FP91EP91DP91CP9RIF3CGAA=" ' 22.3.2019 10:17:35
+    Const THUNK_SIZE    As Long = 420
     Static hThunk       As Long
     Dim aParams(0 To 10) As Long
     Dim lSize           As Long
     
-    aParams(0) = lThisPtr
+    aParams(0) = ObjPtr(pObj)
     aParams(1) = pfnCallback
     If hThunk = 0 Then
         hThunk = VirtualAlloc(0, THUNK_SIZE, MEM_COMMIT, PAGE_EXECUTE_READWRITE)
@@ -264,7 +264,7 @@ Private Function InitSubclassingThunk(ByVal hWnd As Long, ByVal lThisPtr As Long
 End Function
 
 Private Function InitCleanupThunk(ByVal hHandle As Long, sModuleName As String, sProcName As String) As IUnknown
-    Const STR_THUNK     As String = "6AAAAABag+oFgepQED0BV1aLdCQUgz4AdCeL+oHHPBE9AYvCBcwQPQGri8IFCBE9AauLwgUYET0Bq7kCAAAA86WBwjwRPQFSahD/Ugxai/iLwqu4AQAAAKuLRCQMq4tEJBCrg+8Qi0QkGIk4Xl+4UBE9AS1QED0BwhAAkItEJAiDOAB1KoN4BAB1JIF4CMAAAAB1G4F4DAAAAEZ1EotUJAT/QgSLRCQMiRAzwMIMALgCQACAwgwAkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEg/gAfxL/cgj/UgyLVCQEiwpS/1EQM8DCBAA="
+    Const STR_THUNK     As String = "6AAAAABag+oFgepQEPkAV1aLdCQUgz4AdCeL+oHHPBH5AIvCBcwQ+QCri8IFCBH5AKuLwgUYEfkAq7kCAAAA86WBwjwR+QBSahD/Ugxai/iLwqu4AQAAAKuLRCQMq4tEJBCrg+8Qi0QkGIk4Xl+4UBH5AC1QEPkAwhAAkItEJAiDOAB1KoN4BAB1JIF4CMAAAAB1G4F4DAAAAEZ1EotUJAT/QgSLRCQMiRAzwMIMALgCQACAwgwAkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEg/gAfxL/cgj/UgyLVCQEiwpS/1EQM8DCBAA=" ' 22.3.2019 10:19:28
     Const THUNK_SIZE    As Long = 256
     Static hThunk       As Long
     Dim aParams(0 To 1) As Long
@@ -308,7 +308,7 @@ Private Sub Class_Initialize()
             0, 0, 0, 0, 0, HWND_MESSAGE, 0, App.hInstance, ByVal 0)
         If m_hWnd <> 0 Then
             Call SetWindowLong(m_hWnd, GWL_USERDATA, ObjPtr(Me))
-            Set m_pSubclass = InitSubclassingThunk(m_hWnd, ObjPtr(Me), pvAddressOfSubclassProc.SubclassProc(0, 0, 0, 0))
+            Set m_pSubclass = InitSubclassingThunk(m_hWnd, Me, pvAddressOfSubclassProc.SubclassProc(0, 0, 0, 0))
             Set m_pCleanup = InitCleanupThunk(m_hWnd, "user32", "DestroyWindow")
         End If
     End If
