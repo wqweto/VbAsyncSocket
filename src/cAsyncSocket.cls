@@ -356,15 +356,15 @@ Public Function Create( _
     Set m_pCleanup = InitCleanupThunk(m_hSocket, "ws2_32", "closesocket")
     If Not m_oHelperWindow.frAddSocket(Me, m_lIndex) Then
         m_lLastError = WSAEMFILE
-        Close_
+        pvClose
         GoTo QH
     End If
     If Not AsyncSelect(EventMask) Then
-        Close_
+        pvClose
         GoTo QH
     End If
     If Not Bind(SocketAddress, SocketPort) Then
-        Close_
+        pvClose
         GoTo QH
     End If
     '--- success
@@ -550,18 +550,20 @@ EH:
 End Function
 
 Public Sub Close_()
-    '--- note: used in terminate -> no error handling
+    Const FUNC_NAME     As String = "Close_"
+    
+    On Error GoTo EH
     If pvResolveHandle <> 0 Then
         Call WSACancelAsyncRequest(m_uGetHostByName(0).Handle)
         Erase m_uGetHostByName
     End If
     If m_hSocket <> INVALID_SOCKET Then
-        Call WSAAsyncSelect(m_hSocket, m_oHelperWindow.hWnd, 0, 0)
         Call ws_shutdown(m_hSocket, 1)
-        m_oHelperWindow.frRemoveSocket Me, m_lIndex
-        m_hSocket = INVALID_SOCKET
-        Set m_pCleanup = Nothing
+        pvClose
     End If
+    Exit Sub
+EH:
+    PrintError FUNC_NAME
 End Sub
 
 Public Function Connect(HostAddress As String, ByVal HostPort As Long) As Boolean
@@ -1056,6 +1058,16 @@ Private Function pvToString(ByVal lPtr As Long) As String
         Call CopyMemory(ByVal pvToString, ByVal lPtr, Len(pvToString))
     End If
 End Function
+
+Private Sub pvClose()
+    '--- note: used in terminate -> no error handling
+    If m_hSocket <> INVALID_SOCKET Then
+        Call WSAAsyncSelect(m_hSocket, m_oHelperWindow.hWnd, 0, 0)
+        m_oHelperWindow.frRemoveSocket Me, m_lIndex
+        m_hSocket = INVALID_SOCKET
+        Set m_pCleanup = Nothing
+    End If
+End Sub
 
 '= sync ==================================================================
 
@@ -1767,7 +1779,7 @@ End Sub
 
 Private Sub Class_Terminate()
     If hWnd = 0 Then
-        Close_
+        pvClose
         Set m_oHelperWindow = Nothing
     Else
         '-- terminate helper window
