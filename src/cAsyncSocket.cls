@@ -27,7 +27,7 @@ Private Const MODULE_NAME As String = "cAsyncSocket"
 
 #Const ImplUseShared = (ASYNCSOCKET_USE_SHARED <> 0)
 #Const ImplSync = Not (ASYNCSOCKET_NO_SYNC <> 0)
-#Const ImplNoVBIDESupport = (MST_NO_VBIDE_SUPPORT <> 0)
+#Const ImplNoIdeProtection = (MST_NO_IDE_PROTECTION <> 0)
 
 '=========================================================================
 ' Public events
@@ -1634,14 +1634,13 @@ Private Function InitSubclassingThunk(ByVal hWnd As Long, pObj As Object, ByVal 
         aParams(4) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 410)      '--- 410 = SetWindowSubclass ordinal
         aParams(5) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 412)      '--- 412 = RemoveWindowSubclass ordinal
         aParams(6) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 413)      '--- 413 = DefSubclassProc ordinal
-        #If Not ImplNoVBIDESupport Then
-            aParams(7) = hIdeOwner
-            If aParams(7) <> 0 Then
-                aParams(8) = GetProcAddress(GetModuleHandle("user32"), "GetWindowLongA")
-                aParams(9) = GetProcAddress(GetModuleHandle("vba6"), "EbMode")
-                aParams(10) = GetProcAddress(GetModuleHandle("vba6"), "EbIsResetting")
-            End If
-        #End If
+        '--- for IDE protection
+        Debug.Assert pvGetIdeOwner(aParams(7))
+        If aParams(7) <> 0 Then
+            aParams(8) = GetProcAddress(GetModuleHandle("user32"), "GetWindowLongA")
+            aParams(9) = GetProcAddress(GetModuleHandle("vba6"), "EbMode")
+            aParams(10) = GetProcAddress(GetModuleHandle("vba6"), "EbIsResetting")
+        End If
     End If
     lSize = CallWindowProc(hThunk, hWnd, 0, VarPtr(aParams(0)), VarPtr(InitSubclassingThunk))
     Debug.Assert lSize = THUNK_SIZE
@@ -1668,16 +1667,17 @@ Public Function InitCleanupThunk(ByVal hHandle As Long, sModuleName As String, s
     End If
 End Function
 
-#If Not ImplNoVBIDESupport Then
-Private Property Get hIdeOwner() As Long
-    Dim lProcessId      As Long
-    
-    Do
-        hIdeOwner = FindWindowEx(0, hIdeOwner, "IDEOwner", vbNullString)
-        Call GetWindowThreadProcessId(hIdeOwner, lProcessId)
-    Loop While hIdeOwner <> 0 And lProcessId <> GetCurrentProcessId()
-End Property
-#End If
+Private Function pvGetIdeOwner(hIdeOwner As Long) As Boolean
+    #If Not ImplNoIdeProtection Then
+        Dim lProcessId      As Long
+        
+        Do
+            hIdeOwner = FindWindowEx(0, hIdeOwner, "IDEOwner", vbNullString)
+            Call GetWindowThreadProcessId(hIdeOwner, lProcessId)
+        Loop While hIdeOwner <> 0 And lProcessId <> GetCurrentProcessId()
+    #End If
+    pvGetIdeOwner = True
+End Function
 
 Private Property Get TimerEx() As Double
     Dim cFreq           As Currency
