@@ -1635,8 +1635,8 @@ Private Function InitSubclassingThunk(ByVal hWnd As Long, pObj As Object, ByVal 
         aParams(5) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 412)      '--- 412 = RemoveWindowSubclass ordinal
         aParams(6) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 413)      '--- 413 = DefSubclassProc ordinal
         #If Not ImplNoVBIDESupport Then
-            If InIde Then
-                aParams(7) = hIdeOwner
+            aParams(7) = hIdeOwner
+            If aParams(7) <> 0 Then
                 aParams(8) = GetProcAddress(GetModuleHandle("user32"), "GetWindowLongA")
                 aParams(9) = GetProcAddress(GetModuleHandle("vba6"), "EbMode")
                 aParams(10) = GetProcAddress(GetModuleHandle("vba6"), "EbIsResetting")
@@ -1669,15 +1669,6 @@ Public Function InitCleanupThunk(ByVal hHandle As Long, sModuleName As String, s
 End Function
 
 #If Not ImplNoVBIDESupport Then
-Private Property Get InIde() As Boolean
-    Debug.Assert pvSetTrue(InIde)
-End Property
-
-Private Function pvSetTrue(bValue As Boolean) As Boolean
-    bValue = True
-    pvSetTrue = True
-End Function
-
 Private Property Get hIdeOwner() As Long
     Dim lProcessId      As Long
     
