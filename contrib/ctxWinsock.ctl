@@ -268,7 +268,6 @@ Private Property Get pvSocket() As cAsyncSocket
     Exit Property
 EH:
     PrintError FUNC_NAME
-    Resume Next
 End Property
 
 '=========================================================================
@@ -281,19 +280,20 @@ Public Sub Accept(ByVal requestID As Long)
     
     On Error GoTo EH
     If DuplicateHandle(GetCurrentProcess(), requestID, GetCurrentProcess(), hDuplicate, 0, 0, DUPLICATE_SAME_ACCESS) = 0 Then
-        pvSetError Err.LastDllError
+        On Error GoTo 0
+        pvSetError Err.LastDllError, RaiseError:=True
         GoTo QH
     End If
     Set m_oSocket = New cAsyncSocket
     If Not m_oSocket.Attach(hDuplicate) Then
-        pvSetError m_oSocket.LastError
+        On Error GoTo 0
+        pvSetError m_oSocket.LastError, RaiseError:=True
         GoTo QH
     End If
 QH:
     Exit Sub
 EH:
     PrintError FUNC_NAME
-    Resume Next
 End Sub
 
 Public Sub Close_()
@@ -309,7 +309,6 @@ Public Sub Close_()
     Exit Sub
 EH:
     PrintError FUNC_NAME
-    Resume Next
 End Sub
 
 Public Sub Bind(Optional ByVal LocalPort As Long, Optional LocalIP As String)
@@ -318,13 +317,13 @@ Public Sub Bind(Optional ByVal LocalPort As Long, Optional LocalIP As String)
     On Error GoTo EH
     Close_
     If Not pvSocket.Bind(LocalIP, LocalPort) Then
-        pvSetError pvSocket.LastError
+        On Error GoTo 0
+        pvSetError pvSocket.LastError, RaiseError:=True
     End If
     pvState = sckOpen
     Exit Sub
 EH:
     PrintError FUNC_NAME
-    Resume Next
 End Sub
 
 Public Sub Connect(Optional RemoteHost As String, Optional ByVal RemotePort As Long)
@@ -340,13 +339,13 @@ Public Sub Connect(Optional RemoteHost As String, Optional ByVal RemotePort As L
     End If
     pvState = sckResolvingHost
     If Not pvSocket.Connect(m_sRemoteHost, m_lRemotePort) Then
-        pvSetError pvSocket.LastError
+        On Error GoTo 0
+        pvSetError pvSocket.LastError, RaiseError:=True
     End If
     pvState = sckConnected
     Exit Sub
 EH:
     PrintError FUNC_NAME
-    Resume Next
 End Sub
 
 Public Sub Listen()
@@ -355,13 +354,13 @@ Public Sub Listen()
     On Error GoTo EH
     Close_
     If Not pvSocket.Listen() Then
-        pvSetError pvSocket.LastError
+        On Error GoTo 0
+        pvSetError pvSocket.LastError, RaiseError:=True
     End If
     pvState = sckListening
     Exit Sub
 EH:
     PrintError FUNC_NAME
-    Resume Next
 End Sub
 
 Public Sub PeekData(data As Variant, Optional ByVal type_ As Long, Optional ByVal maxLen As Long = -1)
@@ -403,7 +402,6 @@ Public Sub PeekData(data As Variant, Optional ByVal type_ As Long, Optional ByVa
     Exit Sub
 EH:
     PrintError FUNC_NAME
-    Resume Next
 End Sub
 
 Public Sub GetData(data As Variant, Optional ByVal type_ As Long, Optional ByVal maxLen As Long = -1)
@@ -458,7 +456,6 @@ Public Sub GetData(data As Variant, Optional ByVal type_ As Long, Optional ByVal
     Exit Sub
 EH:
     PrintError FUNC_NAME
-    Resume Next
 End Sub
 
 Public Sub SendData(data As Variant)
@@ -480,16 +477,15 @@ Public Sub SendData(data As Variant)
     Exit Sub
 EH:
     PrintError FUNC_NAME
-    Resume Next
 End Sub
 
-Private Sub pvSetError(ByVal lLastDllError As Long, Optional sSource As String)
+Private Sub pvSetError(ByVal lLastDllError As Long, Optional Source As String, Optional ByVal RaiseError As Boolean)
     Dim bCancel         As Boolean
     
     pvState = sckError
-    RaiseEvent Error(vbObjectError, pvSocket.GetErrorDescription(lLastDllError), lLastDllError, sSource, App.HelpFile, 0, bCancel)
-    If Not bCancel Then
-        Err.Raise vbObjectError, sSource, pvSocket.GetErrorDescription(lLastDllError), App.HelpFile, 0
+    RaiseEvent Error(vbObjectError, pvSocket.GetErrorDescription(lLastDllError), lLastDllError, Source, App.HelpFile, 0, bCancel)
+    If Not bCancel And RaiseError Then
+        Err.Raise vbObjectError, Source, pvSocket.GetErrorDescription(lLastDllError), App.HelpFile, 0
     End If
 End Sub
 
@@ -524,7 +520,6 @@ QH:
     Exit Sub
 EH:
     PrintError FUNC_NAME
-    Resume Next
 End Sub
 
 Private Sub m_oSocket_OnResolve(IpAddress As String)
@@ -561,7 +556,6 @@ QH:
     Exit Sub
 EH:
     PrintError FUNC_NAME
-    Resume Next
 End Sub
 
 Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
@@ -573,21 +567,36 @@ End Sub
 '=========================================================================
 
 Private Sub UserControl_Resize()
+    Const FUNC_NAME     As String = "UserControl_Resize"
+    
+    On Error GoTo EH
     Width = ScaleX(32, vbPixels)
     Height = ScaleX(32, vbPixels)
     labLogo.Move 0, (ScaleHeight - labLogo.Height) / 2, ScaleWidth
+    Exit Sub
+EH:
+    PrintError FUNC_NAME
 End Sub
 
 Private Sub UserControl_InitProperties()
+    Const FUNC_NAME     As String = "UserControl_InitProperties"
+    
+    On Error GoTo EH
     labLogo.Caption = STR_LOGO
     LocalPort = DEF_LOCALPORT
     Protocol = DEF_PROTOCOL
     RemoteHost = DEF_REMOTEHOST
     RemotePort = DEF_REMOTEPORT
     Timeout = DEF_TIMEOUT
+    Exit Sub
+EH:
+    PrintError FUNC_NAME
 End Sub
 
 Private Sub UserControl_ReadProperties(PropBag As PropertyBag)
+    Const FUNC_NAME     As String = "UserControl_ReadProperties"
+    
+    On Error GoTo EH
     labLogo.Caption = STR_LOGO
     With PropBag
         LocalPort = .ReadProperty("LocalPort", DEF_LOCALPORT)
@@ -596,9 +605,15 @@ Private Sub UserControl_ReadProperties(PropBag As PropertyBag)
         RemotePort = .ReadProperty("RemotePort", DEF_REMOTEPORT)
         Timeout = .ReadProperty("Timeout", DEF_TIMEOUT)
     End With
+    Exit Sub
+EH:
+    PrintError FUNC_NAME
 End Sub
 
 Private Sub UserControl_WriteProperties(PropBag As PropertyBag)
+    Const FUNC_NAME     As String = "UserControl_WriteProperties"
+    
+    On Error GoTo EH
     With PropBag
         .WriteProperty "LocalPort", LocalPort, DEF_LOCALPORT
         .WriteProperty "Protocol", Protocol, DEF_PROTOCOL
@@ -606,6 +621,9 @@ Private Sub UserControl_WriteProperties(PropBag As PropertyBag)
         .WriteProperty "RemotePort", RemotePort, DEF_REMOTEPORT
         .WriteProperty "Timeout", Timeout, DEF_TIMEOUT
     End With
+    Exit Sub
+EH:
+    PrintError FUNC_NAME
 End Sub
 
 Private Sub UserControl_Initialize()
