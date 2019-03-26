@@ -12,7 +12,6 @@ Begin VB.UserControl ctxWinsock
       Alignment       =   2  'Center
       AutoSize        =   -1  'True
       BackStyle       =   0  'Transparent
-      Caption         =   $"ctxWinsock.ctx":0000
       BeginProperty Font 
          Name            =   "Segoe UI"
          Size            =   7.8
@@ -22,7 +21,7 @@ Begin VB.UserControl ctxWinsock
          Italic          =   0   'False
          Strikethrough   =   0   'False
       EndProperty
-      Height          =   408
+      Height          =   204
       Left            =   0
       TabIndex        =   0
       Top             =   0
@@ -138,6 +137,7 @@ Private Declare Function GetCurrentProcess Lib "kernel32" () As Long
 ' Constants and member variables
 '=========================================================================
 
+Private Const STR_LOGO              As String = "AS" & vbCrLf & "WS"
 Private Const DEF_LOCALPORT         As Long = 0
 Private Const DEF_PROTOCOL          As Long = 0
 Private Const DEF_REMOTEHOST        As String = vbNullString
@@ -150,7 +150,7 @@ Private m_lLocalPort            As Long
 Private m_eProtocol             As UcsProtocolConstants
 Private m_sRemoteHost           As String
 Private m_lRemotePort           As Long
-Private m_lTimeout             As Long
+Private m_lTimeout              As Long
 Private m_baRecvBuffer()        As Byte
 Private m_baSendBuffer()        As Byte
 Private m_lSendPos              As Long
@@ -578,7 +578,17 @@ Private Sub UserControl_Resize()
     labLogo.Move 0, (ScaleHeight - labLogo.Height) / 2, ScaleWidth
 End Sub
 
+Private Sub UserControl_InitProperties()
+    labLogo.Caption = STR_LOGO
+    LocalPort = DEF_LOCALPORT
+    Protocol = DEF_PROTOCOL
+    RemoteHost = DEF_REMOTEHOST
+    RemotePort = DEF_REMOTEPORT
+    Timeout = DEF_TIMEOUT
+End Sub
+
 Private Sub UserControl_ReadProperties(PropBag As PropertyBag)
+    labLogo.Caption = STR_LOGO
     With PropBag
         LocalPort = .ReadProperty("LocalPort", DEF_LOCALPORT)
         Protocol = .ReadProperty("Protocol", DEF_PROTOCOL)
