@@ -7,7 +7,6 @@ Class=cClientInfo; cClientInfo.cls
 Module=mdGlobals; mdGlobals.bas
 Form=frmClient.frm
 Class=cAsyncSocket; ..\..\src\cAsyncSocket.cls
-Class=cAsyncSocketHelperWindow; ..\..\src\cAsyncSocketHelperWindow.cls
 IconForm="frmMain"
 Startup="frmMain"
 HelpFile=""

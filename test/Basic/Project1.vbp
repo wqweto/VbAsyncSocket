@@ -2,7 +2,6 @@ Type=Exe
 Reference=*\G{00020430-0000-0000-C000-000000000046}#2.0#0#..\..\..\..\..\Windows\SysWOW64\stdole2.tlb#OLE Automation
 Form=Form1.frm
 Class=cAsyncSocket; ..\..\src\cAsyncSocket.cls
-Class=cAsyncSocketHelperWindow; ..\..\src\cAsyncSocketHelperWindow.cls
 Module=Module1; Module1.bas
 Class=cWinSockRequest; ..\..\contrib\cWinSockRequest.cls
 Class=cTlsClient; ..\..\contrib\cTlsClient.cls
