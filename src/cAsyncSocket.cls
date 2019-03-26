@@ -112,6 +112,7 @@ Private Const SOCKET_ERROR                  As Long = -1
 Private Const INVALID_SOCKET                As Long = -1
 Private Const AF_INET                       As Long = 2
 Private Const ERR_TIMEOUT                   As Long = &H800705B4
+Private Const SIGN_BIT                      As Long = &H80000000
 '--- for ioctlsocket
 Private Const FIONREAD                      As Long = &H4004667F
 '--- for WSAGetLastError
@@ -391,6 +392,7 @@ Public Function Attach( _
         m_lLastError = WSAEMFILE
         GoTo QH
     End If
+    Set m_pCleanup = InitCleanupThunk(m_hSocket, "ws2_32", "closesocket")
     If Not AsyncSelect(EventMask) Then
         GoTo QH
     End If
@@ -409,8 +411,11 @@ Public Function Detach() As Long
     On Error GoTo EH
     m_lLastError = 0
     Detach = m_hSocket
+    '--- note: prevent closesocket(m_hSocket) being called
+    ThunkPrivateData(m_pCleanup) = INVALID_SOCKET
     m_oHelperWindow.frRemoveSocket Me, m_lIndex
     m_hSocket = INVALID_SOCKET
+    Set m_pCleanup = Nothing
     Exit Function
 EH:
     PrintError FUNC_NAME
@@ -553,9 +558,9 @@ Public Sub Close_()
     If m_hSocket <> INVALID_SOCKET Then
         Call WSAAsyncSelect(m_hSocket, m_oHelperWindow.hWnd, 0, 0)
         Call ws_shutdown(m_hSocket, 1)
-        Set m_pCleanup = Nothing
         m_oHelperWindow.frRemoveSocket Me, m_lIndex
         m_hSocket = INVALID_SOCKET
+        Set m_pCleanup = Nothing
     End If
 End Sub
 
@@ -1666,6 +1671,24 @@ Public Function InitCleanupThunk(ByVal hHandle As Long, sModuleName As String, s
         Debug.Assert lSize = THUNK_SIZE
     End If
 End Function
+
+Private Property Get ThunkPrivateData(pThunk As IUnknown, Optional ByVal Index As Long) As Long
+    Dim lPtr            As Long
+    
+    lPtr = ObjPtr(pThunk)
+    If lPtr <> 0 Then
+        Call CopyMemory(ThunkPrivateData, ByVal (lPtr Xor SIGN_BIT) + 8 + Index * 4 Xor SIGN_BIT, 4)
+    End If
+End Property
+
+Private Property Let ThunkPrivateData(pThunk As IUnknown, Optional ByVal Index As Long, ByVal lValue As Long)
+    Dim lPtr            As Long
+    
+    lPtr = ObjPtr(pThunk)
+    If lPtr <> 0 Then
+        Call CopyMemory(ByVal (lPtr Xor SIGN_BIT) + 8 + Index * 4 Xor SIGN_BIT, lValue, 4)
+    End If
+End Property
 
 Private Function pvGetIdeOwner(hIdeOwner As Long) As Boolean
     #If Not ImplNoIdeProtection Then
