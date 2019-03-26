@@ -18,7 +18,7 @@ For sample clients to various network services (https, SMTP over SSL, etc.) open
 
 ### Usage
 
-Start by including `src\cAsyncSocket.cls` with companion `src\cAsyncSocketHelperWindow.cls` in your project to have a convenient wrapper to most WinSock API functions. Note that `cAsyncSocketHelperWindow` uses self-subclassing implementation that can be unstable to the `End` button/statement in VBIDE.
+Start by including `src\cAsyncSocket.cls` in your project to have a convenient wrapper to most WinSock API functions.
 
 Optionally you can add `contrib\cTlsClient.cls` to your project for SSL/TLS secured channels and/or `contrib\cWinSockRequest.cls` for familiar class methods when accessing TCP/UDP network services.
 
@@ -52,10 +52,10 @@ Produces debug output in `Immediate Window` similar to this:
 
 ### ToDo
 
-- Allow client to perform TLS server certificate check
-- Allow client to assign client certificate for connection
-- Provide UI for end-user to choose suitable certificates from Personal certificate store
-- Add wrappers for http and ftp protocols
-- Add WinSock control replacement
-- Add more samples (incl. `vbcurl.exe` utility)
-- Refactor subclassing thunk to use msg queue not to re-enter IDE in debug mode
+ [ ] Allow client to perform TLS server certificate check
+ [ ] Allow client to assign client certificate for connection
+ [ ] Provide UI for end-user to choose suitable certificates from Personal certificate store
+ [ ] Add wrappers for http and ftp protocols
+ [ ] Add WinSock control replacement
+ [ ] Add more samples (incl. `vbcurl.exe` utility)
+ [x] Refactor subclassing thunk to use msg queue not to re-enter IDE in debug mode
