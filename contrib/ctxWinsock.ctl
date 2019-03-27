@@ -168,7 +168,11 @@ End Sub
 '=========================================================================
 
 Property Get LocalPort() As Long
-    LocalPort = m_lLocalPort
+    If Not m_oSocket Is Nothing Then
+        m_oSocket.GetSockName vbNullString, LocalPort
+    Else
+        LocalPort = m_lLocalPort
+    End If
 End Property
 
 Property Let LocalPort(ByVal lValue As Long)
@@ -245,15 +249,15 @@ Private Property Let pvState(ByVal eValue As UcsStateConstants)
 End Property
 
 Property Get LocalHostName() As String
-    m_oSocket.GetLocalHost LocalHostName, vbNullString
+    pvSocket.GetLocalHost LocalHostName, vbNullString
 End Property
 
 Property Get LocalIP() As String
-    m_oSocket.GetLocalHost vbNullString, LocalIP
+    pvSocket.GetLocalHost vbNullString, LocalIP
 End Property
 
 Property Get RemoteHostIP() As String
-    m_oSocket.GetPeerName RemoteHostIP, 0
+    pvSocket.GetPeerName RemoteHostIP, 0
 End Property
 
 Private Property Get pvSocket() As cAsyncSocket
@@ -262,7 +266,7 @@ Private Property Get pvSocket() As cAsyncSocket
     On Error GoTo EH
     If m_oSocket Is Nothing Then
         Set m_oSocket = New cAsyncSocket
-        m_oSocket.Create m_lLocalPort, m_eProtocol
+        m_oSocket.Create SocketType:=m_eProtocol
     End If
     Set pvSocket = m_oSocket
     Exit Property
@@ -316,7 +320,10 @@ Public Sub Bind(Optional ByVal LocalPort As Long, Optional LocalIP As String)
     
     On Error GoTo EH
     Close_
-    If Not pvSocket.Bind(LocalIP, LocalPort) Then
+    If LocalPort <> 0 Then
+        m_lLocalPort = LocalPort
+    End If
+    If Not pvSocket.Bind(LocalIP, m_lLocalPort) Then
         On Error GoTo 0
         pvSetError pvSocket.LastError, RaiseError:=True
     End If
@@ -352,7 +359,6 @@ Public Sub Listen()
     Const FUNC_NAME     As String = "Listen"
     
     On Error GoTo EH
-    Close_
     If Not pvSocket.Listen() Then
         On Error GoTo 0
         pvSetError pvSocket.LastError, RaiseError:=True
