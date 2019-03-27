@@ -1,14 +1,22 @@
 VERSION 5.00
 Begin VB.Form Form1 
    Caption         =   "Form1"
-   ClientHeight    =   5544
+   ClientHeight    =   5904
    ClientLeft      =   108
    ClientTop       =   456
    ClientWidth     =   5436
    LinkTopic       =   "Form1"
-   ScaleHeight     =   5544
+   ScaleHeight     =   5904
    ScaleWidth      =   5436
    StartUpPosition =   3  'Windows Default
+   Begin VB.CommandButton Command11 
+      Caption         =   "cHttpDownload"
+      Height          =   432
+      Left            =   168
+      TabIndex        =   14
+      Top             =   5292
+      Width           =   2364
+   End
    Begin VB.CommandButton Command10 
       Caption         =   "Sync operations"
       Height          =   432
@@ -135,6 +143,8 @@ Private WithEvents m_oSocket As cAsyncSocket
 Attribute m_oSocket.VB_VarHelpID = -1
 Private WithEvents m_oRequest As cWinSockRequest
 Attribute m_oRequest.VB_VarHelpID = -1
+Private WithEvents m_oHttpDownload As cHttpDownload
+Attribute m_oHttpDownload.VB_VarHelpID = -1
 
 Private Sub Command1_Click()
     Dim sName As String
@@ -712,3 +722,26 @@ QH:
     Screen.MousePointer = vbDefault
 End Sub
 
+Private Sub Command11_Click()
+    Set m_oHttpDownload = New cHttpDownload
+    m_oHttpDownload.DownloadFile "http://dl.unicontsoft.com/upload/pix/ss_vbyoga_flex_container.gif", Environ$("TMP") & "\aaa.gif"
+'    m_oHttpDownload.DownloadFile "http://www.unicontsoft.com/forum", Environ$("TMP") & "\aaa.html"
+End Sub
+
+Private Sub m_oHttpDownload_DownloadProgress(ByVal BytesRead As Double, ByVal BytesTotal As Double)
+    Debug.Print Format$(TimerEx, "0.000"), BytesRead & " from " & BytesTotal
+    Caption = BytesRead & " from " & BytesTotal
+'    If BytesRead > 2000000 Then
+'        m_oHttpDownload.CancelDownload
+'    End If
+End Sub
+
+Private Sub m_oHttpDownload_DownloadComplete(ByVal LocalFileName As String)
+    Debug.Print Format$(TimerEx, "0.000"), "Download to " & LocalFileName & " complete"
+    MsgBox "Download to " & LocalFileName & " complete", vbExclamation
+End Sub
+
+Private Sub m_oHttpDownload_DownloadError(ByVal Number As Long, ByVal Description As String)
+    Debug.Print Format$(TimerEx, "0.000"), Hex$(Number) & ": " & Description
+    MsgBox Description, vbCritical, TypeName(m_oHttpDownload)
+End Sub
