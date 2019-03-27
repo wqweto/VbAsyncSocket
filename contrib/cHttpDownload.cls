@@ -253,6 +253,9 @@ Private Function pvRecvBody(baBuffer() As Byte, Optional ByVal Flush As Boolean)
     If UBound(baBuffer) >= 0 Then
         m_dblBytesRead = m_dblBytesRead + UBound(baBuffer) + 1
         RaiseEvent DownloadProgress(m_dblBytesRead, m_dblContentLength)
+        If m_lCallbackPtr <> 0 Then
+            Call CallbackWeakRef.DownloadProgress(Me, m_dblBytesRead, m_dblContentLength)
+        End If
         lIdx = UBound(m_baRecvBuffer) + 1
         ReDim Preserve m_baRecvBuffer(0 To lIdx + UBound(baBuffer)) As Byte
         Call CopyMemory(m_baRecvBuffer(lIdx), baBuffer(0), UBound(baBuffer) + 1)
@@ -287,6 +290,9 @@ Private Sub pvSetError(ByVal lNumber As Long, Optional sDescription As String)
     End If
     CancelDownload
     RaiseEvent DownloadError(lNumber, sDescription)
+    If m_lCallbackPtr <> 0 Then
+        Call CallbackWeakRef.DownloadError(Me, lNumber, sDescription)
+    End If
     Exit Sub
 EH:
     PrintError FUNC_NAME
@@ -392,6 +398,9 @@ Private Sub m_oSocket_OnClose()
         baBuffer = vbNullString
         pvRecvBody baBuffer, Flush:=True
         RaiseEvent DownloadComplete(m_sLocalFileName)
+        If m_lCallbackPtr <> 0 Then
+            Call CallbackWeakRef.DownloadComplete(Me, m_sLocalFileName)
+        End If
     End If
     CancelDownload
     Exit Sub
