@@ -142,6 +142,7 @@ Public Sub DownloadFile(URL As String, LocalFileName As Variant)
         m_sLocalFileName = LocalFileName
         hResult = SHCreateStreamOnFile(StrPtr(m_sLocalFileName), STGM_WRITE Or STGM_CREATE, m_pOutputStream)
         If hResult < 0 Then
+            On Error GoTo 0
             Err.Raise hResult
         End If
     End If
@@ -150,8 +151,14 @@ Public Sub DownloadFile(URL As String, LocalFileName As Variant)
     m_dblBytesRead = 0
     m_baRecvBuffer = vbNullString
     Set m_oSocket = New cAsyncSocket
-    m_oSocket.Create SocketType:=ucsSckStream
-    m_oSocket.Connect m_uRemote.Host, m_uRemote.Port
+    If Not m_oSocket.Create(SocketType:=ucsSckStream) Then
+        On Error GoTo 0
+        Err.Raise vbObjectError, , m_oSocket.GetErrorDescription(m_oSocket.LastError)
+    End If
+    If Not m_oSocket.Connect(m_uRemote.Host, m_uRemote.Port) Then
+        On Error GoTo 0
+        Err.Raise vbObjectError, , m_oSocket.GetErrorDescription(m_oSocket.LastError)
+    End If
     Exit Sub
 EH:
     PrintError FUNC_NAME
@@ -206,8 +213,14 @@ Private Function pvRecvHeaders(baBuffer() As Byte) As Boolean
             End If
             m_uRemote = uRedirect
             m_oSocket.Close_
-            m_oSocket.Create SocketType:=ucsSckStream
-            m_oSocket.Connect m_uRemote.Host, m_uRemote.Port
+            If Not m_oSocket.Create(SocketType:=ucsSckStream) Then
+                pvSetError m_oSocket.LastError
+                GoTo QH
+            End If
+            If Not m_oSocket.Connect(m_uRemote.Host, m_uRemote.Port) Then
+                pvSetError m_oSocket.LastError
+                GoTo QH
+            End If
         Case "200"
             m_dblContentLength = -1
             For Each vElem In vSplit
@@ -325,9 +338,11 @@ Private Sub m_oSocket_OnConnect()
     
     On Error GoTo EH
     m_eState = ucsWaitHeaders
-    m_oSocket.SendText "GET " & m_uRemote.Path & " HTTP/1.0" & vbCrLf & _
-        "Host: " & m_uRemote.Host & vbCrLf & _
-        "Accept: */*" & vbCrLf & vbCrLf, CodePage:=ucsScpAcp
+    If Not m_oSocket.SendText("GET " & m_uRemote.Path & " HTTP/1.0" & vbCrLf & _
+            "Host: " & m_uRemote.Host & vbCrLf & _
+            "Accept: */*" & vbCrLf & vbCrLf, CodePage:=ucsScpAcp) Then
+        pvSetError m_oSocket.LastError
+    End If
     Exit Sub
 EH:
     PrintError FUNC_NAME
@@ -338,8 +353,9 @@ Private Sub m_oSocket_OnReceive()
     Dim baBuffer()      As Byte
     
     On Error GoTo EH
-    Do While m_eState = ucsWaitHeaders
+    If m_eState = ucsWaitHeaders Then
         If Not m_oSocket.ReceiveArray(baBuffer) Then
+            pvSetError m_oSocket.LastError
             GoTo QH
         End If
         If UBound(baBuffer) < 0 Then
@@ -348,9 +364,10 @@ Private Sub m_oSocket_OnReceive()
         If Not pvRecvHeaders(baBuffer) Then
             GoTo QH
         End If
-    Loop
-    Do While m_eState = ucsWaitBody
+    End If
+    If m_eState = ucsWaitBody Then
         If Not m_oSocket.ReceiveArray(baBuffer) Then
+            pvSetError m_oSocket.LastError
             GoTo QH
         End If
         If UBound(baBuffer) < 0 Then
@@ -359,7 +376,7 @@ Private Sub m_oSocket_OnReceive()
         If Not pvRecvBody(baBuffer) Then
             GoTo QH
         End If
-    Loop
+    End If
 QH:
     Exit Sub
 EH:
