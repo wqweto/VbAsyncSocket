@@ -52,10 +52,10 @@ Produces debug output in `Immediate Window` similar to this:
 
 ### ToDo
 
- [ ] Allow client to perform TLS server certificate check
- [ ] Allow client to assign client certificate for connection
- [ ] Provide UI for end-user to choose suitable certificates from Personal certificate store
- [ ] Add wrappers for http and ftp protocols
- [ ] Add WinSock control replacement
- [ ] Add more samples (incl. `vbcurl.exe` utility)
- [x] Refactor subclassing thunk to use msg queue not to re-enter IDE in debug mode
+ - [ ] Allow client to perform TLS server certificate check
+ - [ ] Allow client to assign client certificate for connection
+ - [ ] Provide UI for end-user to choose suitable certificates from Personal certificate store
+ - [ ] Add wrappers for http and ftp protocols
+ - [x] Add WinSock control replacement
+ - [ ] Add more samples (incl. `vbcurl.exe` utility)
+ - [x] Refactor subclassing thunk to use msg queue not to re-enter IDE in debug mode
