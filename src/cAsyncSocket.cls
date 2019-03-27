@@ -314,9 +314,9 @@ End Property
 
 '= helper window =========================================================
 
-Friend Property Get hWnd() As Long
+Friend Property Get frMessageHWnd() As Long
     If Peek(ArrPtr(m_uWindowState)) <> 0 Then
-        hWnd = m_uWindowState(0).hWnd
+        frMessageHWnd = m_uWindowState(0).hWnd
     End If
 End Property
 
@@ -344,7 +344,7 @@ Public Function Create( _
         m_lLastError = WSAEALREADY
         GoTo QH
     End If
-    If m_oHelperWindow.hWnd = 0 Then
+    If m_oHelperWindow.frMessageHWnd = 0 Then
         m_lLastError = WSANOTINITIALISED
         GoTo QH
     End If
@@ -363,9 +363,11 @@ Public Function Create( _
         pvClose
         GoTo QH
     End If
-    If Not Bind(SocketAddress, SocketPort) Then
-        pvClose
-        GoTo QH
+    If SocketPort <> 0 Then
+        If Not Bind(SocketAddress, SocketPort) Then
+            pvClose
+            GoTo QH
+        End If
     End If
     '--- success
     m_lLastError = 0
@@ -515,7 +517,7 @@ Public Function AsyncSelect(Optional ByVal EventMask As UcsAsyncSocketEventMaskE
     Const FUNC_NAME     As String = "AsyncSelect"
     
     On Error GoTo EH
-    If WSAAsyncSelect(m_hSocket, m_oHelperWindow.hWnd, WM_SOCKET_NOTIFY + m_lIndex, EventMask) = SOCKET_ERROR Then
+    If WSAAsyncSelect(m_hSocket, m_oHelperWindow.frMessageHWnd, WM_SOCKET_NOTIFY + m_lIndex, EventMask) = SOCKET_ERROR Then
         m_lLastError = Err.LastDllError
         GoTo QH
     End If
@@ -578,7 +580,7 @@ Public Function Connect(HostAddress As String, ByVal HostPort As Long) As Boolea
         ReDim m_uGetHostByName(0 To 0) As UcsAsyncGetHostByNameType
         m_uGetHostByName(0).Port = HostPort
         '--- note: concat "" to prevent passing NULL for HostAddress
-        m_uGetHostByName(0).Handle = WSAAsyncGetHostByName(m_oHelperWindow.hWnd, WM_SOCKET_RESOLVE, HostAddress & "", m_uGetHostByName(0).Buffer(0), MAXGETHOSTSTRUCT)
+        m_uGetHostByName(0).Handle = WSAAsyncGetHostByName(m_oHelperWindow.frMessageHWnd, WM_SOCKET_RESOLVE, HostAddress & "", m_uGetHostByName(0).Buffer(0), MAXGETHOSTSTRUCT)
         If m_uGetHostByName(0).Handle = 0 Then
             m_lLastError = Err.LastDllError
             Erase m_uGetHostByName
@@ -848,7 +850,7 @@ Public Sub PostEvent(ByVal EventMask As UcsAsyncSocketEventMaskEnum)
     Const FUNC_NAME     As String = "PostEvent"
     
     On Error GoTo EH
-    Call PostMessage(m_oHelperWindow.hWnd, WM_SOCKET_NOTIFY + m_lIndex, m_hSocket, EventMask)
+    Call PostMessage(m_oHelperWindow.frMessageHWnd, WM_SOCKET_NOTIFY + m_lIndex, m_hSocket, EventMask)
     Exit Sub
 EH:
     PrintError FUNC_NAME
@@ -1062,7 +1064,7 @@ End Function
 Private Sub pvClose()
     '--- note: used in terminate -> no error handling
     If m_hSocket <> INVALID_SOCKET Then
-        Call WSAAsyncSelect(m_hSocket, m_oHelperWindow.hWnd, 0, 0)
+        Call WSAAsyncSelect(m_hSocket, m_oHelperWindow.frMessageHWnd, 0, 0)
         m_oHelperWindow.frRemoveSocket Me, m_lIndex
         m_hSocket = INVALID_SOCKET
         Set m_pCleanup = Nothing
@@ -1377,7 +1379,7 @@ Public Function SyncWaitForEvent( _
     End If
     bBlocking = m_bBlocking
     m_bBlocking = True
-    hWnd = m_oHelperWindow.hWnd
+    hWnd = m_oHelperWindow.frMessageHWnd
     If Timeout > 0 Then
         lTimerID = SetTimer(hWnd, 1, Timeout, 0)
     End If
@@ -1505,7 +1507,7 @@ Friend Function frAddSocket(Socket As cAsyncSocket, Index As Long) As Boolean
     Dim lIdx            As Long
     
     On Error GoTo EH
-    If hWnd = 0 Then
+    If frMessageHWnd = 0 Then
         GoTo QH
     End If
     With m_uWindowState(0)
@@ -1548,7 +1550,7 @@ Friend Function frRemoveSocket(Socket As cAsyncSocket, Index As Long) As Boolean
     Const FUNC_NAME     As String = "frRemoveSocket"
     
     On Error GoTo EH
-    If hWnd = 0 Then
+    If frMessageHWnd = 0 Then
         GoTo QH
     End If
     With m_uWindowState(0)
@@ -1573,7 +1575,7 @@ Private Function pvHandleNotify(ByVal hWnd As Long, ByVal wMsg As Long, ByVal wP
     Dim lIdx            As Long
     
     On Error GoTo EH
-    If hWnd = 0 Then
+    If frMessageHWnd = 0 Then
         GoTo QH
     End If
     With m_uWindowState(0)
@@ -1778,12 +1780,12 @@ Private Sub Class_Initialize()
 End Sub
 
 Private Sub Class_Terminate()
-    If hWnd = 0 Then
+    If frMessageHWnd = 0 Then
         pvClose
         Set m_oHelperWindow = Nothing
     Else
         '-- terminate helper window
-        Call SetWindowLong(hWnd, GWL_USERDATA, 0)
+        Call SetWindowLong(frMessageHWnd, GWL_USERDATA, 0)
         Call WSACleanup
         Erase m_uWindowState
     End If
