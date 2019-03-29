@@ -205,6 +205,8 @@ Private Declare Function ws_gethostname Lib "ws2_32" Alias "gethostname" (ByVal 
     Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleA" (ByVal lpModuleName As String) As Long
     Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
     Private Declare Function GetProcAddressByOrdinal Lib "kernel32" Alias "GetProcAddress" (ByVal hModule As Long, ByVal lpProcOrdinal As Long) As Long
+    Private Declare Function GetProp Lib "user32" Alias "GetPropA" (ByVal hWnd As Long, ByVal lpString As String) As Long
+    Private Declare Function SetProp Lib "user32" Alias "SetPropA" (ByVal hWnd As Long, ByVal lpString As String, ByVal hData As Long) As Long
     Private Declare Function GetWindowThreadProcessId Lib "user32" (ByVal hWnd As Long, lpdwProcessId As Long) As Long
     Private Declare Function GetCurrentProcessId Lib "kernel32" () As Long
 #End If
@@ -552,9 +554,7 @@ EH:
 End Function
 
 Public Sub Close_()
-    Const FUNC_NAME     As String = "Close_"
-    
-    On Error GoTo EH
+    '--- note: used in terminate -> no error handling
     If pvResolveHandle <> 0 Then
         Call WSACancelAsyncRequest(m_uGetHostByName(0).Handle)
         Erase m_uGetHostByName
@@ -563,9 +563,6 @@ Public Sub Close_()
         Call ws_shutdown(m_hSocket, 1)
         pvClose
     End If
-    Exit Sub
-EH:
-    PrintError FUNC_NAME
 End Sub
 
 Public Function Connect(HostAddress As String, ByVal HostPort As Long) As Boolean
@@ -1570,7 +1567,7 @@ EH:
     GoTo QH
 End Function
 
-Private Function pvHandleNotify(ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
+Private Function pvHandleNotify(ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long, Handled As Boolean) As Long
     Const FUNC_NAME     As String = "pvHandleNotify"
     Dim lIdx            As Long
     
@@ -1585,6 +1582,7 @@ Private Function pvHandleNotify(ByVal hWnd As Long, ByVal wMsg As Long, ByVal wP
                 If .SocketPtr(lIdx) <> 0 Then
                     If pvToSocket(.SocketPtr(lIdx)).frNotifyGetHostByName(wParam, lParam) Then
                         pvHandleNotify = 1
+                        Handled = True
                         GoTo QH
                     End If
                 End If
@@ -1595,17 +1593,16 @@ Private Function pvHandleNotify(ByVal hWnd As Long, ByVal wMsg As Long, ByVal wP
                 If .SocketPtr(lIdx) <> 0 Then
                     pvToSocket(.SocketPtr(lIdx)).frNotifyEvent wParam, lParam
                     pvHandleNotify = 1
+                    Handled = True
                 End If
             End If
-        Case Else
-            pvHandleNotify = DefSubclassProc(hWnd, wMsg, wParam, lParam)
         End Select
     End With
 QH:
     Exit Function
 EH:
     PrintError FUNC_NAME
-    GoTo QH
+    Resume QH
 End Function
 
 Private Function pvToSocket(ByVal lPtr As Long) As cAsyncSocket
@@ -1613,11 +1610,13 @@ Private Function pvToSocket(ByVal lPtr As Long) As cAsyncSocket
 End Function
 
 Private Property Get pvAddressOfSubclassProc() As cAsyncSocket
-    Set pvAddressOfSubclassProc = InitAddressOfMethod(Me, 4)
+    Set pvAddressOfSubclassProc = InitAddressOfMethod(Me, 5)
 End Property
 
-Public Function SubclassProc(ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
-    SubclassProc = pvHandleNotify(hWnd, wMsg, wParam, lParam)
+Public Function SubclassProc(ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long, Handled As Boolean) As Long
+    #If hWnd Then '--- touch args
+    #End If
+    SubclassProc = pvHandleNotify(wMsg, wParam, lParam, Handled)
 End Function
 
 '= shared ================================================================
@@ -1635,15 +1634,16 @@ Private Function InitAddressOfMethod(pObj As Object, ByVal MethodParamCount As L
     Debug.Assert lSize = THUNK_SIZE
 End Function
 
-Private Function InitSubclassingThunk(ByVal hWnd As Long, pObj As Object, ByVal pfnCallback As Long) As IUnknown
-    Const STR_THUNK     As String = "6AAAAABag+oFgepwEBEAV1aLdCQUg8YIgz4AdC+L+oHH3BERAIvCBQQREQCri8IFQBERAKuLwgVQEREAq4vCBXgREQCruQkAAADzpYHC3BERAFJqFP9SEFqL+IvCq7gBAAAAq4tEJAyri3QkFKWlg+8UagBX/3IM/3cI/1IYi0QkGIk4Xl+4EBIRAC1wEBEAwhAAkItEJAiDOAB1KoN4BAB1JIF4CMAAAAB1G4F4DAAAAEZ1EotUJAT/QgSLRCQMiRAzwMIMALgCQACAwgwAkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEdRiLClL/cQz/cgj/URyLVCQEiwpS/1EUM8DCBACQVYvsi1UYiwqLQSyFwHQnUv/QWoP4AXc3iwpS/1EwWoXAdSyLClJq8P9xJP9RKFqpAAAACHUZM8BQVP91FP91EP91DP91CP9yDP9SEFjrEYsK/3UU/3UQ/3UM/3UI/1EgXcIYAA==" ' 27.3.2019 9:13:15
-    Const THUNK_SIZE    As Long = 416
-    Static hThunk       As Long
+Public Function InitSubclassingThunk(ByVal hWnd As Long, pObj As Object, ByVal pfnCallback As Long) As IUnknown
+    Const STR_THUNK     As String = "6AAAAABag+oFgepwEDMAV1aLdCQUg8YIgz4AdC+L+oHH/BEzAIvCBQQRMwCri8IFQBEzAKuLwgVQETMAq4vCBXgRMwCruQkAAADzpYHC/BEzAFJqFP9SEFqL+IvCq7gBAAAAq4tEJAyri3QkFKWlg+8UagBX/3IM/3cI/1IYi0QkGIk4Xl+4MBIzAC1wEDMAwhAAkItEJAiDOAB1KoN4BAB1JIF4CMAAAAB1G4F4DAAAAEZ1EotUJAT/QgSLRCQMiRAzwMIMALgCQACAwgwAkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEdRiLClL/cQz/cgj/URyLVCQEiwpS/1EUM8DCBACQVYvsi1UYiwqLQSyFwHQ1Uv/QWoP4AXdUg/gAdQmBfQwDAgAAdEaLClL/UTBahcB1O4sKUmrw/3Ek/1EoWqkAAAAIdShSM8BQUI1EJARQjUQkBFD/dRT/dRD/dQz/dQj/cgz/UhBZWFqFyXURiwr/dRT/dRD/dQz/dQj/USBdwhgADx8A" ' 29.3.2019 13:04:54
+    Const THUNK_SIZE    As Long = 448
+    Dim hThunk          As Long
     Dim aParams(0 To 10) As Long
     Dim lSize           As Long
     
     aParams(0) = ObjPtr(pObj)
     aParams(1) = pfnCallback
+    hThunk = GetProp(pvGetGlobalHwnd(), "InitSubclassingThunk")
     If hThunk = 0 Then
         hThunk = VirtualAlloc(0, THUNK_SIZE, MEM_COMMIT, PAGE_EXECUTE_READWRITE)
         Call CryptStringToBinary(STR_THUNK, Len(STR_THUNK), CRYPT_STRING_BASE64, hThunk, THUNK_SIZE)
@@ -1660,6 +1660,7 @@ Private Function InitSubclassingThunk(ByVal hWnd As Long, pObj As Object, ByVal 
             aParams(9) = GetProcAddress(GetModuleHandle("vba6"), "EbMode")
             aParams(10) = GetProcAddress(GetModuleHandle("vba6"), "EbIsResetting")
         End If
+        Call SetProp(pvGetGlobalHwnd(), "InitSubclassingThunk", hThunk)
     End If
     lSize = CallWindowProc(hThunk, hWnd, 0, VarPtr(aParams(0)), VarPtr(InitSubclassingThunk))
     Debug.Assert lSize = THUNK_SIZE
@@ -1714,6 +1715,14 @@ Private Function pvGetIdeOwner(hIdeOwner As Long) As Boolean
         Loop While hIdeOwner <> 0 And lProcessId <> GetCurrentProcessId()
     #End If
     pvGetIdeOwner = True
+End Function
+
+Private Function pvGetGlobalHwnd() As Long
+    pvGetGlobalHwnd = FindWindowEx(0, 0, "STATIC", App.hInstance & ":" & App.ThreadID & ":MST Global Data")
+    If pvGetGlobalHwnd = 0 Then
+        pvGetGlobalHwnd = CreateWindowEx(0, "STATIC", App.hInstance & ":" & App.ThreadID & ":MST Global Data", _
+            0, 0, 0, 0, 0, 0, 0, App.hInstance, ByVal 0)
+    End If
 End Function
 
 Private Property Get TimerEx() As Double
@@ -1771,7 +1780,7 @@ Private Sub Class_Initialize()
             If WSAStartup(&H101, baWSAData(0)) = 0 Then
                 .hWnd = hWndHelper
                 Call SetWindowLong(hWndHelper, GWL_USERDATA, ObjPtr(Me))
-                Set .Subclass = InitSubclassingThunk(hWndHelper, Me, pvAddressOfSubclassProc.SubclassProc(0, 0, 0, 0))
+                Set .Subclass = InitSubclassingThunk(hWndHelper, Me, pvAddressOfSubclassProc.SubclassProc(0, 0, 0, 0, 0))
                 Set .Cleanup = InitCleanupThunk(hWndHelper, "user32", "DestroyWindow")
             End If
             ReDim .SocketPtr(0 To 511) As Long
@@ -1781,7 +1790,7 @@ End Sub
 
 Private Sub Class_Terminate()
     If frMessageHWnd = 0 Then
-        pvClose
+        Close_
         Set m_oHelperWindow = Nothing
     Else
         '-- terminate helper window
