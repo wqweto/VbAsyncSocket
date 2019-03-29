@@ -132,6 +132,7 @@ Private Const DUPLICATE_SAME_ACCESS         As Long = 2
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function DuplicateHandle Lib "kernel32" (ByVal hSourceProcessHandle As Long, ByVal hSourceHandle As Long, ByVal hTargetProcessHandle As Long, lpTargetHandle As Long, ByVal dwDesiredAccess As Long, ByVal bInheritHandle As Long, ByVal dwOptions As Long) As Long
 Private Declare Function GetCurrentProcess Lib "kernel32" () As Long
+Private Declare Function ws_closesocket Lib "ws2_32" Alias "closesocket" (ByVal s As Long) As Long
 
 '=========================================================================
 ' Constants and member variables
@@ -145,6 +146,7 @@ Private Const DEF_REMOTEPORT        As Long = 0
 Private Const DEF_TIMEOUT           As Long = 5000
 
 Private WithEvents m_oSocket    As cAsyncSocket
+Attribute m_oSocket.VB_VarHelpID = -1
 Private m_eState                As UcsStateConstants
 Private m_lLocalPort            As Long
 Private m_eProtocol             As UcsProtocolConstants
@@ -521,6 +523,7 @@ Private Sub m_oSocket_OnAccept()
         GoTo QH
     End If
     RaiseEvent ConnectionRequest(oTemp.SocketHandle)
+    Call ws_closesocket(oTemp.Detach())
     pvState = sckListening
 QH:
     Exit Sub
