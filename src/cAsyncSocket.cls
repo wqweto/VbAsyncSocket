@@ -112,7 +112,6 @@ Private Const SOCKET_ERROR                  As Long = -1
 Private Const INVALID_SOCKET                As Long = -1
 Private Const AF_INET                       As Long = 2
 Private Const ERR_TIMEOUT                   As Long = &H800705B4
-Private Const SIGN_BIT                      As Long = &H80000000
 '--- for ioctlsocket
 Private Const FIONREAD                      As Long = &H4004667F
 '--- for WSAGetLastError
@@ -143,10 +142,11 @@ Private Const PM_REMOVE                     As Long = 1
 '--- for FormatMessage
 Private Const FORMAT_MESSAGE_FROM_SYSTEM    As Long = &H1000
 Private Const FORMAT_MESSAGE_IGNORE_INSERTS As Long = &H200
-'--- for thunks
+'--- for Modern Subclassing Thunk (MST)
 Private Const MEM_COMMIT                    As Long = &H1000
 Private Const PAGE_EXECUTE_READWRITE        As Long = &H40
 Private Const CRYPT_STRING_BASE64           As Long = 1
+Private Const SIGN_BIT                      As Long = &H80000000
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
@@ -160,7 +160,6 @@ Private Declare Function MultiByteToWideChar Lib "kernel32" (ByVal CodePage As L
 Private Declare Function CreateWindowEx Lib "user32" Alias "CreateWindowExA" (ByVal dwExStyle As Long, ByVal lpClassName As String, ByVal lpWindowName As String, ByVal dwStyle As Long, ByVal X As Long, ByVal Y As Long, ByVal nWidth As Long, ByVal nHeight As Long, ByVal hWndParent As Long, ByVal hMenu As Long, ByVal hInstance As Long, lpParam As Any) As Long
 Private Declare Function SetWindowLong Lib "user32" Alias "SetWindowLongA" (ByVal hWnd As Long, ByVal nIndex As Long, ByVal dwNewLong As Long) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
-Private Declare Function DefSubclassProc Lib "comctl32" Alias "#413" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
 Private Declare Function WSAStartup Lib "ws2_32" (ByVal wVersionRequired As Long, lpWSAData As Any) As Long
 Private Declare Function WSACleanup Lib "ws2_32" () As Long
 Private Declare Function WSAAsyncGetHostByName Lib "ws2_32" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal strHostName As String, buf As Any, ByVal BufLen As Long) As Long
@@ -198,17 +197,21 @@ Private Declare Function ws_gethostname Lib "ws2_32" Alias "gethostname" (ByVal 
 #If Not ImplUseShared Then
     Private Declare Function QueryPerformanceCounter Lib "kernel32" (lpPerformanceCount As Currency) As Long
     Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
-    '--- for thunks
+    '--- for Modern Subclassing Thunk (MST)
     Private Declare Function VirtualAlloc Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As Long
     Private Declare Function CryptStringToBinary Lib "crypt32" Alias "CryptStringToBinaryA" (ByVal pszString As String, ByVal cchString As Long, ByVal dwFlags As Long, ByVal pbBinary As Long, pcbBinary As Long, Optional ByVal pdwSkip As Long, Optional ByVal pdwFlags As Long) As Long
     Private Declare Function CallWindowProc Lib "user32" Alias "CallWindowProcA" (ByVal lpPrevWndFunc As Long, ByVal hWnd As Long, ByVal Msg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
     Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleA" (ByVal lpModuleName As String) As Long
     Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
     Private Declare Function GetProcAddressByOrdinal Lib "kernel32" Alias "GetProcAddress" (ByVal hModule As Long, ByVal lpProcOrdinal As Long) As Long
-    Private Declare Function GetProp Lib "user32" Alias "GetPropA" (ByVal hWnd As Long, ByVal lpString As String) As Long
-    Private Declare Function SetProp Lib "user32" Alias "SetPropA" (ByVal hWnd As Long, ByVal lpString As String, ByVal hData As Long) As Long
-    Private Declare Function GetWindowThreadProcessId Lib "user32" (ByVal hWnd As Long, lpdwProcessId As Long) As Long
-    Private Declare Function GetCurrentProcessId Lib "kernel32" () As Long
+    Private Declare Function DefSubclassProc Lib "comctl32" Alias "#413" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
+    #If Not ImplNoIdeProtection Then
+        Private Declare Function GetWindowThreadProcessId Lib "user32" (ByVal hWnd As Long, lpdwProcessId As Long) As Long
+        Private Declare Function GetCurrentProcessId Lib "kernel32" () As Long
+    #End If
+    Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableA" (ByVal lpName As String, ByVal lpBuffer As String, ByVal nSize As Long) As Long
+    Private Declare Function SetEnvironmentVariable Lib "kernel32" Alias "SetEnvironmentVariableA" (ByVal lpName As String, ByVal lpValue As String) As Long
+    '--- end MST
 #End If
 
 Private Type SOCKADDR_IN
@@ -1622,6 +1625,32 @@ End Function
 '= shared ================================================================
 
 #If Not ImplUseShared Then
+Private Property Get TimerEx() As Double
+    Dim cFreq           As Currency
+    Dim cValue          As Currency
+    
+    Call QueryPerformanceFrequency(cFreq)
+    Call QueryPerformanceCounter(cValue)
+    TimerEx = cValue / cFreq
+End Property
+
+Private Function Znl(ByVal lValue As Long, Optional IfEmptyLong As Variant = Null, Optional ByVal EmptyLong As Long = 0) As Variant
+    Znl = IIf(lValue = EmptyLong, IfEmptyLong, lValue)
+End Function
+
+Private Function UnsignedAdd(ByVal lUnsignedPtr As Long, ByVal lSignedOffset As Long) As Long
+    '--- note: safely add *signed* offset to *unsigned* ptr for *unsigned* retval w/o overflow in LARGEADDRESSAWARE processes
+    UnsignedAdd = ((lUnsignedPtr Xor &H80000000) + lSignedOffset) Xor &H80000000
+End Function
+
+Private Function Peek(ByVal lPtr As Long) As Long
+    Call CopyMemory(Peek, ByVal lPtr, 4)
+End Function
+
+'=========================================================================
+' The Modern Subclassing Thunk (MST)
+'=========================================================================
+
 Private Function InitAddressOfMethod(pObj As Object, ByVal MethodParamCount As Long) As Object
     Const STR_THUNK     As String = "6AAAAABag+oFV4v6ge9QEMEAgcekEcEAuP9EJAS5+QcAAPOri8LB4AgFuQAAAKuLwsHoGAUAjYEAq7gIAAArq7hEJASLq7hJCIsEq7iBi1Qkq4tEJAzB4AIFCIkCM6uLRCQMweASBcDCCACriTrHQgQBAAAAi0QkCIsAiUIIi0QkEIlCDIHqUBDBAIvCBTwRwQCri8IFUBHBAKuLwgVgEcEAq4vCBYQRwQCri8IFjBHBAKuLwgWUEcEAq4vCBZwRwQCri8IFpBHBALn5BwAAq4PABOL6i8dfgcJQEMEAi0wkEIkRK8LCEAAPHwCLVCQE/0IEi0QkDIkQM8DCDABmkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEg/gAfgPCBABZWotCDGgAgAAAagBSUf/gZpC4AUAAgMIIALgBQACAwhAAuAFAAIDCGAC4AUAAgMIkAA==" ' 25.3.2019 14:01:08
     Const THUNK_SIZE    As Long = 16728
@@ -1634,16 +1663,18 @@ Private Function InitAddressOfMethod(pObj As Object, ByVal MethodParamCount As L
     Debug.Assert lSize = THUNK_SIZE
 End Function
 
-Public Function InitSubclassingThunk(ByVal hWnd As Long, pObj As Object, ByVal pfnCallback As Long) As IUnknown
-    Const STR_THUNK     As String = "6AAAAABag+oFgepwEDMAV1aLdCQUg8YIgz4AdC+L+oHH/BEzAIvCBQQRMwCri8IFQBEzAKuLwgVQETMAq4vCBXgRMwCruQkAAADzpYHC/BEzAFJqFP9SEFqL+IvCq7gBAAAAq4tEJAyri3QkFKWlg+8UagBX/3IM/3cI/1IYi0QkGIk4Xl+4MBIzAC1wEDMAwhAAkItEJAiDOAB1KoN4BAB1JIF4CMAAAAB1G4F4DAAAAEZ1EotUJAT/QgSLRCQMiRAzwMIMALgCQACAwgwAkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEdRiLClL/cQz/cgj/URyLVCQEiwpS/1EUM8DCBACQVYvsi1UYiwqLQSyFwHQ1Uv/QWoP4AXdUg/gAdQmBfQwDAgAAdEaLClL/UTBahcB1O4sKUmrw/3Ek/1EoWqkAAAAIdShSM8BQUI1EJARQjUQkBFD/dRT/dRD/dQz/dQj/cgz/UhBZWFqFyXURiwr/dRT/dRD/dQz/dQj/USBdwhgADx8A" ' 29.3.2019 13:04:54
-    Const THUNK_SIZE    As Long = 448
-    Dim hThunk          As Long
+Private Function InitSubclassingThunk(ByVal hWnd As Long, pObj As Object, ByVal pfnCallback As Long) As IUnknown
+    Const STR_THUNK     As String = "6AAAAABag+oFgepwEB4BV1aLdCQUg8YIgz4AdC+L+oHHABIeAYvCBQgRHgGri8IFRBEeAauLwgVUER4Bq4vCBXwRHgGruQkAAADzpYHCABIeAVJqGP9SEFqL+IvCq7gBAAAAqzPAq4tEJAyri3QkFKWlg+8YagBX/3IM/3cM/1IYi0QkGIk4Xl+4NBIeAS1wEB4BwhAAZpCLRCQIgzgAdSqDeAQAdSSBeAjAAAAAdRuBeAwAAABGdRKLVCQE/0IEi0QkDIkQM8DCDAC4AkAAgMIMAJCLVCQE/0IEi0IEwgQADx8Ai1QkBP9KBItCBHUYiwpS/3EM/3IM/1Eci1QkBIsKUv9RFDPAwgQAkFWL7ItVGIsKi0EshcB0OFL/0FqJQgiD+AF3VIP4AHUJgX0MAwIAAHRGiwpS/1EwWoXAdTuLClJq8P9xJP9RKFqpAAAACHUoUjPAUFCNRCQEUI1EJARQ/3UU/3UQ/3UM/3UI/3IQ/1IUWVhahcl1EYsK/3UU/3UQ/3UM/3UI/1EgXcIYAA==" ' 1.4.2019 11:41:46
+    Const THUNK_SIZE    As Long = 452
+    Static hThunk       As Long
     Dim aParams(0 To 10) As Long
     Dim lSize           As Long
     
     aParams(0) = ObjPtr(pObj)
     aParams(1) = pfnCallback
-    hThunk = GetProp(pvGetGlobalHwnd(), "InitSubclassingThunk")
+    If hThunk = 0 Then
+        hThunk = pvThunkGlobalData("InitSubclassingThunk")
+    End If
     If hThunk = 0 Then
         hThunk = VirtualAlloc(0, THUNK_SIZE, MEM_COMMIT, PAGE_EXECUTE_READWRITE)
         Call CryptStringToBinary(STR_THUNK, Len(STR_THUNK), CRYPT_STRING_BASE64, hThunk, THUNK_SIZE)
@@ -1660,13 +1691,13 @@ Public Function InitSubclassingThunk(ByVal hWnd As Long, pObj As Object, ByVal p
             aParams(9) = GetProcAddress(GetModuleHandle("vba6"), "EbMode")
             aParams(10) = GetProcAddress(GetModuleHandle("vba6"), "EbIsResetting")
         End If
-        Call SetProp(pvGetGlobalHwnd(), "InitSubclassingThunk", hThunk)
+        pvThunkGlobalData("InitSubclassingThunk") = hThunk
     End If
     lSize = CallWindowProc(hThunk, hWnd, 0, VarPtr(aParams(0)), VarPtr(InitSubclassingThunk))
     Debug.Assert lSize = THUNK_SIZE
 End Function
 
-Public Function InitCleanupThunk(ByVal hHandle As Long, sModuleName As String, sProcName As String) As IUnknown
+Private Function InitCleanupThunk(ByVal hHandle As Long, sModuleName As String, sProcName As String) As IUnknown
     Const STR_THUNK     As String = "6AAAAABag+oFgepQEDwBV1aLdCQUgz4AdCeL+oHHPBE8AYvCBcwQPAGri8IFCBE8AauLwgUYETwBq7kCAAAA86WBwjwRPAFSahD/Ugxai/iLwqu4AQAAAKuLRCQMq4tEJBCrg+8Qi0QkGIk4Xl+4UBE8AS1QEDwBwhAAkItEJAiDOAB1KoN4BAB1JIF4CMAAAAB1G4F4DAAAAEZ1EotUJAT/QgSLRCQMiRAzwMIMALgCQACAwgwAkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEdRL/cgj/UgyLVCQEiwpS/1EQM8DCBAAPHwA=" ' 25.3.2019 14:03:56
     Const THUNK_SIZE    As Long = 256
     Static hThunk       As Long
@@ -1675,10 +1706,14 @@ Public Function InitCleanupThunk(ByVal hHandle As Long, sModuleName As String, s
     Dim lSize           As Long
     
     If hThunk = 0 Then
+        hThunk = pvThunkGlobalData("InitCleanupThunk")
+    End If
+    If hThunk = 0 Then
         hThunk = VirtualAlloc(0, THUNK_SIZE, MEM_COMMIT, PAGE_EXECUTE_READWRITE)
         Call CryptStringToBinary(STR_THUNK, Len(STR_THUNK), CRYPT_STRING_BASE64, hThunk, THUNK_SIZE)
         aParams(0) = GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemAlloc")
         aParams(1) = GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemFree")
+        pvThunkGlobalData("InitCleanupThunk") = hThunk
     End If
     pfnCleanup = GetProcAddress(GetModuleHandle(sModuleName), sProcName)
     If pfnCleanup <> 0 Then
@@ -1717,35 +1752,17 @@ Private Function pvGetIdeOwner(hIdeOwner As Long) As Boolean
     pvGetIdeOwner = True
 End Function
 
-Private Function pvGetGlobalHwnd() As Long
-    pvGetGlobalHwnd = FindWindowEx(0, 0, "STATIC", App.hInstance & ":" & App.ThreadID & ":MST Global Data")
-    If pvGetGlobalHwnd = 0 Then
-        pvGetGlobalHwnd = CreateWindowEx(0, "STATIC", App.hInstance & ":" & App.ThreadID & ":MST Global Data", _
-            0, 0, 0, 0, 0, 0, 0, App.hInstance, ByVal 0)
-    End If
-End Function
-
-Private Property Get TimerEx() As Double
-    Dim cFreq           As Currency
-    Dim cValue          As Currency
+Private Property Get pvThunkGlobalData(sKey As String) As Long
+    Dim sBuffer     As String
     
-    Call QueryPerformanceFrequency(cFreq)
-    Call QueryPerformanceCounter(cValue)
-    TimerEx = cValue / cFreq
+    sBuffer = String$(50, 0)
+    Call GetEnvironmentVariable("_MST_GLOBAL" & App.hInstance & "_" & sKey, sBuffer, Len(sBuffer) - 1)
+    pvThunkGlobalData = Val(Left$(sBuffer, InStr(sBuffer, vbNullChar) - 1))
 End Property
 
-Private Function Znl(ByVal lValue As Long, Optional IfEmptyLong As Variant = Null, Optional ByVal EmptyLong As Long = 0) As Variant
-    Znl = IIf(lValue = EmptyLong, IfEmptyLong, lValue)
-End Function
-
-Private Function UnsignedAdd(ByVal lUnsignedPtr As Long, ByVal lSignedOffset As Long) As Long
-    '--- note: safely add *signed* offset to *unsigned* ptr for *unsigned* retval w/o overflow in LARGEADDRESSAWARE processes
-    UnsignedAdd = ((lUnsignedPtr Xor &H80000000) + lSignedOffset) Xor &H80000000
-End Function
-
-Private Function Peek(ByVal lPtr As Long) As Long
-    Call CopyMemory(Peek, ByVal lPtr, 4)
-End Function
+Private Property Let pvThunkGlobalData(sKey As String, ByVal lValue As Long)
+    Call SetEnvironmentVariable("_MST_GLOBAL" & App.hInstance & "_" & sKey, lValue)
+End Property
 #End If
 
 '=========================================================================
