@@ -472,15 +472,16 @@ Private Function pvTlsHandshake(sHostAddress As String, baExtra() As Byte) As Bo
             lResult = InitializeSecurityContext(m_hTlsCredentials, m_hTlsContext, ByVal sHostAddress, lContextReq, 0, _
                 SECURITY_NATIVE_DREP, uInDesc, 0, m_hTlsContext, uOutDesc, lContextAttr, 0)
         End If
-        If lContextReq <> lContextAttr Then
-            pvSetError vbObjectError, FUNC_NAME, Replace(Replace(STR_ERR_CONTEXT_MISMATCH, "%1", Hex(lContextReq)), "%2", Hex(lContextAttr))
-            GoTo QH
-        End If
         '--- note: these success codes are generally not returned in TLS/SSL case
         Select Case lResult
         Case SEC_I_COMPLETE_AND_CONTINUE, SEC_I_COMPLETE_NEEDED
             If CompleteAuthToken(m_hTlsContext, uOutDesc) < 0 Then
                 pvSetError Err.LastDllError, FUNC_NAME & vbCrLf & "CompleteAuthToken"
+                GoTo QH
+            End If
+        Case Is >= 0
+            If lContextReq <> lContextAttr Then
+                pvSetError vbObjectError, FUNC_NAME, Replace(Replace(STR_ERR_CONTEXT_MISMATCH, "%1", Hex(lContextReq)), "%2", Hex(lContextAttr))
                 GoTo QH
             End If
         End Select
