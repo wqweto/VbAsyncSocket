@@ -557,7 +557,9 @@ EH:
 End Function
 
 Public Sub Close_()
-    '--- note: used in terminate -> no error handling
+    Const FUNC_NAME     As String = "Close_"
+    
+    On Error GoTo EH
     If pvResolveHandle <> 0 Then
         Call WSACancelAsyncRequest(m_uGetHostByName(0).Handle)
         Erase m_uGetHostByName
@@ -566,6 +568,9 @@ Public Sub Close_()
         Call ws_shutdown(m_hSocket, 1)
         pvClose
     End If
+    Exit Sub
+EH:
+    PrintError FUNC_NAME
 End Sub
 
 Public Function Connect(HostAddress As String, ByVal HostPort As Long) As Boolean
@@ -1620,6 +1625,7 @@ Private Property Get pvAddressOfSubclassProc() As cAsyncSocket
 End Property
 
 Public Function SubclassProc(ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long, Handled As Boolean) As Long
+Attribute SubclassProc.VB_MemberFlags = "40"
     #If hWnd Then '--- touch args
     #End If
     SubclassProc = pvHandleNotify(wMsg, wParam, lParam, Handled)
@@ -1810,7 +1816,7 @@ End Sub
 
 Private Sub Class_Terminate()
     If frMessageHWnd = 0 Then
-        Close_
+        pvClose
         Set m_oHelperWindow = Nothing
     Else
         '-- terminate helper window
