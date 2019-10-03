@@ -1139,7 +1139,6 @@ EH:
     PrintError FUNC_NAME
 End Function
 
-
 Public Function SyncReceiveArray( _
             Buffer() As Byte, _
             Optional ByVal NeedLen As Long, _
@@ -1248,7 +1247,11 @@ Public Function SyncReceive( _
             If Not SyncWaitForEvent(Timeout, ucsSfdRead) Then
                 GoTo QH
             End If
-        ElseIf lResult > 0 Then
+        ElseIf lResult = 0 Then
+            If Not SyncWaitForEvent(Timeout, ucsSfdRead) Then
+                GoTo QH
+            End If
+        Else
             If uAddr.sin_family <> 0 Then
                 pvFromSockAddr uAddr, HostAddress, HostPort
             End If
