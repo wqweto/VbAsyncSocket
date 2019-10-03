@@ -1759,12 +1759,12 @@ Private Property Get pvThunkGlobalData(sKey As String) As Long
     Dim sBuffer     As String
     
     sBuffer = String$(50, 0)
-    Call GetEnvironmentVariable("_MST_GLOBAL" & App.hInstance & "_" & sKey, sBuffer, Len(sBuffer) - 1)
+    Call GetEnvironmentVariable("_MST_GLOBAL" & GetCurrentProcessId() & "_" & sKey, sBuffer, Len(sBuffer) - 1)
     pvThunkGlobalData = Val(Left$(sBuffer, InStr(sBuffer, vbNullChar) - 1))
 End Property
 
 Private Property Let pvThunkGlobalData(sKey As String, ByVal lValue As Long)
-    Call SetEnvironmentVariable("_MST_GLOBAL" & App.hInstance & "_" & sKey, lValue)
+    Call SetEnvironmentVariable("_MST_GLOBAL" & GetCurrentProcessId() & "_" & sKey, lValue)
 End Property
 #End If
 
@@ -1778,7 +1778,7 @@ Private Sub Class_Initialize()
     Dim lPtr            As Long
     Dim baWSAData()     As Byte
     
-    sHelperName = App.hInstance & ":" & App.ThreadID & ":" & STR_HELPER_NAME
+    sHelperName = GetCurrentProcessId() & ":" & App.ThreadID & ":" & STR_HELPER_NAME
     hWndHelper = FindWindowEx(HWND_MESSAGE, 0, STR_HELPER_CLASS, sHelperName)
     lPtr = GetWindowLong(hWndHelper, GWL_USERDATA)
     If hWndHelper = 0 Or lPtr <> 0 Then
