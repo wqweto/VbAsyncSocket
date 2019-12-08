@@ -30,21 +30,24 @@ Private Const MODULE_NAME As String = "cHttpDownload"
 '=========================================================================
 
 Event DownloadProgress(ByVal BytesRead As Double, ByVal BytesTotal As Double)
-Event DownloadError(ByVal Number As Long, ByVal Description As String)
 Event DownloadComplete(ByVal LocalFileName As String)
+Event UploadProgress(ByVal BytesWritten As Double, ByVal BytesTotal As Double)
+Event UploadComplete(ByVal LocalFileName As String)
+Event OperationError(ByVal Number As Long, ByVal Description As String)
 
 '=========================================================================
 ' API
 '=========================================================================
 
 '--- for SHCreateStreamOnFile
+Private Const STGM_READ                     As Long = 0
 Private Const STGM_WRITE                    As Long = 1
 Private Const STGM_CREATE                   As Long = &H1000
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
 Private Declare Function SHCreateStreamOnFile Lib "shlwapi" Alias "SHCreateStreamOnFileW" (ByVal pszFile As Long, ByVal grfMode As Long, ppstm As IUnknown) As Long
-Private Declare Function IStream_Write Lib "shlwapi" (ByVal pstm As IUnknown, pv As Any, ByVal cb As Long) As Long
+Private Declare Function DispCallFunc Lib "oleaut32" (ByVal pvInstance As Long, ByVal oVft As Long, ByVal lCc As Long, ByVal vtReturn As VbVarType, ByVal cActuals As Long, prgVt As Any, prgpVarg As Any, pvargResult As Variant) As Long
 
 '=========================================================================
 ' Constants and member variables
@@ -63,18 +66,22 @@ Private WithEvents m_oSocket    As cAsyncSocket
 Attribute m_oSocket.VB_VarHelpID = -1
 Private m_uRemote               As UcsParsedUrl
 Private m_sLocalFileName        As String
-Private m_pOutputStream         As IUnknown
+Private m_lStreamFlags          As Long
+Private m_pFileStream           As IUnknown
 Private m_dStartDate            As Date
 Private m_lCallbackPtr          As Long
 Private m_eState                As UcsStateEnum
-Private m_baRecvBuffer()        As Byte
-Private m_dblBytesRead          As Double
+Private m_baFileBuffer()        As Byte
+Private m_dblBytesProgress      As Double
 Private m_dblContentLength      As Double
+Private m_sBoundaryData         As String
 
 Private Enum UcsStateEnum
     ucsIdle
-    ucsWaitHeaders
-    ucsWaitBody
+    ucsWaitRecvHeaders
+    ucsWaitRecvBody
+    ucsWaitSendBody
+    ucsWaitBoundary
 End Enum
 
 Private Type UcsParsedUrl
@@ -123,7 +130,30 @@ End Property
 '=========================================================================
 
 Public Sub DownloadFile(URL As String, LocalFileName As Variant)
-    Const FUNC_NAME     As String = "DownloadFile"
+    pvInit URL, LocalFileName, STGM_WRITE Or STGM_CREATE
+End Sub
+
+Public Sub UploadFile(URL As String, LocalFileName As Variant)
+    pvInit URL, LocalFileName, STGM_READ
+End Sub
+
+Public Sub CancelOperation()
+    Const FUNC_NAME     As String = "CancelOperation"
+    
+    On Error GoTo EH
+    Set m_oSocket = Nothing
+    Set m_pFileStream = Nothing
+    m_lCallbackPtr = 0
+    m_eState = ucsIdle
+    Exit Sub
+EH:
+    PrintError FUNC_NAME
+End Sub
+
+'= private ===============================================================
+
+Private Sub pvInit(URL As String, LocalFileName As Variant, ByVal StreamFlags As Long)
+    Const FUNC_NAME     As String = "pvInit"
     Dim hResult     As Long
     
     On Error GoTo EH
@@ -137,10 +167,11 @@ Public Sub DownloadFile(URL As String, LocalFileName As Variant)
     End If
     If IsObject(LocalFileName) Then
         m_sLocalFileName = "[stream]"
-        Set m_pOutputStream = LocalFileName
+        Set m_pFileStream = LocalFileName
     Else
         m_sLocalFileName = LocalFileName
-        hResult = SHCreateStreamOnFile(StrPtr(m_sLocalFileName), STGM_WRITE Or STGM_CREATE, m_pOutputStream)
+        m_lStreamFlags = StreamFlags
+        hResult = SHCreateStreamOnFile(StrPtr(m_sLocalFileName), m_lStreamFlags, m_pFileStream)
         If hResult < 0 Then
             On Error GoTo 0
             Err.Raise hResult
@@ -148,8 +179,18 @@ Public Sub DownloadFile(URL As String, LocalFileName As Variant)
     End If
     m_dStartDate = Now
     m_eState = ucsIdle
-    m_dblBytesRead = 0
-    m_baRecvBuffer = vbNullString
+    m_dblBytesProgress = 0
+    If m_lStreamFlags = STGM_READ Then
+        If IsObject(LocalFileName) Then
+            m_dblContentLength = -1
+        Else
+            m_dblContentLength = FileLen(m_sLocalFileName)
+        End If
+        ReDim m_baFileBuffer(0 To LNG_FLUSH_LIMIT - 1) As Byte
+    Else
+        m_dblContentLength = 0
+        m_baFileBuffer = vbNullString
+    End If
     Set m_oSocket = New cAsyncSocket
     If Not m_oSocket.Create(SocketType:=ucsSckStream) Then
         On Error GoTo 0
@@ -164,21 +205,6 @@ EH:
     PrintError FUNC_NAME
 End Sub
 
-Public Sub CancelDownload()
-    Const FUNC_NAME     As String = "CancelDownload"
-    
-    On Error GoTo EH
-    Set m_oSocket = Nothing
-    Set m_pOutputStream = Nothing
-    m_lCallbackPtr = 0
-    m_eState = ucsIdle
-    Exit Sub
-EH:
-    PrintError FUNC_NAME
-End Sub
-
-'= private ===============================================================
-
 Private Function pvRecvHeaders(baBuffer() As Byte) As Boolean
     Const FUNC_NAME     As String = "pvRecvHeaders"
     Const STR_DELIM     As String = vbCrLf & vbCrLf
@@ -189,7 +215,7 @@ Private Function pvRecvHeaders(baBuffer() As Byte) As Boolean
     Dim uRedirect       As UcsParsedUrl
     
     On Error GoTo EH
-    sHeaders = m_oSocket.FromTextArray(m_baRecvBuffer, ucsScpAcp) & m_oSocket.FromTextArray(baBuffer, ucsScpAcp)
+    sHeaders = m_oSocket.FromTextArray(m_baFileBuffer, ucsScpAcp) & m_oSocket.FromTextArray(baBuffer, ucsScpAcp)
     lPos = InStr(sHeaders, STR_DELIM)
     If lPos > 0 Then
         vSplit = Split(Left$(sHeaders, lPos), vbCrLf)
@@ -228,7 +254,7 @@ Private Function pvRecvHeaders(baBuffer() As Byte) As Boolean
                     m_dblContentLength = Val(Mid$(vElem, Len(HDR_CONTENT_LENGTH) + 1))
                 End If
             Next
-            m_eState = ucsWaitBody
+            m_eState = ucsWaitRecvBody
             pvRecvBody m_oSocket.ToTextArray(Mid$(sHeaders, lPos + Len(STR_DELIM)), ucsScpAcp)
         Case Else
             pvSetError vbObjectError, Replace(ERR_INVALID_RESPONSE, "%1", Mid$(vSplit(0), 10))
@@ -251,18 +277,18 @@ Private Function pvRecvBody(baBuffer() As Byte, Optional ByVal Flush As Boolean)
     
     On Error GoTo EH
     If UBound(baBuffer) >= 0 Then
-        m_dblBytesRead = m_dblBytesRead + UBound(baBuffer) + 1
-        RaiseEvent DownloadProgress(m_dblBytesRead, m_dblContentLength)
+        m_dblBytesProgress = m_dblBytesProgress + UBound(baBuffer) + 1
+        RaiseEvent DownloadProgress(m_dblBytesProgress, m_dblContentLength)
         If m_lCallbackPtr <> 0 Then
-            Call CallbackWeakRef.DownloadProgress(Me, m_dblBytesRead, m_dblContentLength)
+            Call CallbackWeakRef.DownloadProgress(Me, m_dblBytesProgress, m_dblContentLength)
         End If
-        lIdx = UBound(m_baRecvBuffer) + 1
-        ReDim Preserve m_baRecvBuffer(0 To lIdx + UBound(baBuffer)) As Byte
-        Call CopyMemory(m_baRecvBuffer(lIdx), baBuffer(0), UBound(baBuffer) + 1)
+        lIdx = UBound(m_baFileBuffer) + 1
+        ReDim Preserve m_baFileBuffer(0 To lIdx + UBound(baBuffer)) As Byte
+        Call CopyMemory(m_baFileBuffer(lIdx), baBuffer(0), UBound(baBuffer) + 1)
     End If
-    If UBound(m_baRecvBuffer) >= LNG_FLUSH_LIMIT Or Flush Then
-        hResult = IStream_Write(m_pOutputStream, m_baRecvBuffer(0), UBound(m_baRecvBuffer) + 1)
-        m_baRecvBuffer = vbNullString
+    If UBound(m_baFileBuffer) >= LNG_FLUSH_LIMIT Or Flush Then
+        hResult = IStream_Write(m_pFileStream, m_baFileBuffer)
+        m_baFileBuffer = vbNullString
         If hResult < 0 Then
             pvSetError hResult
             GoTo QH
@@ -277,6 +303,47 @@ EH:
     Resume QH
 End Function
 
+Private Function pvSendBody() As Boolean
+    Const FUNC_NAME     As String = "pvSendBody"
+    Dim hResult         As Long
+    Dim lSize           As Long
+    
+    On Error GoTo EH
+    RaiseEvent UploadProgress(m_dblBytesProgress, m_dblContentLength)
+    If m_lCallbackPtr <> 0 Then
+        Call CallbackWeakRef.UploadProgress(Me, m_dblBytesProgress, m_dblContentLength)
+    End If
+    hResult = IStream_Read(m_pFileStream, m_baFileBuffer, lSize)
+    If hResult < 0 Then
+        pvSetError hResult
+        GoTo QH
+    End If
+    If lSize > 0 Then
+        If m_oSocket.Send(VarPtr(m_baFileBuffer(0)), lSize) < 0 Then
+            If Not m_oSocket.HasPendingEvent Then
+                pvSetError m_oSocket.LastError
+                GoTo QH
+            End If
+        End If
+        m_oSocket.PostEvent ucsSfdWrite
+        m_dblBytesProgress = m_dblBytesProgress + lSize
+    Else
+        m_eState = ucsWaitBoundary
+        If Not m_oSocket.SendText(m_sBoundaryData, CodePage:=ucsScpAcp) Then
+            If Not m_oSocket.HasPendingEvent Then
+                pvSetError m_oSocket.LastError
+                GoTo QH
+            End If
+        End If
+    End If
+    '--- success
+    pvSendBody = True
+QH:
+    Exit Function
+EH:
+    PrintError FUNC_NAME
+End Function
+
 Private Sub pvSetError(ByVal lNumber As Long, Optional sDescription As String)
     Const FUNC_NAME     As String = "pvSetError"
     
@@ -288,10 +355,10 @@ Private Sub pvSetError(ByVal lNumber As Long, Optional sDescription As String)
             sDescription = "Error " & lNumber
         End If
     End If
-    CancelDownload
-    RaiseEvent DownloadError(lNumber, sDescription)
+    CancelOperation
+    RaiseEvent OperationError(lNumber, sDescription)
     If m_lCallbackPtr <> 0 Then
-        Call CallbackWeakRef.DownloadError(Me, lNumber, sDescription)
+        Call CallbackWeakRef.OperationError(Me, lNumber, sDescription)
     End If
     Exit Sub
 EH:
@@ -335,19 +402,64 @@ Private Function pvParseUrl(sUrl As String, uParsed As UcsParsedUrl) As Boolean
     End With
 End Function
 
+Private Function IStream_Read(pstm As IUnknown, baBuffer() As Byte, Optional BytesRead As Long) As Long
+    IStream_Read = DispCallByVtbl(pstm, 3, VarPtr(baBuffer(0)), UBound(baBuffer) + 1, VarPtr(BytesRead))
+End Function
+
+Private Function IStream_Write(pstm As IUnknown, baBuffer() As Byte, Optional BytesWritten As Long) As Long
+    IStream_Write = DispCallByVtbl(pstm, 4, VarPtr(baBuffer(0)), UBound(baBuffer) + 1, VarPtr(BytesWritten))
+End Function
+
+Private Function DispCallByVtbl(pUnk As IUnknown, ByVal lIndex As Long, ParamArray A() As Variant) As Variant
+    Const CC_STDCALL    As Long = 4
+    Dim lIdx            As Long
+    Dim vParam()        As Variant
+    Dim vType(0 To 63)  As Integer
+    Dim vPtr(0 To 63)   As Long
+    Dim hResult         As Long
+    
+    vParam = A
+    For lIdx = 0 To UBound(vParam)
+        vType(lIdx) = VarType(vParam(lIdx))
+        vPtr(lIdx) = VarPtr(vParam(lIdx))
+    Next
+    hResult = DispCallFunc(ObjPtr(pUnk), lIndex * 4, CC_STDCALL, vbLong, lIdx, vType(0), vPtr(0), DispCallByVtbl)
+    If hResult < 0 Then
+        Err.Raise hResult, "DispCallFunc"
+    End If
+End Function
+
 '=========================================================================
 ' Socket events
 '=========================================================================
 
 Private Sub m_oSocket_OnConnect()
     Const FUNC_NAME     As String = "m_oSocket_OnConnect"
+    Const STR_BOUNDARY  As String = "3fbd04f5-b1ed-4060-99b9-fca7ff59c113"
+    Dim sPostData       As String
     
     On Error GoTo EH
-    m_eState = ucsWaitHeaders
-    If Not m_oSocket.SendText("GET " & m_uRemote.Path & " HTTP/1.0" & vbCrLf & _
-            "Host: " & m_uRemote.Host & vbCrLf & _
-            "Accept: */*" & vbCrLf & vbCrLf, CodePage:=ucsScpAcp) Then
-        pvSetError m_oSocket.LastError
+    If m_lStreamFlags <> STGM_READ Then
+        m_eState = ucsWaitRecvHeaders
+        If Not m_oSocket.SendText("GET " & m_uRemote.Path & " HTTP/1.0" & vbCrLf & _
+                "Host: " & m_uRemote.Host & vbCrLf & _
+                "Accept: */*" & vbCrLf & vbCrLf, CodePage:=ucsScpAcp) Then
+            pvSetError m_oSocket.LastError
+        End If
+    Else
+        m_eState = ucsWaitSendBody
+        sPostData = "--" & STR_BOUNDARY & vbCrLf & _
+            "Content-Disposition: form-data; name=""uploadfile""; filename=""" & Mid$(m_sLocalFileName, InStrRev(m_sLocalFileName, "\") + 1) & """" & vbCrLf & _
+            "Content-Type: application/octet-stream" & vbCrLf & vbCrLf
+        m_sBoundaryData = vbCrLf & "--" & STR_BOUNDARY & "--"
+        If Not m_oSocket.SendText("POST " & m_uRemote.Path & " HTTP/1.0" & vbCrLf & _
+                "Host: " & m_uRemote.Host & vbCrLf & _
+                "Content-Length: " & Len(sPostData) + m_dblContentLength + Len(m_sBoundaryData) & vbCrLf & _
+                "Content-Type: multipart/form-data; boundary=" & STR_BOUNDARY & vbCrLf & _
+                "Accept: */*" & vbCrLf & vbCrLf & _
+                sPostData, CodePage:=ucsScpAcp) Then
+            pvSetError m_oSocket.LastError
+        End If
     End If
     Exit Sub
 EH:
@@ -359,7 +471,7 @@ Private Sub m_oSocket_OnReceive()
     Dim baBuffer()      As Byte
     
     On Error GoTo EH
-    If m_eState = ucsWaitHeaders Then
+    If m_eState = ucsWaitRecvHeaders Then
         If Not m_oSocket.ReceiveArray(baBuffer) Then
             pvSetError m_oSocket.LastError
             GoTo QH
@@ -371,7 +483,7 @@ Private Sub m_oSocket_OnReceive()
             GoTo QH
         End If
     End If
-    If m_eState = ucsWaitBody Then
+    If m_eState = ucsWaitRecvBody Then
         If Not m_oSocket.ReceiveArray(baBuffer) Then
             pvSetError m_oSocket.LastError
             GoTo QH
@@ -389,12 +501,30 @@ EH:
     PrintError FUNC_NAME
 End Sub
 
+Private Sub m_oSocket_OnSend()
+    Const FUNC_NAME     As String = "m_oSocket_OnSend"
+    
+    On Error GoTo EH
+    If m_eState = ucsWaitBoundary Then
+        m_oSocket_OnClose
+    End If
+    If m_eState = ucsWaitSendBody Then
+        If Not pvSendBody() Then
+            GoTo QH
+        End If
+    End If
+QH:
+    Exit Sub
+EH:
+    PrintError FUNC_NAME
+End Sub
+
 Private Sub m_oSocket_OnClose()
     Const FUNC_NAME     As String = "m_oSocket_OnClose"
     Dim baBuffer()      As Byte
     
     On Error GoTo EH
-    If m_eState = ucsWaitBody Then
+    If m_eState = ucsWaitRecvBody Then
         baBuffer = vbNullString
         pvRecvBody baBuffer, Flush:=True
         RaiseEvent DownloadComplete(m_sLocalFileName)
@@ -402,7 +532,13 @@ Private Sub m_oSocket_OnClose()
             Call CallbackWeakRef.DownloadComplete(Me, m_sLocalFileName)
         End If
     End If
-    CancelDownload
+    If m_eState = ucsWaitBoundary Then
+        RaiseEvent UploadComplete(m_sLocalFileName)
+        If m_lCallbackPtr <> 0 Then
+            Call CallbackWeakRef.UploadComplete(Me, m_sLocalFileName)
+        End If
+    End If
+    CancelOperation
     Exit Sub
 EH:
     PrintError FUNC_NAME
