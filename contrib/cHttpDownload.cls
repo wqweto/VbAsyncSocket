@@ -56,7 +56,7 @@ Private Declare Function DispCallFunc Lib "oleaut32" (ByVal pvInstance As Long, 
 
 Private Const HDR_CONTENT_LENGTH    As String = "content-length:"
 Private Const HDR_LOCATION          As String = "location:"
-Private Const LNG_FLUSH_LIMIT       As Long = 1024& * 1024
+Private Const DEF_BUFFER_SIZE       As Long = 256& * 1024
 '--- errors
 Private Const ERR_INVALID_URL       As String = "Invalid URL"
 Private Const ERR_HTTP_ONLY         As String = "Http protocol supported only"
@@ -76,6 +76,7 @@ Private m_baFileBuffer()        As Byte
 Private m_dblBytesProgress      As Double
 Private m_dblContentLength      As Double
 Private m_sBoundaryData         As String
+Private m_lBufferSize           As Long
 
 Private Enum UcsStateEnum
     ucsIdle
@@ -128,6 +129,16 @@ End Property
 
 Property Get Socket() As cAsyncSocket
     Set Socket = m_oSocket
+End Property
+
+Property Get BufferSize() As Long
+    BufferSize = m_lBufferSize
+End Property
+
+Property Let BufferSize(ByVal lValue As Long)
+    If lValue > 0 Then
+        m_lBufferSize = lValue
+    End If
 End Property
 
 '=========================================================================
@@ -291,7 +302,7 @@ Private Function pvRecvBody(baBuffer() As Byte, Optional ByVal Flush As Boolean)
         ReDim Preserve m_baFileBuffer(0 To lIdx + UBound(baBuffer)) As Byte
         Call CopyMemory(m_baFileBuffer(lIdx), baBuffer(0), UBound(baBuffer) + 1)
     End If
-    If UBound(m_baFileBuffer) >= LNG_FLUSH_LIMIT Or Flush Then
+    If UBound(m_baFileBuffer) >= m_lBufferSize Or Flush Then
         hResult = IStream_Write(m_pFileStream, m_baFileBuffer)
         m_baFileBuffer = vbNullString
         If hResult < 0 Then
@@ -315,7 +326,7 @@ Private Function pvSendBody() As Boolean
     
     On Error GoTo EH
     If UBound(m_baFileBuffer) < 0 And Not m_pFileStream Is Nothing Then
-        ReDim m_baFileBuffer(0 To LNG_FLUSH_LIMIT - 1) As Byte
+        ReDim m_baFileBuffer(0 To m_lBufferSize - 1) As Byte
         hResult = IStream_Read(m_pFileStream, m_baFileBuffer, lSize)
         If hResult < 0 Then
             pvSetError hResult
@@ -330,7 +341,9 @@ Private Function pvSendBody() As Boolean
                 pvSetError m_oSocket.LastError
                 GoTo QH
             End If
-            ReDim Preserve m_baFileBuffer(0 To lSize - 1) As Byte
+            If lSize < UBound(m_baFileBuffer) + 1 Then
+                ReDim Preserve m_baFileBuffer(0 To lSize - 1) As Byte
+            End If
         Else
             m_baFileBuffer = vbNullString
             RaiseEvent UploadProgress(m_dblBytesProgress, m_dblContentLength)
@@ -338,8 +351,8 @@ Private Function pvSendBody() As Boolean
                 Call CallbackWeakRef.UploadProgress(Me, m_dblBytesProgress, m_dblContentLength)
             End If
             m_dblBytesProgress = m_dblBytesProgress + lSize
+            m_oSocket.PostEvent ucsSfdWrite
         End If
-        m_oSocket.PostEvent ucsSfdWrite
     Else
         Set m_pFileStream = Nothing
         m_baFileBuffer = vbNullString
@@ -354,6 +367,7 @@ Private Function pvSendBody() As Boolean
             If m_lCallbackPtr <> 0 Then
                 Call CallbackWeakRef.UploadProgress(Me, m_dblBytesProgress, m_dblContentLength)
             End If
+            m_oSocket.PostEvent ucsSfdWrite
         End If
     End If
     '--- success
@@ -526,7 +540,7 @@ Private Sub m_oSocket_OnSend()
     
     On Error GoTo EH
     If m_eState = ucsWaitBoundary Then
-        m_oSocket_OnClose
+        m_oSocket.Close_
     End If
     If m_eState = ucsWaitSendBody Then
         If Not pvSendBody() Then
@@ -572,4 +586,12 @@ Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsy
     Exit Sub
 EH:
     PrintError FUNC_NAME
+End Sub
+
+'=========================================================================
+' Base class events
+'=========================================================================
+
+Private Sub Class_Initialize()
+    m_lBufferSize = DEF_BUFFER_SIZE
 End Sub
