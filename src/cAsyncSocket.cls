@@ -41,6 +41,7 @@ Event OnReceive()
 Event OnSend()
 Event OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
 Event OnMessagePending(Handled As Boolean)
+Event BeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Cancel As Boolean)
 
 '=========================================================================
 ' Public enums
@@ -249,6 +250,7 @@ Private m_pCleanup              As IUnknown
 Private m_oHelperWindow         As cAsyncSocket
 Private m_lIndex                As Long
 Private m_lLastError            As Long
+Private m_lLastSendBytes        As Long
 Private m_uGetHostByName()      As UcsAsyncGetHostByNameType
 Private m_uWindowState()        As UcsHelperWindowStateType
 #If ImplSync Then
@@ -305,6 +307,10 @@ Property Get AvailableBytes() As Long
     If Not IOCtl(FIONREAD, AvailableBytes) Then
         AvailableBytes = SOCKET_ERROR
     End If
+End Property
+
+Property Get LastSendBytes() As Long
+    LastSendBytes = m_lLastSendBytes
 End Property
 
 Property Get HasPendingEvent() As Boolean
@@ -797,6 +803,7 @@ Public Function Send( _
             GoTo QH
         End If
     End If
+    m_lLastSendBytes = BufLen
     If uAddr.sin_family <> 0 Then
         Send = ws_sendto(m_hSocket, ByVal BufPtr, BufLen, Flags, uAddr, LenB(uAddr))
     Else
@@ -849,11 +856,15 @@ EH:
     PrintError FUNC_NAME
 End Function
 
-Public Sub PostEvent(ByVal EventMask As UcsAsyncSocketEventMaskEnum)
+Public Sub PostEvent(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Optional ByVal Immediate As Boolean)
     Const FUNC_NAME     As String = "PostEvent"
     
     On Error GoTo EH
-    Call PostMessage(m_oHelperWindow.frMessageHWnd, WM_SOCKET_NOTIFY + m_lIndex, m_hSocket, EventMask)
+    If Immediate Then
+        pvDoNotify m_hSocket, EventMask
+    Else
+        Call PostMessage(m_oHelperWindow.frMessageHWnd, WM_SOCKET_NOTIFY + m_lIndex, m_hSocket, EventMask)
+    End If
     Exit Sub
 EH:
     PrintError FUNC_NAME
@@ -931,88 +942,85 @@ End Function
 
 Private Sub pvDoNotify(ByVal wParam As Long, ByVal lParam As Long)
     Dim eEvent          As UcsAsyncSocketEventMaskEnum
-    Dim lErrorCode      As Long
+    Dim bCancel         As Boolean
     Dim lBytes          As Long
 
-    If m_hSocket = wParam Then
-        eEvent = lParam And &HFFFF&
-        lErrorCode = lParam \ &H10000
-        If lErrorCode <> 0 Then
-            m_lLastError = lErrorCode
-            RaiseEvent OnError(lErrorCode, eEvent)
-        Else
-            Select Case eEvent
-            Case ucsSfdRead
-                If Not IOCtl(FIONREAD, lBytes) Then
-                    RaiseEvent OnError(m_lLastError, eEvent)
-                    If m_hSocket = INVALID_SOCKET Then
-                        GoTo QH
-                    End If
-                End If
-                If lBytes <> 0 Then
-                    m_lLastError = 0
-                    RaiseEvent OnReceive
-                End If
-            Case [_ucsSfdForceRead]
-                m_lLastError = 0
-                RaiseEvent OnReceive
-            Case ucsSfdWrite
-                m_lLastError = 0
-                RaiseEvent OnSend
-            Case ucsSfdConnect
-                m_lLastError = 0
-                RaiseEvent OnConnect
-            Case ucsSfdAccept
-                m_lLastError = 0
-                RaiseEvent OnAccept
-            Case ucsSfdClose
-                m_lLastError = 0
-                RaiseEvent OnClose
-            End Select
-        End If
+    If m_hSocket <> wParam Then
+        GoTo QH
     End If
+    eEvent = lParam And &HFFFF&
+    m_lLastError = lParam \ &H10000
+    If m_lLastError <> 0 Then
+        RaiseEvent OnError(m_lLastError, eEvent)
+        GoTo QH
+    End If
+    RaiseEvent BeforeNotify(eEvent, bCancel)
+    If bCancel Then
+        GoTo QH
+    End If
+    Select Case eEvent
+    Case ucsSfdRead
+        If Not IOCtl(FIONREAD, lBytes) Then
+            RaiseEvent OnError(m_lLastError, eEvent)
+            If m_hSocket = INVALID_SOCKET Then
+                GoTo QH
+            End If
+        End If
+        If lBytes <> 0 Then
+            RaiseEvent OnReceive
+        End If
+    Case [_ucsSfdForceRead]
+        RaiseEvent OnReceive
+    Case ucsSfdWrite
+        RaiseEvent OnSend
+    Case ucsSfdConnect
+        RaiseEvent OnConnect
+    Case ucsSfdAccept
+        RaiseEvent OnAccept
+    Case ucsSfdClose
+        RaiseEvent OnClose
+    End Select
 QH:
 End Sub
 
 Private Sub pvDoResolve(ByVal wParam As Long, ByVal lParam As Long)
-    Dim lErrorCode      As Long
     Dim uAddr           As SOCKADDR_IN
     Dim lPtr            As Long
     
-    If pvResolveHandle = wParam Then
-        lErrorCode = lParam \ &H10000
-        If lErrorCode <> 0 Then
-            Erase m_uGetHostByName
-            m_lLastError = lErrorCode
-            RaiseEvent OnError(lErrorCode, [_ucsSfdResolve])
+    If pvResolveHandle <> wParam Then
+        GoTo QH
+    End If
+    m_lLastError = lParam \ &H10000
+    If m_lLastError <> 0 Then
+        Erase m_uGetHostByName
+        RaiseEvent OnError(m_lLastError, [_ucsSfdResolve])
+        GoTo QH
+    End If
+    uAddr.sin_family = AF_INET
+    uAddr.sin_port = ws_htons(m_uGetHostByName(0).Port)
+    '--- set sin_addr to first IP address resolved
+    Call CopyMemory(lPtr, m_uGetHostByName(0).Buffer(12), 4)
+    Call CopyMemory(lPtr, ByVal lPtr, 4)
+    Call CopyMemory(uAddr.sin_addr, ByVal lPtr, 4)
+    Erase m_uGetHostByName
+    m_lLastError = 0
+    RaiseEvent OnResolve(pvToString(ws_inet_ntoa(uAddr.sin_addr)))
+    If m_hSocket = INVALID_SOCKET Then
+        m_lLastError = WSAEINTR
+        GoTo QH
+    End If
+    If SockOpt(ucsSsoType) = ucsSckStream Then
+        '--- note uAddr is prepared above, before m_uGetHostByName being erased
+        If ws_connect(m_hSocket, uAddr, LenB(uAddr)) = SOCKET_ERROR Then
+            m_lLastError = Err.LastDllError
+            If m_lLastError <> WSAEWOULDBLOCK Then
+                RaiseEvent OnError(m_lLastError, ucsSfdConnect)
+            End If
         Else
-            uAddr.sin_family = AF_INET
-            uAddr.sin_port = ws_htons(m_uGetHostByName(0).Port)
-            '--- set sin_addr to first IP address resolved
-            Call CopyMemory(lPtr, m_uGetHostByName(0).Buffer(12), 4)
-            Call CopyMemory(lPtr, ByVal lPtr, 4)
-            Call CopyMemory(uAddr.sin_addr, ByVal lPtr, 4)
-            Erase m_uGetHostByName
-            m_lLastError = 0
-            RaiseEvent OnResolve(pvToString(ws_inet_ntoa(uAddr.sin_addr)))
-            If m_hSocket = INVALID_SOCKET Then
-                m_lLastError = WSAEINTR
-                GoTo QH
-            End If
-            If SockOpt(ucsSsoType) = ucsSckStream Then
-                '--- note uAddr is prepared above, before m_uGetHostByName being erased
-                If ws_connect(m_hSocket, uAddr, LenB(uAddr)) = SOCKET_ERROR Then
-                    m_lLastError = Err.LastDllError
-                    If m_lLastError <> WSAEWOULDBLOCK Then
-                        RaiseEvent OnError(m_lLastError, ucsSfdConnect)
-                    End If
-                Else
-                    PostEvent ucsSfdConnect
-                End If
-            Else
-                PostEvent ucsSfdConnect
-            End If
+            PostEvent ucsSfdConnect
         End If
+    Else
+        PostEvent ucsSfdConnect
     End If
 QH:
 End Sub
