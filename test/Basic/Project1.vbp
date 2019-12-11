@@ -6,6 +6,7 @@ Module=Module1; Module1.bas
 Class=cWinSockRequest; ..\..\contrib\cWinSockRequest.cls
 Class=cTlsClient; ..\..\contrib\cTlsClient.cls
 Class=cHttpDownload; ..\..\contrib\cHttpDownload.cls
+Class=cRateLimiter; ..\..\contrib\cRateLimiter.cls
 IconForm="Form1"
 Startup="Form1"
 HelpFile=""

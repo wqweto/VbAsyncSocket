@@ -1,20 +1,37 @@
 VERSION 5.00
 Begin VB.Form Form1 
    Caption         =   "Form1"
-   ClientHeight    =   5904
+   ClientHeight    =   6336
    ClientLeft      =   108
    ClientTop       =   456
    ClientWidth     =   5448
    LinkTopic       =   "Form1"
-   ScaleHeight     =   5904
+   ScaleHeight     =   6336
    ScaleWidth      =   5448
    StartUpPosition =   3  'Windows Default
+   Begin VB.TextBox txtBandwidth 
+      Height          =   288
+      Left            =   4452
+      TabIndex        =   17
+      Text            =   "1024"
+      Top             =   5376
+      Width           =   852
+   End
+   Begin VB.CheckBox chkRateLimit 
+      Caption         =   "Rate limit (KB/s):"
+      Height          =   264
+      Left            =   2688
+      TabIndex        =   16
+      Top             =   5376
+      Value           =   1  'Checked
+      Width           =   1608
+   End
    Begin VB.CommandButton Command12 
       Caption         =   "HttpUpload"
       Height          =   432
-      Left            =   2688
+      Left            =   168
       TabIndex        =   15
-      Top             =   5292
+      Top             =   5796
       Width           =   2364
    End
    Begin VB.CommandButton Command11 
@@ -153,6 +170,8 @@ Private WithEvents m_oRequest As cWinSockRequest
 Attribute m_oRequest.VB_VarHelpID = -1
 Private WithEvents m_oHttpDownload As cHttpDownload
 Attribute m_oHttpDownload.VB_VarHelpID = -1
+Private m_oRateLimiter As cRateLimiter
+Private m_dblStartTimerEx As Double
 
 Private Sub Command1_Click()
     Dim sName As String
@@ -737,8 +756,18 @@ Private Sub Command11_Click()
 '    m_oHttpDownload.DownloadFile "http://www.unicontsoft.com/forum", Environ$("TMP") & "\aaa.html"
 End Sub
 
+Private Sub m_oHttpDownload_OperationStart()
+    m_dblStartTimerEx = TimerEx
+    If chkRateLimit.Value = vbChecked And Val(txtBandwidth.Text) > 0 Then
+        Set m_oRateLimiter = New cRateLimiter
+        m_oRateLimiter.Init m_oHttpDownload.Socket, Val(txtBandwidth.Text) * 1024
+    Else
+        Set m_oRateLimiter = Nothing
+    End If
+End Sub
+
 Private Sub m_oHttpDownload_DownloadProgress(ByVal BytesRead As Double, ByVal BytesTotal As Double)
-    Debug.Print Format$(TimerEx, "0.000"), "Downloaded " & BytesRead & " from " & BytesTotal
+    Debug.Print Format$(TimerEx, "0.000"), "Downloaded " & BytesRead & " from " & BytesTotal & " @ " & Format$(BytesRead / (TimerEx - m_dblStartTimerEx) / 1024, "0.0") & "KB/s"
     Caption = "Downloaded " & BytesRead & " from " & BytesTotal
 '    If BytesRead > 2000000 Then
 '        m_oHttpDownload.CancelDownload
@@ -761,7 +790,7 @@ Private Sub Command12_Click()
 End Sub
 
 Private Sub m_oHttpDownload_UploadProgress(ByVal BytesWritten As Double, ByVal BytesTotal As Double)
-    Debug.Print Format$(TimerEx, "0.000"), "Uploaded " & BytesWritten & " of " & BytesTotal
+    Debug.Print Format$(TimerEx, "0.000"), "Uploaded " & BytesWritten & " of " & BytesTotal & " @ " & Format$(BytesWritten / (TimerEx - m_dblStartTimerEx) / 1024, "0.0") & "KB/s"
     Caption = "Uploaded " & BytesWritten & " of " & BytesTotal
 End Sub
 
