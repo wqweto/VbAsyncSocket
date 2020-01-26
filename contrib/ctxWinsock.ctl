@@ -37,7 +37,7 @@ Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
 '
-' VbAsyncSocket Project (c) 2018-2019 by wqweto@gmail.com
+' VbAsyncSocket Project (c) 2018-2020 by wqweto@gmail.com
 '
 ' Simple and thin WinSock API wrappers for VB6
 '
@@ -50,7 +50,7 @@ DefObj A-Z
 Private Const MODULE_NAME As String = "ctxWinsock"
 
 '=========================================================================
-' Public events
+' Events
 '=========================================================================
 
 Event Connect()
@@ -156,6 +156,7 @@ Private m_lTimeout              As Long
 Private m_baRecvBuffer()        As Byte
 Private m_baSendBuffer()        As Byte
 Private m_lSendPos              As Long
+Private m_oRequestSocket        As cAsyncSocket
 
 '=========================================================================
 ' Error handling
@@ -266,11 +267,15 @@ Private Property Get pvSocket() As cAsyncSocket
     Const FUNC_NAME     As String = "pvSocket [get]"
     
     On Error GoTo EH
-    If m_oSocket Is Nothing Then
-        Set m_oSocket = New cAsyncSocket
-        m_oSocket.Create SocketType:=m_eProtocol
+    If Not m_oRequestSocket Is Nothing Then
+        Set pvSocket = m_oRequestSocket
+    Else
+        If m_oSocket Is Nothing Then
+            Set m_oSocket = New cAsyncSocket
+            m_oSocket.Create SocketType:=m_eProtocol
+        End If
+        Set pvSocket = m_oSocket
     End If
-    Set pvSocket = m_oSocket
     Exit Property
 EH:
     PrintError FUNC_NAME
@@ -522,7 +527,9 @@ Private Sub m_oSocket_OnAccept()
         pvSetError m_oSocket.LastError
         GoTo QH
     End If
+    Set m_oRequestSocket = oTemp
     RaiseEvent ConnectionRequest(oTemp.SocketHandle)
+    Set m_oRequestSocket = Nothing
     Call ws_closesocket(oTemp.Detach())
     pvState = sckListening
 QH:

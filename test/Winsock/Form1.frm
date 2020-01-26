@@ -91,7 +91,7 @@ Private Sub Command2_Click()
 End Sub
 
 Private Sub ctxServer_ConnectionRequest(Index As Integer, ByVal requestID As Long)
-    Debug.Print "ctxServer_ConnectionRequest, requestID=" & requestID, Timer
+    Debug.Print "ctxServer_ConnectionRequest, requestID=" & requestID & ", RemoteHostIP=" & ctxServer(Index).RemoteHostIP, Timer
     Load ctxServer(ctxServer.UBound + 1)
     ctxServer(ctxServer.UBound).Accept requestID
 End Sub
