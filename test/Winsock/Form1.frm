@@ -91,7 +91,7 @@ Private Sub Command2_Click()
 End Sub
 
 Private Sub ctxServer_ConnectionRequest(Index As Integer, ByVal requestID As Long)
-    Debug.Print "ctxServer_ConnectionRequest, requestID=" & requestID & ", RemoteHostIP=" & ctxServer(Index).RemoteHostIP, Timer
+    Debug.Print "ctxServer_ConnectionRequest, requestID=" & requestID & ", RemoteHostIP=" & ctxServer(Index).RemoteHostIP & ", RemotePort=" & ctxServer(Index).RemotePort, Timer
     Load ctxServer(ctxServer.UBound + 1)
     ctxServer(ctxServer.UBound).Accept requestID
 End Sub
@@ -107,7 +107,10 @@ Private Sub ctxServer_DataArrival(Index As Integer, ByVal bytesTotal As Long)
     If UBound(vSplit) >= 0 Then
         Debug.Print vSplit(0)
         sBody = "<html><body><p>" & Join(vSplit, "</p>" & vbCrLf & "<p>" & Index & ": ") & "</p>" & vbCrLf & _
-            "<p>" & Index & ": Current time is " & Now & "</p></body></html>" & vbCrLf
+            "<p>" & Index & ": Current time is " & Now & "</p>" & _
+            "<p>" & Index & ": RemoteHostIP is " & ctxServer(Index).RemoteHostIP & "</p>" & vbCrLf & _
+            "<p>" & Index & ": RemotePort is " & ctxServer(Index).RemotePort & "</p>" & vbCrLf & _
+            "</body></html>" & vbCrLf
         ctxServer(Index).SendData "HTTP/1.1 200 OK" & vbCrLf & _
             "Content-Type: text/html" & vbCrLf & _
             "Content-Length: " & Len(sBody) & vbCrLf & vbCrLf & _

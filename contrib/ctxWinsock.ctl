@@ -213,7 +213,11 @@ Property Let RemoteHost(sValue As String)
 End Property
 
 Property Get RemotePort() As Long
-    RemotePort = m_lRemotePort
+    If Not m_oSocket Is Nothing Then
+        m_oSocket.GetPeerName vbNullString, RemotePort
+    Else
+        RemotePort = m_lRemotePort
+    End If
 End Property
 
 Property Let RemotePort(ByVal lValue As Long)
