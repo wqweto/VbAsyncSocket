@@ -886,25 +886,6 @@ Private Function pvPatchTrampoline(ByVal Pfn As Long) As Boolean
     pvPatchTrampoline = True
 End Function
 
-Private Function pvPatchMethodTrampoline(ByVal Pfn As Long, ByVal lMethodIdx As Long) As Boolean
-    Dim bInIDE          As Boolean
-
-    Debug.Assert pvSetTrue(bInIDE)
-    If bInIDE Then
-        '--- note: IDE is not large-address aware
-        Call CopyMemory(Pfn, ByVal Pfn + &H16, 4)
-    Else
-        Call VirtualProtect(Pfn, 12, PAGE_EXECUTE_READWRITE, 0)
-    End If
-    ' 0: 8B 44 24 04          mov         eax,dword ptr [esp+4]
-    ' 4: 8B 00                mov         eax,dword ptr [eax]
-    ' 6: FF A0 00 00 00 00    jmp         dword ptr [eax+lMethodIdx*4]
-    Call CopyMemory(ByVal Pfn, -684575231150992.4725@, 8)
-    Call CopyMemory(ByVal (Pfn Xor &H80000000) + 8 Xor &H80000000, lMethodIdx * 4, 4)
-    '--- success
-    pvPatchMethodTrampoline = True
-End Function
-
 Private Function pvSetTrue(bValue As Boolean) As Boolean
     bValue = True
     pvSetTrue = True
@@ -974,6 +955,25 @@ Private Function pvCallCollectionRemove(ByVal oCol As Collection, Index As Varia
     
     pvPatchMethodTrampoline AddressOf mdTlsCrypto.pvCallCollectionRemove, IDX_COLLECTION_REMOVE
     pvCallCollectionRemove = pvCallCollectionRemove(oCol, Index)
+End Function
+
+Private Function pvPatchMethodTrampoline(ByVal Pfn As Long, ByVal lMethodIdx As Long) As Boolean
+    Dim bInIDE          As Boolean
+
+    Debug.Assert pvSetTrue(bInIDE)
+    If bInIDE Then
+        '--- note: IDE is not large-address aware
+        Call CopyMemory(Pfn, ByVal Pfn + &H16, 4)
+    Else
+        Call VirtualProtect(Pfn, 12, PAGE_EXECUTE_READWRITE, 0)
+    End If
+    ' 0: 8B 44 24 04          mov         eax,dword ptr [esp+4]
+    ' 4: 8B 00                mov         eax,dword ptr [eax]
+    ' 6: FF A0 00 00 00 00    jmp         dword ptr [eax+lMethodIdx*4]
+    Call CopyMemory(ByVal Pfn, -684575231150992.4725@, 8)
+    Call CopyMemory(ByVal (Pfn Xor &H80000000) + 8 Xor &H80000000, lMethodIdx * 4, 4)
+    '--- success
+    pvPatchMethodTrampoline = True
 End Function
 #End If
 
