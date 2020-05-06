@@ -90,7 +90,7 @@ Private Declare Function GetAsyncKeyState Lib "user32" (ByVal vKey As Long) As I
 ' Constants and member variables
 '=========================================================================
 
-Private m_oSocket               As cTlsSocket
+Private WithEvents m_oSocket    As cTlsSocket
 Private m_sServerName           As String
 Private WithEvents m_oServerSocket As cTlsSocket
 Attribute m_oServerSocket.VB_VarHelpID = -1
@@ -140,7 +140,7 @@ Private Sub Form_Load()
     If txtResult.Font.Name = "Arial" Then
         txtResult.Font.Name = "Courier New"
     End If
-    For Each vElem In Split("cert-test.sandbox.google.com|tls13.1d.pw|localhost:44330|tls.ctf.network|www.mikestoolbox.org|swifttls.org|tls13.pinterjann.is|rsa8192.badssl.com|rsa4096.badssl.com|rsa2048.badssl.com|ecc384.badssl.com|ecc256.badssl.com|dir.bg|host.bg|bgdev.org|cnn.com|gmail.com|google.com", "|")
+    For Each vElem In Split("cert-test.sandbox.google.com|tls13.1d.pw|localhost:44330|tls.ctf.network|www.mikestoolbox.org|swifttls.org|tls13.pinterjann.is|rsa8192.badssl.com|rsa4096.badssl.com|rsa2048.badssl.com|ecc384.badssl.com|ecc256.badssl.com|dir.bg|host.bg|bgdev.org|cnn.com|gmail.com|google.com|saas.bg|saas.bg:465", "|")
         cobUrl.AddItem vElem
     Next
     sAddr = GetSetting(App.Title, "Form1", "Url", cobUrl.Text)
@@ -207,7 +207,7 @@ Private Sub Command1_Click()
     If LenB(sResult) <> 0 Then
         If Not bKeepDebug Then
             txtResult.Text = vbNullString
-            pvAppendLogText txtResult, "Elapsed " & Format$(Timer - dblTimer, "0.000") & " sec" & vbCrLf
+            pvAppendLogText txtResult, "Received " & Len(sResult) & " bytes in " & Format$(Timer - dblTimer, "0.000") & " sec" & vbCrLf
         End If
         pvAppendLogText txtResult, sResult
         txtResult.SelStart = 0
@@ -231,11 +231,9 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
     Const HDR_CONNECTION As String = "connection:"
     Dim baRecv()        As Byte
     Dim sRequest        As String
-    Dim lSize           As Long
-    Dim dblTimer        As Double
     Dim bResult         As Boolean
     Dim vHeaders        As Variant
-    Dim lHeaderlength   As Long
+    Dim lHeaderLength   As Long
     Dim lContentLength  As Long
     Dim sEncoding       As String
     Dim sConnection     As String
@@ -249,56 +247,45 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
     pvAppendLogText txtResult, "Connecting to " & uRemote.Host & vbCrLf
     If m_sServerName <> uRemote.Host & ":" & uRemote.Port Or m_oSocket Is Nothing Then
         Set m_oSocket = New cTlsSocket
-        If Not m_oSocket.Connect(uRemote.Host, uRemote.Port) Then
+        If Not m_oSocket.SyncConnect(uRemote.Host, uRemote.Port) Then
             sError = m_oSocket.LastError
             GoTo QH
         End If
         m_sServerName = uRemote.Host & ":" & uRemote.Port
-        If Not m_oSocket.SyncWaitForEvent(2000, ucsSfdConnect) Then
-            sError = m_oSocket.LastError
-            GoTo QH
-        End If
+'        If Not m_oSocket.SyncWaitForEvent(2000, ucsSfdConnect) Then
+'            sError = m_oSocket.LastError
+'            GoTo QH
+'        End If
     End If
     '--- send TLS application data and wait for reply
     sRequest = "GET " & uRemote.Path & uRemote.QueryString & " HTTP/1.1" & vbCrLf & _
                "Connection: keep-alive" & vbCrLf & _
                "Host: " & uRemote.Host & vbCrLf & vbCrLf
-    If Not m_oSocket.SendArray(StrConv(sRequest, vbFromUnicode)) Then
+    If Not m_oSocket.SyncSendArray(StrConv(sRequest, vbFromUnicode)) Then
         sError = m_oSocket.LastError
         GoTo QH
     End If
-    lSize = 0
-    dblTimer = Timer
+    lContentLength = -1
     Do
-        If m_oSocket.IsClosed Then
-            Set m_oSocket = Nothing
-            Exit Do
-        End If
-        bResult = m_oSocket.ReceiveArray(baRecv)
+        bResult = m_oSocket.SyncReceiveArray(baRecv, Timeout:=15000)
         If UBound(baRecv) < 0 Then
             If m_oSocket.IsClosed Then
                 Set m_oSocket = Nothing
                 Exit Do
             End If
-            bResult = m_oSocket.SyncWaitForEvent(2000, ucsSfdRead)
             If Not bResult Then
-                If m_oSocket.IsClosed Then
-                    Set m_oSocket = Nothing
-                    Exit Do
-                End If
                 sError = m_oSocket.LastError
                 GoTo QH
             End If
-            bResult = m_oSocket.ReceiveArray(baRecv)
-        End If
-        If UBound(baRecv) >= 0 Then
-            HttpsRequest = HttpsRequest & Replace(Replace(StrConv(baRecv, vbUnicode), vbCr, vbNullString), vbLf, vbCrLf)
+        Else
+            HttpsRequest = HttpsRequest & StrConv(baRecv, vbUnicode)
+'            Debug.Print "Len(HttpsRequest)=" & Len(HttpsRequest), Timer
         End If
         If IsEmpty(vHeaders) Then
-            lHeaderlength = InStr(1, HttpsRequest, vbCrLf & vbCrLf)
-            If lHeaderlength > 0 Then
-                vHeaders = Split(Left$(HttpsRequest, lHeaderlength), vbCrLf)
-                lHeaderlength = lHeaderlength + 4
+            lHeaderLength = InStr(1, HttpsRequest, vbCrLf & vbCrLf) - 1
+            If lHeaderLength > 0 Then
+                vHeaders = Split(Left$(HttpsRequest, lHeaderLength), vbCrLf)
+                lHeaderLength = lHeaderLength + 4
                 For Each vElem In vHeaders
                     If Left$(LCase(vElem), Len(HDR_CONTENT_LENGTH)) = HDR_CONTENT_LENGTH Then
                         lContentLength = Val(Mid$(vElem, Len(HDR_CONTENT_LENGTH) + 1))
@@ -310,8 +297,11 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
                 Next
             End If
         End If
-        If lContentLength > 0 Then
-            If Len(HttpsRequest) >= lHeaderlength + lContentLength Then
+        If lContentLength >= 0 Then
+            If Len(HttpsRequest) >= lHeaderLength + lContentLength Then
+                If Len(HttpsRequest) <> lHeaderLength + lContentLength Then
+                    Debug.Print "Warning: Received " & Len(HttpsRequest) & " instead of " & lHeaderLength + lContentLength
+                End If
                 Exit Do
             End If
         ElseIf sEncoding = "chunked" Then
@@ -329,7 +319,7 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
         Set m_oSocket = Nothing
     End If
 QH:
-'    HttpsRequest = vbNullString
+    HttpsRequest = Replace(Replace(HttpsRequest, vbCr, vbNullString), vbLf, vbCrLf)
     If LenB(sError) <> 0 Then
         Set m_oSocket = Nothing
     End If
@@ -419,3 +409,27 @@ Private Function pvSetVisible(oCtl As Object, ByVal bValue As Boolean) As Boolea
     oCtl.Visible = bValue
     pvSetVisible = True
 End Function
+
+Private Sub m_oSocket_OnResolve(IpAddress As String)
+    Debug.Print "m_oSocket_OnResolve, IpAddress=" & IpAddress, Timer
+End Sub
+
+Private Sub m_oSocket_OnConnect()
+    Debug.Print "m_oSocket_OnConnect", Timer
+End Sub
+
+Private Sub m_oSocket_OnReceive()
+    Debug.Print "m_oSocket_OnReceive", Timer
+End Sub
+
+Private Sub m_oSocket_OnSend()
+    Debug.Print "m_oSocket_OnSend", Timer
+End Sub
+
+Private Sub m_oSocket_OnClose()
+    Debug.Print "m_oSocket_OnClose", Timer
+End Sub
+
+Private Sub m_oSocket_OnError()
+    Debug.Print "m_oSocket_OnError, m_oSocket.LastError=" & m_oSocket.LastError, Timer
+End Sub

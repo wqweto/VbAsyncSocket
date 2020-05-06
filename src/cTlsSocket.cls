@@ -147,6 +147,7 @@ Private Const NCRYPTBUFFER_PKCS_SECRET                  As Long = 46
 '--- export policy flags
 Private Const NCRYPT_ALLOW_EXPORT_FLAG                  As Long = &H1
 Private Const NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG        As Long = &H2
+Private Const ERR_TIMEOUT                               As Long = &H800705B4
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
@@ -502,19 +503,20 @@ Private Const ERR_INVALID_REMOTE_KEY                    As String = "Invalid rem
 Private Const ERR_INVALID_SIZE_REMOTE_KEY               As String = "Invalid data size for remote key"
 Private Const ERR_INVALID_SIZE_VERSIONS                 As String = "Invalid data size for supported versions"
 Private Const ERR_INVALID_SIGNATURE                     As String = "Invalid certificate signature"
+Private Const ERR_INVALID_HASH_SIZE                     As String = "Invalid hash size (%1)"
 Private Const ERR_COOKIE_NOT_ALLOWED                    As String = "Cookie not allowed outside HelloRetryRequest"
 Private Const ERR_NO_HANDSHAKE_MESSAGES                 As String = "Missing handshake messages"
 Private Const ERR_NO_PREVIOUS_SECRET                    As String = "Missing previous secret (%1)"
 Private Const ERR_NO_REMOTE_RANDOM                      As String = "Missing remote random"
 Private Const ERR_NO_SERVER_CERTIFICATE                 As String = "Missing server certificate"
 Private Const ERR_NO_SUPPORTED_CIPHER_SUITE             As String = "Missing supported ciphersuite"
-Private Const ERR_INVALID_HASH_SIZE                     As String = "Invalid hash size (%1)"
 Private Const ERR_TRUST_IS_REVOKED                      As String = "Trust for this certificate or one of the certificates in the certificate chain has been revoked"
 Private Const ERR_TRUST_IS_PARTIAL_CHAIN                As String = "The certificate chain is not complete"
 Private Const ERR_TRUST_IS_UNTRUSTED_ROOT               As String = "The certificate or certificate chain is based on an untrusted root"
 Private Const ERR_TRUST_IS_NOT_TIME_VALID               As String = "The certificate has expired"
 Private Const ERR_TRUST_REVOCATION_STATUS_UNKNOWN       As String = "The revocation status of the certificate or one of the certificates in the certificate chain is unknown"
 Private Const ERR_NO_MATCHING_ALT_NAME                  As String = "No certificate subject name matches target host name"
+Private Const DEF_TIMEOUT                               As Long = 5000
 
 Private WithEvents m_oSocket    As cAsyncSocket
 Attribute m_oSocket.VB_VarHelpID = -1
@@ -525,12 +527,13 @@ Private m_uCtx                  As UcsTlsContext
 Private m_hRootStore            As Long
 '--- I/O buffers
 Private m_baRecv()              As Byte
-Private m_lRecvPos              As Long
+Private m_lRecvSize             As Long
 Private m_baSend()              As Byte
 Private m_lSendPos              As Long
+Private m_lSendSize             As Long
 
 Private Enum UcsTlsStatesEnum
-    [_ucsTlsStateEmpty]
+    ucsTlsStateNew
     ucsTlsStateClosed
     ucsTlsStateHandshakeStart
     ucsTlsStateExpectServerHello
@@ -710,49 +713,28 @@ End Property
 ' Methods
 '=========================================================================
 
-Public Function StartTls(Optional RemoteHostName As String, Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum = ucsTlsSupportAll) As Boolean
-    Const FUNC_NAME     As String = "StartTls"
-    Dim baOutput()      As Byte
-    Dim lSize           As Long
-    Dim bResult         As Boolean
-    Dim baEmpty()       As Byte
+Public Function Create(Optional ByVal SocketPort As Long, Optional SocketAddress As String) As Boolean
+    Create = m_oSocket.Create(SocketPort:=SocketPort, SocketAddress:=SocketAddress)
+End Function
+
+Public Function Listen(Optional ByVal ConnectionBacklog As Long = 5) As Boolean
+    Const FUNC_NAME     As String = "Listen"
     
     On Error GoTo EH
-    If Not pvTlsInitClient(m_uCtx, RemoteHostName, LocalFeatures) Then
-        GoTo QH
+    If m_uCtx.LocalCertificates Is Nothing Then
+        If Not PkiGenerSelfSignedCertificate() Then
+            GoTo QH
+        End If
     End If
-    bResult = pvTlsHandshake(m_uCtx, baEmpty, 0, baOutput, lSize)
-    If Not m_oSocket.SendArray(baOutput) Then
-        GoTo QH
-    End If
-    If Not bResult Then
+    If Not m_oSocket.Listen(ConnectionBacklog) Then
         GoTo QH
     End If
     '--- success
-    StartTls = True
+    Listen = True
 QH:
     Exit Function
 EH:
     PrintError FUNC_NAME
-    Resume QH
-End Function
-
-Friend Function frStartServerTls( _
-            Optional Certificates As Collection, _
-            Optional PrivateKey As Variant) As Boolean
-    m_bUseTls = True
-    m_oSocket.GetPeerName m_sRemoteHostName, 0
-    m_eLocalFeatures = ucsTlsSupportTls13
-    If Not pvTlsInitServer(m_uCtx, m_sRemoteHostName, Certificates, PrivateKey) Then
-        GoTo QH
-    End If
-    '--- success
-    frStartServerTls = True
-QH:
-End Function
-
-Public Function Create(Optional ByVal SocketPort As Long, Optional SocketAddress As String) As Boolean
-    Create = m_oSocket.Create(SocketPort:=SocketPort, SocketAddress:=SocketAddress)
 End Function
 
 Public Function Accept(ConnectedSocket As cTlsSocket, Optional ByVal UseTls As Boolean = True) As Boolean
@@ -780,16 +762,30 @@ EH:
     Resume QH
 End Function
 
+Friend Function frStartServerTls( _
+            Optional Certificates As Collection, _
+            Optional PrivateKey As Variant) As Boolean
+    m_bUseTls = True
+    m_oSocket.GetPeerName m_sRemoteHostName, 0
+    m_eLocalFeatures = ucsTlsSupportTls13
+    If Not pvTlsInitServer(m_uCtx, m_sRemoteHostName, Certificates, PrivateKey) Then
+        GoTo QH
+    End If
+    '--- success
+    frStartServerTls = True
+QH:
+End Function
+
 Public Function Connect(HostAddress As String, ByVal HostPort As Long, Optional ByVal UseTls As Boolean = True) As Boolean
     Const FUNC_NAME     As String = "Connect"
     
     On Error GoTo EH
-    If Not m_oSocket.Connect(HostAddress, HostPort) Then
-        GoTo QH
-    End If
     m_bUseTls = UseTls
     m_sRemoteHostName = HostAddress
     m_eLocalFeatures = ucsTlsSupportAll
+    If Not m_oSocket.Connect(HostAddress, HostPort) Then
+        GoTo QH
+    End If
     '-- success
     Connect = True
 QH:
@@ -799,24 +795,38 @@ EH:
     Resume QH
 End Function
 
-Public Function Listen(Optional ByVal ConnectionBacklog As Long = 5) As Boolean
-    Const FUNC_NAME     As String = "Listen"
+Public Function StartTls(Optional RemoteHostName As String, Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum = ucsTlsSupportAll) As Boolean
+    Const FUNC_NAME     As String = "StartTls"
+    Dim baOutput()      As Byte
+    Dim lSize           As Long
+    Dim bResult         As Boolean
+    Dim baEmpty()       As Byte
     
     On Error GoTo EH
-    If m_uCtx.LocalCertificates Is Nothing Then
-        If Not PkiGenerSelfSignedCertificate() Then
-            GoTo QH
-        End If
+    If m_uCtx.State > ucsTlsStateClosed Then
+        GoTo QH
     End If
-    If Not m_oSocket.Listen(ConnectionBacklog) Then
+    If LenB(RemoteHostName) <> 0 Then
+        m_sRemoteHostName = RemoteHostName
+    End If
+    m_eLocalFeatures = LocalFeatures
+    If Not pvTlsInitClient(m_uCtx, m_sRemoteHostName, m_eLocalFeatures) Then
+        GoTo QH
+    End If
+    bResult = pvTlsHandshake(m_uCtx, baEmpty, 0, baOutput, lSize)
+    If Not m_oSocket.SendArray(baOutput) Then
+        GoTo QH
+    End If
+    If Not bResult Then
         GoTo QH
     End If
     '--- success
-    Listen = True
+    StartTls = True
 QH:
     Exit Function
 EH:
     PrintError FUNC_NAME
+    Resume QH
 End Function
 
 Public Function ReceiveArray(Buffer() As Byte) As Boolean
@@ -825,7 +835,7 @@ Public Function ReceiveArray(Buffer() As Byte) As Boolean
     On Error GoTo EH
     If m_bUseTls Then
         Buffer = vbNullString
-        If m_lRecvPos = 0 Then
+        If m_lRecvSize = 0 Then
             If pvTlsIsClosed(m_uCtx) Then
                 GoTo QH
             End If
@@ -833,10 +843,10 @@ Public Function ReceiveArray(Buffer() As Byte) As Boolean
                 GoTo QH
             End If
         End If
-        If m_lRecvPos > 0 Then
-            pvArrayAllocate Buffer, m_lRecvPos, FUNC_NAME & ".Buffer"
-            Call CopyMemory(Buffer(0), m_baRecv(0), m_lRecvPos)
-            m_lRecvPos = 0
+        If m_lRecvSize > 0 Then
+            pvArrayAllocate Buffer, m_lRecvSize, FUNC_NAME & ".Buffer"
+            Call CopyMemory(Buffer(0), m_baRecv(0), m_lRecvSize)
+            m_lRecvSize = 0
         End If
         '--- success
         ReceiveArray = True
@@ -852,13 +862,34 @@ End Function
 
 Public Function SendArray(Buffer() As Byte) As Boolean
     Const FUNC_NAME     As String = "SendArray"
+    Dim lInputSize      As Long
+    Dim baTemp()        As Byte
+    Dim bResult         As Boolean
+    Dim lPos            As Long
+    Dim lSize           As Long
     
     On Error GoTo EH
     If m_bUseTls Then
         If pvTlsIsClosed(m_uCtx) Then
             GoTo QH
         End If
-        m_lSendPos = pvWriteArray(m_baSend, m_lSendPos, Buffer)
+        lInputSize = pvArraySize(Buffer)
+        If lInputSize <= TLS_MAX_PLAINTEXT_RECORD_SIZE Then
+            bResult = pvTlsSend(m_uCtx, Buffer, lInputSize, m_baSend, m_lSendSize)
+        Else
+            '--- chunk Buffer on TLS_MAX_PLAINTEXT_RECORD_SIZE application data records
+            pvArrayAllocate baTemp, TLS_MAX_PLAINTEXT_RECORD_SIZE, FUNC_NAME & ".baTemp"
+            Do
+                lSize = IIf(lInputSize - lPos < TLS_MAX_PLAINTEXT_RECORD_SIZE, lInputSize - lPos, TLS_MAX_PLAINTEXT_RECORD_SIZE)
+                Call CopyMemory(baTemp(0), Buffer(lPos), lSize)
+                lPos = lPos + lSize
+                bResult = pvTlsSend(m_uCtx, baTemp, lSize, m_baSend, m_lSendSize)
+            Loop While lPos < lInputSize And bResult
+        End If
+        If Not bResult Then
+            RaiseEvent OnError
+            GoTo QH
+        End If
         If Not pvOnSend() Then
             GoTo QH
         End If
@@ -894,56 +925,162 @@ EH:
     Resume QH
 End Function
 
+'= sync ==================================================================
+
+#If ImplSync Then
+Public Function SyncConnect(HostAddress As String, ByVal HostPort As Long, Optional ByVal Timeout As Long, Optional ByVal UseTls As Boolean = True) As Boolean
+    Const FUNC_NAME     As String = "SyncConnect"
+    
+    On Error GoTo EH
+    If UseTls Then
+        If Timeout = 0 Then
+            Timeout = DEF_TIMEOUT
+        End If
+        If Not Connect(HostAddress, HostPort, UseTls:=UseTls) Then
+            GoTo QH
+        End If
+        If Not SyncWaitForEvent(Timeout, ucsSfdConnect) Then
+            GoTo QH
+        End If
+        '--- success
+        SyncConnect = True
+    Else
+        SyncConnect = m_oSocket.SyncConnect(HostAddress, HostPort, Timeout:=Timeout)
+    End If
+QH:
+    Exit Function
+EH:
+    PrintError FUNC_NAME
+End Function
+
+Public Function SyncSendArray(Buffer() As Byte, Optional ByVal Timeout As Long) As Boolean
+    Const FUNC_NAME     As String = "SyncSendArray"
+    
+    On Error GoTo EH
+    If UBound(Buffer) < 0 Then
+        SyncSendArray = True
+    ElseIf m_bUseTls Then
+        If Timeout = 0 Then
+            Timeout = DEF_TIMEOUT
+        End If
+        If Not SendArray(Buffer) Then
+            GoTo QH
+        End If
+        If Not SyncWaitForEvent(Timeout, ucsSfdWrite) Then
+            GoTo QH
+        End If
+        '--- success
+        SyncSendArray = True
+    Else
+        SyncSendArray = m_oSocket.SyncSendArray(Buffer, Timeout:=Timeout)
+    End If
+QH:
+    Exit Function
+EH:
+    PrintError FUNC_NAME
+End Function
+
+Public Function SyncReceiveArray(Buffer() As Byte, Optional ByVal NeedLen As Long, Optional ByVal Timeout As Long) As Boolean
+    Const FUNC_NAME     As String = "SyncReceiveArray"
+    Dim lElapsed        As Long
+    Dim dblTimer        As Double
+    Dim baRecv()        As Byte
+    Dim lPos            As Long
+    
+    On Error GoTo EH
+    If m_bUseTls Then
+        If Timeout = 0 Then
+            Timeout = DEF_TIMEOUT
+        End If
+        Buffer = vbNullString
+        dblTimer = TimerEx
+        Do
+            If NeedLen = 0 Then
+                If Not ReceiveArray(Buffer) Then
+                    GoTo QH
+                End If
+            Else
+                If Not ReceiveArray(baRecv) Then
+                    GoTo QH
+                End If
+                lPos = pvWriteArray(Buffer, lPos, baRecv)
+            End If
+            If UBound(Buffer) >= NeedLen Then
+                Exit Do
+            ElseIf pvTlsIsClosed(m_uCtx) Then
+                GoTo QH
+            End If
+            If Timeout > 0 Then
+                lElapsed = Int((TimerEx - dblTimer) * 1000)
+                If lElapsed >= Timeout Then
+                    m_oSocket.frLastError = ERR_TIMEOUT
+                    GoTo QH
+                End If
+            End If
+            If Not SyncWaitForEvent(Timeout - lElapsed, ucsSfdRead) Then
+                GoTo QH
+            End If
+        Loop
+        '--- success
+        SyncReceiveArray = True
+    Else
+        SyncReceiveArray = m_oSocket.SyncReceiveArray(Buffer, NeedLen:=NeedLen, Timeout:=Timeout)
+    End If
+QH:
+    Exit Function
+EH:
+    PrintError FUNC_NAME
+End Function
+
 Public Function SyncWaitForEvent( _
             ByVal Timeout As Long, _
             Optional ByVal EventMask As UcsAsyncSocketEventMaskEnum = ucsSfdAll) As Boolean
     Const FUNC_NAME     As String = "SyncWaitForEvent"
-    Dim dblTimerEx      As Double
-    Dim lRemaining      As Long
+    Const LNG_TLS_MASK  As Long = ucsSfdConnect Or ucsSfdRead Or ucsSfdWrite
+    Dim dblTimer        As Double
+    Dim lElapsed        As Long
     
     On Error GoTo EH
-    If m_bUseTls Then
-        dblTimerEx = TimerEx
-        Select Case EventMask
-        Case ucsSfdConnect
-            Do While Not pvTlsIsReady(m_uCtx)
-                If pvTlsIsClosed(m_uCtx) Then
+    If m_bUseTls And (EventMask And LNG_TLS_MASK) <> 0 Then
+        dblTimer = TimerEx
+        m_oSocket.SyncProcessMsgQueue
+        Do
+            If (EventMask And ucsSfdConnect) <> 0 Then
+                If pvTlsIsReady(m_uCtx) Then
+                    Exit Do
+                End If
+            End If
+            If (EventMask And ucsSfdRead) <> 0 Then
+                If m_lRecvSize > 0 Then
+                    Exit Do
+                End If
+            End If
+            If (EventMask And ucsSfdWrite) <> 0 Then
+                If m_lSendPos = 0 Then
+                    Exit Do
+                End If
+            End If
+            If pvTlsIsClosed(m_uCtx) Then
+                GoTo QH
+            End If
+            If Timeout > 0 Then
+                lElapsed = Int((TimerEx - dblTimer) * 1000)
+                If lElapsed >= Timeout Then
+                    m_oSocket.frLastError = ERR_TIMEOUT
                     GoTo QH
                 End If
-                If Timeout > 0 Then
-                    lRemaining = Timeout - CLng((TimerEx - dblTimerEx) * 1000)
-                    If lRemaining <= 0 Then
-                        GoTo QH
-                    End If
-                End If
-                If Not m_oSocket.SyncWaitForEvent(lRemaining, ucsSfdAll) Then
-                    GoTo QH
-                End If
-                m_oSocket.SyncProcessMsgQueue
-            Loop
-        Case ucsSfdRead
-            Do While m_lRecvPos = 0
-                If pvTlsIsClosed(m_uCtx) Then
-                    GoTo QH
-                End If
-                If Timeout > 0 Then
-                    lRemaining = Timeout - CLng((TimerEx - dblTimerEx) * 1000)
-                    If lRemaining <= 0 Then
-                        GoTo QH
-                    End If
-                End If
-                If Not m_oSocket.SyncWaitForEvent(lRemaining, ucsSfdAll) Then
-                    GoTo QH
-                End If
-                m_oSocket.SyncProcessMsgQueue
-            Loop
-        Case Else
-            GoTo SocketWait
-        End Select
+            End If
+            If Not m_oSocket.SyncWaitForEvent(Timeout - lElapsed, ucsSfdAll) Then
+                GoTo QH
+            End If
+            m_oSocket.SyncProcessMsgQueue
+            If m_oSocket.LastError <> 0 Then
+                GoTo QH
+            End If
+        Loop
         '--- success
         SyncWaitForEvent = True
     Else
-SocketWait:
         SyncWaitForEvent = m_oSocket.SyncWaitForEvent(Timeout, EventMask)
     End If
 QH:
@@ -952,6 +1089,7 @@ EH:
     PrintError FUNC_NAME
     Resume Next
 End Function
+#End If
 
 '= private ===============================================================
 
@@ -977,7 +1115,7 @@ Private Function pvOnReceive() As Boolean
     Dim baOutput()      As Byte
     Dim lSize           As Long
     Dim bResult         As Boolean
-    Dim baEmpty()       As Byte
+    Dim lPrevSize       As Long
     
     On Error GoTo EH
     If Not m_oSocket.ReceiveArray(baRecv) Then
@@ -986,7 +1124,7 @@ Private Function pvOnReceive() As Boolean
     If pvArraySize(baRecv) > 0 Then
         If Not pvTlsIsReady(m_uCtx) Then
             bResult = pvTlsHandshake(m_uCtx, baRecv, -1, baOutput, lSize)
-            Erase baRecv
+            baRecv = vbNullString
             If pvArraySize(baOutput) > 0 Then
                 If Not m_oSocket.SendArray(baOutput) Then
                     GoTo QH
@@ -1005,14 +1143,13 @@ Private Function pvOnReceive() As Boolean
             End If
             RaiseEvent OnConnect
         End If
-        bResult = pvTlsReceive(m_uCtx, baRecv, -1, m_baRecv, m_lRecvPos)
+        lPrevSize = m_lRecvSize
+        bResult = pvTlsReceive(m_uCtx, baRecv, -1, m_baRecv, m_lRecvSize)
+        If m_lRecvSize > lPrevSize Then
+            RaiseEvent OnReceive
+        End If
         If pvTlsIsClosed(m_uCtx) Then
             RaiseEvent OnClose
-            GoTo QH
-        End If
-        lSize = 0
-        If pvTlsSend(m_uCtx, baEmpty, 0, baOutput, lSize) And lSize > 0 Then
-            Call m_oSocket.SendArray(baOutput)
         End If
         If Not bResult Then
             RaiseEvent OnError
@@ -1030,28 +1167,25 @@ End Function
 
 Private Function pvOnSend() As Boolean
     Const FUNC_NAME     As String = "pvOnSend"
-    Dim baOutput()      As Byte
-    Dim lSize           As Long
-    Dim bResult         As Boolean
+    Dim lBytes          As Long
     
     On Error GoTo EH
-    If pvTlsIsReady(m_uCtx) And m_lSendPos > 0 Then
-        bResult = pvTlsSend(m_uCtx, m_baSend, m_lSendPos, baOutput, lSize)
-        m_lSendPos = 0
-        If lSize > 0 Then
-            If Not m_oSocket.SendArray(baOutput) Then
-                GoTo QH
-            End If
-        End If
-        If Not bResult Then
-            RaiseEvent OnError
+    If pvTlsIsReady(m_uCtx) And m_lSendPos < m_lSendSize Then
+        lBytes = m_oSocket.Send(VarPtr(m_baSend(m_lSendPos)), m_lSendSize - m_lSendPos)
+        If lBytes < 0 Then
             GoTo QH
+        Else
+            m_lSendPos = m_lSendPos + lBytes
+            RaiseEvent OnSend
+        End If
+        If m_lSendPos >= m_lSendSize Then
+            m_lSendPos = 0
+            m_lSendSize = 0
         End If
     End If
     '--- success
     pvOnSend = True
 QH:
-    
     Exit Function
 EH:
     PrintError FUNC_NAME
@@ -4924,8 +5058,9 @@ Private Sub m_oSocket_OnConnect()
         If Not pvOnConnect() Then
             GoTo QH
         End If
+    Else
+        RaiseEvent OnConnect
     End If
-    RaiseEvent OnConnect
 QH:
 End Sub
 
@@ -4934,8 +5069,9 @@ Private Sub m_oSocket_OnReceive()
         If Not pvOnReceive() Then
             GoTo QH
         End If
+    Else
+        RaiseEvent OnReceive
     End If
-    RaiseEvent OnReceive
 QH:
 End Sub
 
@@ -4944,8 +5080,9 @@ Private Sub m_oSocket_OnSend()
         If Not pvOnSend() Then
             GoTo QH
         End If
+    Else
+        RaiseEvent OnSend
     End If
-    RaiseEvent OnSend
 QH:
 End Sub
 
@@ -4958,7 +5095,14 @@ Private Sub m_oSocket_OnAccept()
 End Sub
 
 Private Sub m_oSocket_OnClose()
-    RaiseEvent OnClose
+    If m_bUseTls Then
+        If Not pvTlsIsClosed(m_uCtx) Then
+            m_uCtx.State = ucsTlsStateClosed
+            RaiseEvent OnClose
+        End If
+    Else
+        RaiseEvent OnClose
+    End If
 End Sub
 
 Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
