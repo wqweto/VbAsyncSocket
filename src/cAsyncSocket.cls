@@ -196,7 +196,8 @@ Private Declare Function ws_gethostname Lib "ws2_32" Alias "gethostname" (ByVal 
     Private Declare Function DispatchMessage Lib "user32" Alias "DispatchMessageA" (lpMsg As APIMSG) As Long
     Private Declare Function SetTimer Lib "user32" (ByVal hWnd As Long, ByVal nIDEvent As Long, ByVal uElapse As Long, ByVal lpTimerFunc As Long) As Long
     Private Declare Function KillTimer Lib "user32" (ByVal hWnd As Long, ByVal nIDEvent As Long) As Long
-    Private Declare Function WaitMessage Lib "user32" () As Long
+'    Private Declare Function WaitMessage Lib "user32" () As Long
+    Private Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
 #End If
 #If Not ImplUseShared Then
     Private Declare Function QueryPerformanceCounter Lib "kernel32" (lpPerformanceCount As Currency) As Long
@@ -296,6 +297,10 @@ End Property
 
 Property Get LastError() As Long
     LastError = m_lLastError
+End Property
+
+Friend Property Let frLastError(ByVal lValue As Long)
+    m_lLastError = lValue
 End Property
 
 Property Get SockOpt(ByVal OptionName As UcsAsyncSocketOptionNameEnum, Optional ByVal Level As UcsAsyncSocketOptionLevelEnum = ucsSolSocket) As Long
@@ -1474,11 +1479,13 @@ Public Function SyncWaitForEvent( _
                 End If
                 bPeek = False
             Else
-                Call WaitMessage
+'                Call WaitMessage
+                Call Sleep(1)
                 bPeek = True
             End If
         Else
-            Call WaitMessage
+'            Call WaitMessage
+            Call Sleep(1)
             bPeek = True
         End If
     Loop
@@ -1599,11 +1606,13 @@ EH:
     GoTo QH
 End Function
 
-Private Function pvHandleNotify(ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long, Handled As Boolean) As Long
+Private Function pvHandleNotify(ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long, Handled As Boolean) As Long
     Const FUNC_NAME     As String = "pvHandleNotify"
     Dim lIdx            As Long
     
     On Error GoTo EH
+    pvHandleNotify = DefSubclassProc(hWnd, wMsg, wParam, lParam)
+    Handled = True
     If frMessageHWnd = 0 Then
         GoTo QH
     End If
@@ -1614,7 +1623,6 @@ Private Function pvHandleNotify(ByVal wMsg As Long, ByVal wParam As Long, ByVal 
                 If .SocketPtr(lIdx) <> 0 Then
                     If pvToSocket(.SocketPtr(lIdx)).frNotifyGetHostByName(wParam, lParam) Then
                         pvHandleNotify = 1
-                        Handled = True
                         GoTo QH
                     End If
                 End If
@@ -1625,7 +1633,6 @@ Private Function pvHandleNotify(ByVal wMsg As Long, ByVal wParam As Long, ByVal 
                 If .SocketPtr(lIdx) <> 0 Then
                     pvToSocket(.SocketPtr(lIdx)).frNotifyEvent wParam, lParam
                     pvHandleNotify = 1
-                    Handled = True
                 End If
             End If
         End Select
@@ -1647,9 +1654,7 @@ End Property
 
 Public Function SubclassProc(ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long, Handled As Boolean) As Long
 Attribute SubclassProc.VB_MemberFlags = "40"
-    #If hWnd Then '--- touch args
-    #End If
-    SubclassProc = pvHandleNotify(wMsg, wParam, lParam, Handled)
+    SubclassProc = pvHandleNotify(hWnd, wMsg, wParam, lParam, Handled)
 End Function
 
 '= shared ================================================================
