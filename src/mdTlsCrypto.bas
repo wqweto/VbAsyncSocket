@@ -98,6 +98,7 @@ Private Const LNG_OUT_OF_MEMORY         As Long = 8
 Private m_baBuffer()                As Byte
 Private m_lBuffIdx                  As Long
 Private m_uData                     As UcsCryptoThunkData
+Public g_oRequestSocket             As cTlsSocket
 
 Private Enum UcsThunkPfnIndexEnum
     [_ucsPfnNotUsed]

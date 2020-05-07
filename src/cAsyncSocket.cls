@@ -1305,7 +1305,7 @@ Public Function SyncSendText( _
             Optional HostAddress As String, _
             Optional ByVal HostPort As Long, _
             Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As Boolean
-    Const FUNC_NAME     As String = "SendText"
+    Const FUNC_NAME     As String = "SyncSendText"
     
     On Error GoTo EH
     SyncSendText = SyncSendArray(ToTextArray(Text, CodePage), Timeout, HostAddress, HostPort)

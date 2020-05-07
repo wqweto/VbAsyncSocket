@@ -52,7 +52,7 @@ Event OnClose()
 Event OnConnect()
 Event OnReceive()
 Event OnSend()
-Event OnError()
+Event OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
 Event OnMessagePending(Handled As Boolean)
 Event BeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Cancel As Boolean)
 
@@ -63,7 +63,8 @@ Event BeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Cancel As Boo
 Public Enum UcsTlsLocalFeaturesEnum '--- bitmask
     ucsTlsSupportTls12 = 2 ^ 0
     ucsTlsSupportTls13 = 2 ^ 1
-    ucsTlsSupportAll = -1
+    ucsTlsIgnoreServerCertificateErrors = 2 ^ 2
+    ucsTlsSupportAll = ucsTlsSupportTls12 Or ucsTlsSupportTls13
 End Enum
 
 '=========================================================================
@@ -516,6 +517,7 @@ Private Const ERR_TRUST_IS_UNTRUSTED_ROOT               As String = "The certifi
 Private Const ERR_TRUST_IS_NOT_TIME_VALID               As String = "The certificate has expired"
 Private Const ERR_TRUST_REVOCATION_STATUS_UNKNOWN       As String = "The revocation status of the certificate or one of the certificates in the certificate chain is unknown"
 Private Const ERR_NO_MATCHING_ALT_NAME                  As String = "No certificate subject name matches target host name"
+Private Const STR_CHR1                                  As String = "" '--- CHAR(1)
 Private Const DEF_TIMEOUT                               As Long = 5000
 
 Private WithEvents m_oSocket    As cAsyncSocket
@@ -525,7 +527,8 @@ Private m_sRemoteHostName       As String
 Private m_eLocalFeatures        As UcsTlsLocalFeaturesEnum
 Private m_uCtx                  As UcsTlsContext
 Private m_hRootStore            As Long
-'--- I/O buffers
+Private m_oRootStoreFwd         As cTlsSocket
+'--- socket buffers
 Private m_baRecv()              As Byte
 Private m_lRecvSize             As Long
 Private m_baSend()              As Byte
@@ -697,33 +700,67 @@ Property Get Socket() As cAsyncSocket
     Set Socket = m_oSocket
 End Property
 
-Property Get LastError() As String
+Property Get SocketHandle() As Long
+    SocketHandle = m_oSocket.SocketHandle
+End Property
+
+Property Get LastErrorText() As String
     If m_oSocket.LastError <> 0 Then
-        LastError = m_oSocket.GetErrorDescription(m_oSocket.LastError)
+        LastErrorText = m_oSocket.GetErrorDescription(m_oSocket.LastError)
     Else
-        LastError = pvTlsGetLastError(m_uCtx)
+        LastErrorText = pvTlsGetLastError(m_uCtx)
     End If
 End Property
 
+Property Get LastError() As String
+    LastError = m_oSocket.LastError
+End Property
+
 Property Get IsClosed() As Boolean
-    IsClosed = pvTlsIsClosed(m_uCtx)
+    If m_bUseTls Then
+        IsClosed = pvTlsIsClosed(m_uCtx)
+    Else
+        IsClosed = (m_oSocket.SocketHandle = -1) ' INVALID_SOCKET
+    End If
+End Property
+
+Property Get AvailableBytes() As Long
+    If m_bUseTls Then
+        AvailableBytes = m_lRecvSize
+    Else
+        AvailableBytes = m_oSocket.AvailableBytes
+    End If
+End Property
+
+Property Get LastSendBytes() As Long
+    LastSendBytes = m_oSocket.LastSendBytes
+End Property
+
+Friend Property Get frRootStore() As Long
+    If Not m_oRootStoreFwd Is Nothing Then
+        frRootStore = m_oRootStoreFwd.frRootStore
+    Else
+        frRootStore = m_hRootStore
+    End If
+End Property
+
+Property Get LocalCertificates() As Collection
+    Set LocalCertificates = m_uCtx.LocalCertificates
 End Property
 
 '=========================================================================
 ' Methods
 '=========================================================================
 
-Public Function Create(Optional ByVal SocketPort As Long, Optional SocketAddress As String) As Boolean
-    Create = m_oSocket.Create(SocketPort:=SocketPort, SocketAddress:=SocketAddress)
-End Function
-
 Public Function Listen(Optional ByVal ConnectionBacklog As Long = 5) As Boolean
     Const FUNC_NAME     As String = "Listen"
     
     On Error GoTo EH
-    If m_uCtx.LocalCertificates Is Nothing Then
-        If Not PkiGenerSelfSignedCertificate() Then
-            GoTo QH
+    If m_bUseTls Then
+        If m_uCtx.LocalCertificates Is Nothing Then
+            If Not pvPkiGenerSelfSignedCertificate(m_uCtx.LocalCertificates, m_uCtx.LocalPrivateKey) Then
+                GoTo QH
+            End If
         End If
     End If
     If Not m_oSocket.Listen(ConnectionBacklog) Then
@@ -737,32 +774,35 @@ EH:
     PrintError FUNC_NAME
 End Function
 
-Public Function Accept(ConnectedSocket As cTlsSocket, Optional ByVal UseTls As Boolean = True) As Boolean
+Public Function Accept( _
+            ConnectedSocket As cTlsSocket, _
+            Optional SocketAddress As String, _
+            Optional SocketPort As Long, _
+            Optional ByVal UseTls As Boolean = True) As Boolean
     Const FUNC_NAME     As String = "Accept"
     
     On Error GoTo EH
     If ConnectedSocket Is Nothing Then
         Set ConnectedSocket = New cTlsSocket
     End If
-    If Not m_oSocket.Accept(ConnectedSocket.Socket) Then
+    If Not m_oSocket.Accept(ConnectedSocket.Socket, SocketAddress, SocketPort) Then
         GoTo QH
     End If
     If UseTls Then
-        If Not ConnectedSocket.frStartServerTls(m_uCtx.LocalCertificates, m_uCtx.LocalPrivateKey) Then
+        If Not ConnectedSocket.StartServerTls(m_uCtx.LocalCertificates, m_uCtx.LocalPrivateKey) Then
             GoTo QH
         End If
     End If
     '--- success
     Accept = True
 QH:
-    
     Exit Function
 EH:
     PrintError FUNC_NAME
     Resume QH
 End Function
 
-Friend Function frStartServerTls( _
+Public Function StartServerTls( _
             Optional Certificates As Collection, _
             Optional PrivateKey As Variant) As Boolean
     m_bUseTls = True
@@ -772,17 +812,21 @@ Friend Function frStartServerTls( _
         GoTo QH
     End If
     '--- success
-    frStartServerTls = True
+    StartServerTls = True
 QH:
 End Function
 
-Public Function Connect(HostAddress As String, ByVal HostPort As Long, Optional ByVal UseTls As Boolean = True) As Boolean
+Public Function Connect( _
+            HostAddress As String, _
+            ByVal HostPort As Long, _
+            Optional ByVal UseTls As Boolean = True, _
+            Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum = ucsTlsSupportAll) As Boolean
     Const FUNC_NAME     As String = "Connect"
     
     On Error GoTo EH
     m_bUseTls = UseTls
     m_sRemoteHostName = HostAddress
-    m_eLocalFeatures = ucsTlsSupportAll
+    m_eLocalFeatures = LocalFeatures
     If Not m_oSocket.Connect(HostAddress, HostPort) Then
         GoTo QH
     End If
@@ -795,7 +839,9 @@ EH:
     Resume QH
 End Function
 
-Public Function StartTls(Optional RemoteHostName As String, Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum = ucsTlsSupportAll) As Boolean
+Public Function StartTls( _
+            Optional RemoteHostName As String, _
+            Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum = ucsTlsSupportAll) As Boolean
     Const FUNC_NAME     As String = "StartTls"
     Dim baOutput()      As Byte
     Dim lSize           As Long
@@ -829,7 +875,30 @@ EH:
     Resume QH
 End Function
 
-Public Function ReceiveArray(Buffer() As Byte) As Boolean
+Public Function ReceiveText( _
+            Optional HostAddress As String = STR_CHR1, _
+            Optional HostPort As Long, _
+            Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As String
+    Const FUNC_NAME     As String = "ReceiveText"
+    Dim baBuffer()      As Byte
+    
+    On Error GoTo EH
+    If m_bUseTls Then
+        If ReceiveArray(baBuffer) Then
+            ReceiveText = m_oSocket.FromTextArray(baBuffer, CodePage)
+        End If
+    Else
+        ReceiveText = m_oSocket.ReceiveText(HostAddress, HostPort, CodePage)
+    End If
+    Exit Function
+EH:
+    PrintError FUNC_NAME
+End Function
+
+Public Function ReceiveArray( _
+            Buffer() As Byte, _
+            Optional HostAddress As String = STR_CHR1, _
+            Optional HostPort As Long) As Boolean
     Const FUNC_NAME     As String = "ReceiveArray"
     
     On Error GoTo EH
@@ -851,7 +920,7 @@ Public Function ReceiveArray(Buffer() As Byte) As Boolean
         '--- success
         ReceiveArray = True
     Else
-        ReceiveArray = m_oSocket.ReceiveArray(Buffer)
+        ReceiveArray = m_oSocket.ReceiveArray(Buffer, HostAddress, HostPort)
     End If
 QH:
     Exit Function
@@ -860,7 +929,28 @@ EH:
     Resume QH
 End Function
 
-Public Function SendArray(Buffer() As Byte) As Boolean
+Public Function SendText( _
+            Text As String, _
+            Optional HostAddress As String, _
+            Optional ByVal HostPort As Long, _
+            Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As Boolean
+    Const FUNC_NAME     As String = "SendText"
+    
+    On Error GoTo EH
+    If m_bUseTls Then
+        SendText = SendArray(m_oSocket.ToTextArray(Text, CodePage), HostAddress, HostPort)
+    Else
+        SendText = m_oSocket.SendText(Text, HostAddress, HostPort, CodePage)
+    End If
+    Exit Function
+EH:
+    PrintError FUNC_NAME
+End Function
+
+Public Function SendArray( _
+            Buffer() As Byte, _
+            Optional HostAddress As String, _
+            Optional ByVal HostPort As Long) As Boolean
     Const FUNC_NAME     As String = "SendArray"
     Dim lInputSize      As Long
     Dim baTemp()        As Byte
@@ -887,7 +977,7 @@ Public Function SendArray(Buffer() As Byte) As Boolean
             Loop While lPos < lInputSize And bResult
         End If
         If Not bResult Then
-            RaiseEvent OnError
+            RaiseEvent OnError(-1, ucsSfdWrite)
             GoTo QH
         End If
         If Not pvOnSend() Then
@@ -896,13 +986,35 @@ Public Function SendArray(Buffer() As Byte) As Boolean
         '--- success
         SendArray = True
     Else
-        SendArray = m_oSocket.SendArray(Buffer)
+        SendArray = m_oSocket.SendArray(Buffer, HostAddress, HostPort)
     End If
 QH:
     Exit Function
 EH:
     PrintError FUNC_NAME
     Resume QH
+End Function
+
+Public Function Send( _
+            ByVal BufPtr As Long, _
+            ByVal BufLen As Long, _
+            Optional HostAddress As String, _
+            Optional ByVal HostPort As Long) As Long
+    Dim baBuffer()      As Byte
+    
+    
+    If BufLen = 0 Then
+        '--- do nothing
+    ElseIf m_bUseTls Then
+        pvWriteBuffer baBuffer, 0, BufPtr, BufLen
+        If Not SendArray(baBuffer) Then
+            Send = -1
+        Else
+            Send = BufLen
+        End If
+    Else
+        Send = m_oSocket.Send(BufPtr, BufLen, HostAddress, HostPort)
+    End If
 End Function
 
 Public Function ShutDown() As Boolean
@@ -923,6 +1035,58 @@ QH:
 EH:
     PrintError FUNC_NAME
     Resume QH
+End Function
+
+'= forward ===============================================================
+
+Public Function Create( _
+            Optional ByVal SocketPort As Long, _
+            Optional ByVal SocketType As UcsAsyncSocketTypeEnum = ucsSckStream, _
+            Optional ByVal EventMask As UcsAsyncSocketEventMaskEnum = ucsSfdAll, _
+            Optional SocketAddress As String) As Boolean
+    Create = m_oSocket.Create(SocketPort, SocketType, EventMask, SocketAddress)
+End Function
+
+Public Function GetSockName(SocketAddress As String, SocketPort As Long) As Boolean
+    GetSockName = m_oSocket.GetSockName(SocketAddress, SocketPort)
+End Function
+
+Public Function GetPeerName(PeerAddress As String, PeerPort As Long) As Boolean
+    GetPeerName = m_oSocket.GetPeerName(PeerAddress, PeerPort)
+End Function
+
+Public Function GetLocalHost(HostName As String, HostAddress As String) As Boolean
+    GetLocalHost = m_oSocket.GetLocalHost(HostName, HostAddress)
+End Function
+
+Public Function Attach( _
+            ByVal SocketHandle As Long, _
+            Optional ByVal EventMask As UcsAsyncSocketEventMaskEnum = ucsSfdAll) As Boolean
+    Attach = m_oSocket.Attach(SocketHandle, EventMask)
+End Function
+
+Public Function Detach() As Long
+    Detach = m_oSocket.Detach()
+End Function
+
+Public Sub Close_()
+    m_oSocket.Close_
+End Sub
+
+Public Function Bind(Optional SocketAddress As String, Optional ByVal SocketPort As Long) As Boolean
+    Bind = m_oSocket.Bind(SocketAddress, SocketPort)
+End Function
+
+Public Function FromTextArray(baText() As Byte, Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As String
+    FromTextArray = m_oSocket.FromTextArray(baText, CodePage)
+End Function
+
+Public Function ToTextArray(sText As String, Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As Byte()
+    ToTextArray = m_oSocket.ToTextArray(sText, CodePage)
+End Function
+
+Public Function GetErrorDescription(ByVal ErrorCode As Long) As String
+    GetErrorDescription = m_oSocket.GetErrorDescription(ErrorCode)
 End Function
 
 '= sync ==================================================================
@@ -948,6 +1112,19 @@ Public Function SyncConnect(HostAddress As String, ByVal HostPort As Long, Optio
         SyncConnect = m_oSocket.SyncConnect(HostAddress, HostPort, Timeout:=Timeout)
     End If
 QH:
+    Exit Function
+EH:
+    PrintError FUNC_NAME
+End Function
+
+Public Function SyncSendText( _
+            Text As String, _
+            Optional ByVal Timeout As Long, _
+            Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As Boolean
+    Const FUNC_NAME     As String = "SyncSendText"
+    
+    On Error GoTo EH
+    SyncSendText = SyncSendArray(m_oSocket.ToTextArray(Text, CodePage), Timeout:=Timeout)
     Exit Function
 EH:
     PrintError FUNC_NAME
@@ -980,7 +1157,65 @@ EH:
     PrintError FUNC_NAME
 End Function
 
-Public Function SyncReceiveArray(Buffer() As Byte, Optional ByVal NeedLen As Long, Optional ByVal Timeout As Long) As Boolean
+Public Function SyncReceiveText( _
+            Optional ByVal NeedLen As Long, _
+            Optional ByVal Timeout As Long, _
+            Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As String
+    Const FUNC_NAME     As String = "SyncReceiveText"
+    Dim lElapsed        As Long
+    Dim dblTimer        As Double
+    Dim baRecv()        As Byte
+    Dim lPos            As Long
+    Dim baBuffer()      As Byte
+    
+    On Error GoTo EH
+    If m_bUseTls Then
+        If Timeout = 0 Then
+            Timeout = DEF_TIMEOUT
+        End If
+        baBuffer = vbNullString
+        dblTimer = TimerEx
+        Do
+            If NeedLen = 0 Then
+                If Not ReceiveArray(baBuffer) Then
+                    GoTo QH
+                End If
+            Else
+                If Not ReceiveArray(baRecv) Then
+                    GoTo QH
+                End If
+                lPos = pvWriteArray(baBuffer, lPos, baRecv)
+            End If
+            SyncReceiveText = m_oSocket.FromTextArray(baBuffer, CodePage)
+            If Len(SyncReceiveText) >= NeedLen Then
+                Exit Do
+            ElseIf pvTlsIsClosed(m_uCtx) Then
+                GoTo QH
+            End If
+            If Timeout > 0 Then
+                lElapsed = Int((TimerEx - dblTimer) * 1000)
+                If lElapsed >= Timeout Then
+                    m_oSocket.frLastError = ERR_TIMEOUT
+                    GoTo QH
+                End If
+            End If
+            If Not SyncWaitForEvent(Timeout - lElapsed, ucsSfdRead) Then
+                GoTo QH
+            End If
+        Loop
+    Else
+        SyncReceiveText = m_oSocket.SyncReceiveText(NeedLen:=NeedLen, Timeout:=Timeout, CodePage:=CodePage)
+    End If
+QH:
+    Exit Function
+EH:
+    PrintError FUNC_NAME
+End Function
+
+Public Function SyncReceiveArray( _
+            Buffer() As Byte, _
+            Optional ByVal NeedLen As Long, _
+            Optional ByVal Timeout As Long) As Boolean
     Const FUNC_NAME     As String = "SyncReceiveArray"
     Dim lElapsed        As Long
     Dim dblTimer        As Double
@@ -1135,11 +1370,21 @@ Private Function pvOnReceive() As Boolean
                 GoTo QH
             End If
             If Not bResult Then
-                RaiseEvent OnError
+                RaiseEvent OnError(-1, ucsSfdRead)
                 GoTo QH
             End If
             If Not pvTlsIsReady(m_uCtx) Then
                 GoTo QH
+            End If
+            If Not m_uCtx.IsServer And (m_uCtx.LocalFeatures = ucsTlsIgnoreServerCertificateErrors) = 0 Then
+                If m_uCtx.RemoteCertificates Is Nothing Then
+                    RaiseEvent OnError(-1, ucsSfdRead)
+                    GoTo QH
+                End If
+                If Not pvPkiCertChainValidate(m_uCtx.RemoteHostName, m_uCtx.RemoteCertificates, frRootStore, m_uCtx.LastError) Then
+                    RaiseEvent OnError(-1, ucsSfdRead)
+                    GoTo QH
+                End If
             End If
             RaiseEvent OnConnect
         End If
@@ -1152,7 +1397,7 @@ Private Function pvOnReceive() As Boolean
             RaiseEvent OnClose
         End If
         If Not bResult Then
-            RaiseEvent OnError
+            RaiseEvent OnError(-1, ucsSfdRead)
             GoTo QH
         End If
     End If
@@ -4207,20 +4452,6 @@ Public Function PkiPemImportCertificates(ByVal vPemFiles As Variant) As Boolean
     End If
 End Function
 
-Public Function PkiPemImportRootCaCertStore(sCaBundlePemFile As String) As Boolean
-    Dim hCertStore      As Long
-    
-    hCertStore = pvPkiPemImportRootCaCertStore(sCaBundlePemFile)
-    If hCertStore <> 0 Then
-        If m_hRootStore <> 0 Then
-            Call CertCloseStore(m_hRootStore, 0)
-        End If
-        m_hRootStore = hCertStore
-        '--- success
-        PkiPemImportRootCaCertStore = True
-    End If
-End Function
-
 Public Function PkiPkcs12ImportCertificates(sPfxFile As String, sPassword As String) As Boolean
     Dim cCerts          As Collection
     Dim baPrivKey()     As Byte
@@ -4233,20 +4464,28 @@ Public Function PkiPkcs12ImportCertificates(sPfxFile As String, sPassword As Str
     End If
 End Function
 
-Public Function PkiGenerSelfSignedCertificate(Optional ByVal Subject As String) As Boolean
-    Dim cCerts          As Collection
-    Dim baPrivKey()     As Byte
+Public Function PkiPemImportRootCaCertStore(Optional CaBundlePemFile As String, Optional RootFwd As cTlsSocket) As Boolean
+    Dim hCertStore      As Long
     
-    If pvPkiGenerSelfSignedCertificate(cCerts, baPrivKey, Subject) Then
-        Set m_uCtx.LocalCertificates = cCerts
-        m_uCtx.LocalPrivateKey = baPrivKey
-        '--- success
-        PkiGenerSelfSignedCertificate = True
+    If LenB(CaBundlePemFile) = 0 Then
+        Set m_oRootStoreFwd = RootFwd
+        If m_hRootStore <> 0 Then
+            Call CertCloseStore(m_hRootStore, 0)
+            m_hRootStore = 0
+        End If
+    Else
+        hCertStore = pvPkiPemImportRootCaCertStore(CaBundlePemFile)
+        If hCertStore = 0 Then
+            GoTo QH
+        End If
+        If m_hRootStore <> 0 Then
+            Call CertCloseStore(m_hRootStore, 0)
+        End If
+        m_hRootStore = hCertStore
     End If
-End Function
-
-Public Function PkiCertChainValidate(sError As String) As Boolean
-    PkiCertChainValidate = pvPkiCertChainValidate(m_uCtx.RemoteHostName, m_uCtx.RemoteCertificates, m_hRootStore, sError)
+    '--- success
+    PkiPemImportRootCaCertStore = True
+QH:
 End Function
 
 '= private ===============================================================
@@ -5106,7 +5345,7 @@ Private Sub m_oSocket_OnClose()
 End Sub
 
 Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
-    RaiseEvent OnError
+    RaiseEvent OnError(ErrorCode, EventMask)
 End Sub
 
 Private Sub m_oSocket_OnMessagePending(Handled As Boolean)
