@@ -1716,8 +1716,7 @@ Private Function InitSubclassingThunk(ByVal hWnd As Long, pObj As Object, ByVal 
         Call DefSubclassProc(0, 0, 0, 0)                                            '--- load comctl32
         aParams(4) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 410)      '--- 410 = SetWindowSubclass ordinal
         aParams(5) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 412)      '--- 412 = RemoveWindowSubclass ordinal
-'        aParams(6) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 413)      '--- 413 = DefSubclassProc ordinal
-        aParams(6) = GetProcAddress(GetModuleHandle("user32"), "PostMessageA")
+        aParams(6) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 413)      '--- 413 = DefSubclassProc ordinal
         '--- for IDE protection
         Debug.Assert pvThunkIdeOwner(aParams(7))
         If aParams(7) <> 0 Then
