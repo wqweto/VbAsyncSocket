@@ -89,6 +89,7 @@ Private Sub Command3_Click()
 End Sub
 
 Private Sub Command2_Click()
+    ctxServer(0).Close_
     ctxServer(0).Protocol = sckTCPProtocol
     ctxServer(0).Bind 8088, "127.0.0.1"
     ctxServer(0).Listen
@@ -96,6 +97,7 @@ Private Sub Command2_Click()
 End Sub
 
 Private Sub Command4_Click()
+    ctxServer(0).Close_
     ctxServer(0).Protocol = sckTLSProtocol
     ctxServer(0).Bind 8088, "127.0.0.1"
     ctxServer(0).Listen
@@ -157,3 +159,6 @@ Private Sub ctxServer_Close(Index As Integer)
 End Sub
 
 
+Private Sub ctxWinsock_Error(ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
+    Debug.Print "Error: " & Description
+End Sub

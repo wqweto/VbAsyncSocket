@@ -690,6 +690,8 @@ Public Function ReceiveArray( _
     Const FUNC_NAME     As String = "ReceiveArray"
     Dim uAddr           As SOCKADDR_IN
     Dim lBytes          As Long
+    Dim lPos            As Long
+    Dim lSize           As Long
     
     On Error GoTo EH
     lBytes = AvailableBytes
@@ -697,19 +699,25 @@ Public Function ReceiveArray( _
         Buffer = vbNullString
     Else
         ReDim Buffer(0 To lBytes - 1) As Byte
-        If HostAddress <> STR_CHR1 Then
-            lBytes = ws_recvfrom(m_hSocket, Buffer(0), lBytes, Flags, uAddr, LenB(uAddr))
-        Else
-            lBytes = ws_recv(m_hSocket, Buffer(0), lBytes, Flags)
-        End If
-        If lBytes = SOCKET_ERROR Then
-            m_lLastError = Err.LastDllError
-            GoTo QH
-        ElseIf lBytes = 0 Then
-            Buffer = vbNullString
-        ElseIf lBytes <> UBound(Buffer) + 1 Then
-            ReDim Preserve Buffer(0 To lBytes - 1) As Byte
-        End If
+        Do
+            lPos = lPos + lSize
+            If HostAddress <> STR_CHR1 Then
+                lSize = ws_recvfrom(m_hSocket, Buffer(lPos), lBytes - lPos, Flags, uAddr, LenB(uAddr))
+            Else
+                lSize = ws_recv(m_hSocket, Buffer(lPos), lBytes - lPos, Flags)
+            End If
+            If lSize = SOCKET_ERROR Then
+                m_lLastError = Err.LastDllError
+                GoTo QH
+            ElseIf lSize = 0 Then
+                If lPos = 0 Then
+                    Buffer = vbNullString
+                Else
+                    ReDim Preserve Buffer(0 To lPos - 1) As Byte
+                End If
+                Exit Do
+            End If
+        Loop While lPos + lSize < lBytes
         If uAddr.sin_family <> 0 Then
             pvFromSockAddr uAddr, HostAddress, HostPort
         End If

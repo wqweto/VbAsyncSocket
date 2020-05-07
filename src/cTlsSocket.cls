@@ -821,7 +821,7 @@ Public Function Connect( _
             HostAddress As String, _
             ByVal HostPort As Long, _
             Optional ByVal UseTls As Boolean = True, _
-            Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum = ucsTlsSupportAll) As Boolean
+            Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum) As Boolean
     Const FUNC_NAME     As String = "Connect"
     
     On Error GoTo EH
@@ -842,7 +842,7 @@ End Function
 
 Public Function StartTls( _
             Optional RemoteHostName As String, _
-            Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum = ucsTlsSupportAll) As Boolean
+            Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum) As Boolean
     Const FUNC_NAME     As String = "StartTls"
     Dim baOutput()      As Byte
     Dim lSize           As Long
@@ -856,7 +856,11 @@ Public Function StartTls( _
     If LenB(RemoteHostName) <> 0 Then
         m_sRemoteHostName = RemoteHostName
     End If
-    m_eLocalFeatures = LocalFeatures
+    If LocalFeatures = 0 Then
+        m_eLocalFeatures = ucsTlsSupportAll Or IIf(OsVersion < ucsOsvXp, ucsTlsIgnoreServerCertificateErrors, 0)
+    Else
+        m_eLocalFeatures = LocalFeatures
+    End If
     If Not pvTlsInitClient(m_uCtx, m_sRemoteHostName, m_eLocalFeatures) Then
         GoTo QH
     End If
@@ -1042,6 +1046,14 @@ EH:
     Resume QH
 End Function
 
+Public Function GetErrorDescription(ByVal ErrorCode As Long) As String
+    If ErrorCode = -1 Then
+        GetErrorDescription = pvTlsGetLastError(m_uCtx)
+    Else
+        GetErrorDescription = m_oSocket.GetErrorDescription(ErrorCode)
+    End If
+End Function
+
 '= forwarded =============================================================
 
 Public Function Create( _
@@ -1088,10 +1100,6 @@ End Function
 
 Public Function ToTextArray(sText As String, Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As Byte()
     ToTextArray = m_oSocket.ToTextArray(sText, CodePage)
-End Function
-
-Public Function GetErrorDescription(ByVal ErrorCode As Long) As String
-    GetErrorDescription = m_oSocket.GetErrorDescription(ErrorCode)
 End Function
 
 '= sync ==================================================================
@@ -1358,10 +1366,13 @@ Private Function pvOnReceive() As Boolean
     Dim lPrevSize       As Long
     
     On Error GoTo EH
-    If Not m_oSocket.ReceiveArray(baRecv) Then
-        GoTo QH
-    End If
-    If pvArraySize(baRecv) > 0 Then
+    Do
+        If Not m_oSocket.ReceiveArray(baRecv) Then
+            GoTo QH
+        End If
+        If pvArraySize(baRecv) <= 0 Then
+            Exit Do
+        End If
         If Not pvTlsIsReady(m_uCtx) Then
             bResult = pvTlsHandshake(m_uCtx, baRecv, -1, baOutput, lSize)
             baRecv = vbNullString
@@ -1381,7 +1392,7 @@ Private Function pvOnReceive() As Boolean
             If Not pvTlsIsReady(m_uCtx) Then
                 GoTo QH
             End If
-            If Not m_uCtx.IsServer And (m_uCtx.LocalFeatures = ucsTlsIgnoreServerCertificateErrors) = 0 Then
+            If Not m_uCtx.IsServer And (m_uCtx.LocalFeatures And ucsTlsIgnoreServerCertificateErrors) = 0 Then
                 If m_uCtx.RemoteCertificates Is Nothing Then
                     RaiseEvent OnError(-1, ucsSfdRead)
                     GoTo QH
@@ -1405,7 +1416,7 @@ Private Function pvOnReceive() As Boolean
             RaiseEvent OnError(-1, ucsSfdRead)
             GoTo QH
         End If
-    End If
+    Loop
     '--- success
     pvOnReceive = True
 QH:
