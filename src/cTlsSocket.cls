@@ -149,6 +149,7 @@ Private Const NCRYPTBUFFER_PKCS_SECRET                  As Long = 46
 Private Const NCRYPT_ALLOW_EXPORT_FLAG                  As Long = &H1
 Private Const NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG        As Long = &H2
 Private Const ERR_TIMEOUT                               As Long = &H800705B4
+Private Const INVALID_SOCKET                            As Long = -1
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
@@ -720,7 +721,7 @@ Property Get IsClosed() As Boolean
     If m_bUseTls Then
         IsClosed = pvTlsIsClosed(m_uCtx)
     Else
-        IsClosed = (m_oSocket.SocketHandle = -1) ' INVALID_SOCKET
+        IsClosed = (m_oSocket.SocketHandle = INVALID_SOCKET)
     End If
 End Property
 
@@ -1000,9 +1001,10 @@ Public Function Send( _
             ByVal BufLen As Long, _
             Optional HostAddress As String, _
             Optional ByVal HostPort As Long) As Long
+    Const FUNC_NAME     As String = "Send"
     Dim baBuffer()      As Byte
     
-    
+    On Error GoTo EH
     If BufLen = 0 Then
         '--- do nothing
     ElseIf m_bUseTls Then
@@ -1015,6 +1017,9 @@ Public Function Send( _
     Else
         Send = m_oSocket.Send(BufPtr, BufLen, HostAddress, HostPort)
     End If
+    Exit Function
+EH:
+    PrintError FUNC_NAME
 End Function
 
 Public Function ShutDown() As Boolean
@@ -1037,7 +1042,7 @@ EH:
     Resume QH
 End Function
 
-'= forward ===============================================================
+'= forwarded =============================================================
 
 Public Function Create( _
             Optional ByVal SocketPort As Long, _
@@ -1456,7 +1461,7 @@ EH:
 End Function
 
 '=========================================================================
-' TLS methods
+' TLS support
 '=========================================================================
 
 Private Function pvTlsInitClient( _
