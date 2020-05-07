@@ -2,17 +2,33 @@ VERSION 5.00
 Object = "{248DD890-BB45-11CF-9ABC-0080C7E7B78D}#1.0#0"; "MSWINSCK.OCX"
 Begin VB.Form Form1 
    Caption         =   "Form1"
-   ClientHeight    =   2316
+   ClientHeight    =   2952
    ClientLeft      =   108
    ClientTop       =   456
    ClientWidth     =   3624
    LinkTopic       =   "Form1"
-   ScaleHeight     =   2316
+   ScaleHeight     =   2952
    ScaleWidth      =   3624
    StartUpPosition =   3  'Windows Default
+   Begin VB.CommandButton Command4 
+      Caption         =   "HTTPS Server"
+      Height          =   516
+      Left            =   252
+      TabIndex        =   3
+      Top             =   2268
+      Width           =   1524
+   End
+   Begin VB.CommandButton Command3 
+      Caption         =   "HTTPS request"
+      Height          =   516
+      Left            =   252
+      TabIndex        =   2
+      Top             =   1596
+      Width           =   1524
+   End
    Begin VB.CommandButton Command2 
       Caption         =   "HTTP Server"
-      Height          =   600
+      Height          =   516
       Left            =   252
       TabIndex        =   1
       Top             =   924
@@ -63,7 +79,27 @@ Attribute VB_Exposed = False
 Option Explicit
 
 Private Sub Command1_Click()
+    ctxWinsock.Protocol = sckTCPProtocol
     ctxWinsock.Connect "bgdev.org", 80
+End Sub
+
+Private Sub Command3_Click()
+    ctxWinsock.Protocol = sckTLSProtocol
+    ctxWinsock.Connect "bgdev.org", 443
+End Sub
+
+Private Sub Command2_Click()
+    ctxServer(0).Protocol = sckTCPProtocol
+    ctxServer(0).Bind 8088, "127.0.0.1"
+    ctxServer(0).Listen
+    Shell "cmd /c start http://localhost:8088/"
+End Sub
+
+Private Sub Command4_Click()
+    ctxServer(0).Protocol = sckTLSProtocol
+    ctxServer(0).Bind 8088, "127.0.0.1"
+    ctxServer(0).Listen
+    Shell "cmd /c start https://localhost:8088/"
 End Sub
 
 Private Sub ctxWinsock_Connect()
@@ -78,21 +114,14 @@ Private Sub ctxWinsock_DataArrival(ByVal bytesTotal As Long)
     
     Debug.Print "DataArrival", bytesTotal
     ctxWinsock.PeekData sBuffer
-    Do
-        ctxWinsock.GetData sBuffer, maxLen:=10
-        Debug.Print sBuffer;
-    Loop While LenB(sBuffer) <> 0
-End Sub
-
-Private Sub Command2_Click()
-    ctxServer(0).Bind 8088, "127.0.0.1"
-    ctxServer(0).Listen
-    Shell "cmd /c start http://localhost:8088/"
+    ctxWinsock.GetData sBuffer
+    Debug.Print sBuffer;
 End Sub
 
 Private Sub ctxServer_ConnectionRequest(Index As Integer, ByVal requestID As Long)
     Debug.Print "ctxServer_ConnectionRequest, requestID=" & requestID & ", RemoteHostIP=" & ctxServer(Index).RemoteHostIP & ", RemotePort=" & ctxServer(Index).RemotePort, Timer
     Load ctxServer(ctxServer.UBound + 1)
+    ctxServer(ctxServer.UBound).Protocol = ctxServer(Index).Protocol
     ctxServer(ctxServer.UBound).Accept requestID
 End Sub
 

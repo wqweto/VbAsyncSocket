@@ -68,6 +68,7 @@ Event Error(ByVal Number As Long, Description As String, ByVal Scode As UcsError
 Public Enum UcsProtocolConstants
     sckTCPProtocol = 0
     sckUDPProtocol = 1
+    sckTLSProtocol = 2
 End Enum
 
 Public Enum UcsStateConstants
@@ -145,7 +146,7 @@ Private Const DEF_REMOTEHOST        As String = vbNullString
 Private Const DEF_REMOTEPORT        As Long = 0
 Private Const DEF_TIMEOUT           As Long = 5000
 
-Private WithEvents m_oSocket    As cAsyncSocket
+Private WithEvents m_oSocket    As cTlsSocket
 Attribute m_oSocket.VB_VarHelpID = -1
 Private m_eState                As UcsStateConstants
 Private m_lLocalPort            As Long
@@ -156,7 +157,7 @@ Private m_lTimeout              As Long
 Private m_baRecvBuffer()        As Byte
 Private m_baSendBuffer()        As Byte
 Private m_lSendPos              As Long
-Private m_oRequestSocket        As cAsyncSocket
+Private m_oRequestSocket        As cTlsSocket
 
 '=========================================================================
 ' Error handling
@@ -267,7 +268,7 @@ Property Get RemoteHostIP() As String
     pvSocket.GetPeerName RemoteHostIP, 0
 End Property
 
-Private Property Get pvSocket() As cAsyncSocket
+Private Property Get pvSocket() As cTlsSocket
     Const FUNC_NAME     As String = "pvSocket [get]"
     
     On Error GoTo EH
@@ -275,8 +276,8 @@ Private Property Get pvSocket() As cAsyncSocket
         Set pvSocket = m_oRequestSocket
     Else
         If m_oSocket Is Nothing Then
-            Set m_oSocket = New cAsyncSocket
-            m_oSocket.Create SocketType:=m_eProtocol
+            Set m_oSocket = New cTlsSocket
+            m_oSocket.Create SocketType:=(m_eProtocol And 1)
         End If
         Set pvSocket = m_oSocket
     End If
@@ -299,7 +300,10 @@ Public Sub Accept(ByVal requestID As Long)
         pvSetError Err.LastDllError, RaiseError:=True
         GoTo QH
     End If
-    Set m_oSocket = New cAsyncSocket
+    Set m_oSocket = g_oRequestSocket
+    If m_oSocket Is Nothing Then
+        Set m_oSocket = New cTlsSocket
+    End If
     If Not m_oSocket.Attach(hDuplicate) Then
         On Error GoTo 0
         pvSetError m_oSocket.LastError, RaiseError:=True
@@ -356,7 +360,7 @@ Public Sub Connect(Optional RemoteHost As String, Optional ByVal RemotePort As L
         m_lRemotePort = RemotePort
     End If
     pvState = sckResolvingHost
-    If Not pvSocket.Connect(m_sRemoteHost, m_lRemotePort) Then
+    If Not pvSocket.Connect(m_sRemoteHost, m_lRemotePort, UseTls:=(m_eProtocol = sckTLSProtocol)) Then
         On Error GoTo 0
         pvSetError pvSocket.LastError, RaiseError:=True
     End If
@@ -370,6 +374,9 @@ Public Sub Listen()
     Const FUNC_NAME     As String = "Listen"
     
     On Error GoTo EH
+    If m_eProtocol = sckTLSProtocol Then
+        pvSocket.StartServerTls
+    End If
     If Not pvSocket.Listen() Then
         On Error GoTo 0
         pvSetError pvSocket.LastError, RaiseError:=True
@@ -522,19 +529,23 @@ End Sub
 
 Private Sub m_oSocket_OnAccept()
     Const FUNC_NAME     As String = "m_oSocket_OnAccept"
-    Dim oTemp           As cAsyncSocket
+    Dim oTemp           As cTlsSocket
+    Dim hSocket         As Long
     
     On Error GoTo EH
     pvState = sckConnectionPending
-    Set oTemp = New cAsyncSocket
-    If Not m_oSocket.Accept(oTemp) Then
+    Set oTemp = New cTlsSocket
+    If Not m_oSocket.Accept(oTemp, UseTls:=(m_eProtocol = sckTLSProtocol)) Then
         pvSetError m_oSocket.LastError
         GoTo QH
     End If
     Set m_oRequestSocket = oTemp
-    RaiseEvent ConnectionRequest(oTemp.SocketHandle)
+    Set g_oRequestSocket = oTemp
+    hSocket = oTemp.Detach()
+    RaiseEvent ConnectionRequest(hSocket)
     Set m_oRequestSocket = Nothing
-    Call ws_closesocket(oTemp.Detach())
+    Set g_oRequestSocket = Nothing
+    Call ws_closesocket(hSocket)
     pvState = sckListening
 QH:
     Exit Sub
