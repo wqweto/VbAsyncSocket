@@ -56,7 +56,7 @@ Private Declare Function SetEnvironmentVariable Lib "kernel32" Alias "SetEnviron
 ' Constants and member variables
 '=========================================================================
 
-Private WithEvents m_oSocket    As cAsyncSocket
+Private WithEvents m_oSocket    As cTlsSocket
 Attribute m_oSocket.VB_VarHelpID = -1
 Private m_dblLimit              As Long
 Private m_cEvents               As Collection
@@ -85,7 +85,7 @@ End Property
 ' Methods
 '=========================================================================
 
-Public Function Init(oSocket As cAsyncSocket, ByVal LimitInBytes As Long) As Boolean
+Public Function Init(oSocket As cTlsSocket, ByVal LimitInBytes As Long) As Boolean
     Const FUNC_NAME     As String = "Init"
     
     On Error GoTo EH
@@ -244,12 +244,12 @@ Private Sub m_oSocket_BeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnu
             m_dblCurSize = m_dblCurSize + m_oSocket.LastSendBytes
         End If
         lDelay = pvCalcWaitTime(m_dblCurSize, m_dblLimit, TimerEx - m_dblStartTime)
-        If lDelay > 0 Then
-            m_cEvents.Add EventMask
-            Cancel = True
-            Set m_pTimer = InitFireOnceTimerThunk(Me, pvAddressOfTimerProc.TimerProc(), Delay:=lDelay)
-        End If
     End Select
+    If lDelay > 0 Or m_cEvents.Count > 0 Then
+        m_cEvents.Add EventMask
+        Cancel = True
+        Set m_pTimer = InitFireOnceTimerThunk(Me, pvAddressOfTimerProc.TimerProc(), Delay:=lDelay)
+    End If
     Exit Sub
 EH:
     PrintError FUNC_NAME

@@ -9,6 +9,15 @@ Begin VB.Form Form1
    ScaleHeight     =   6336
    ScaleWidth      =   5448
    StartUpPosition =   3  'Windows Default
+   Begin VB.CheckBox chkUseHttps 
+      Caption         =   "Use HTTPS"
+      Height          =   264
+      Left            =   2688
+      TabIndex        =   18
+      Top             =   5712
+      Value           =   1  'Checked
+      Width           =   1608
+   End
    Begin VB.TextBox txtBandwidth 
       Height          =   288
       Left            =   4452
@@ -752,8 +761,7 @@ End Sub
 
 Private Sub Command11_Click()
     Set m_oHttpDownload = New cHttpDownload
-    m_oHttpDownload.DownloadFile "http://dl.unicontsoft.com/upload/pix/ss_vbyoga_flex_container.gif", Environ$("TMP") & "\aaa.gif"
-'    m_oHttpDownload.DownloadFile "http://www.unicontsoft.com/forum", Environ$("TMP") & "\aaa.html"
+    m_oHttpDownload.DownloadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://dl.unicontsoft.com/upload/pix/ss_vbyoga_flex_container.gif", Environ$("TMP") & "\aaa.gif"
 End Sub
 
 Private Sub m_oHttpDownload_OperationStart()
@@ -786,7 +794,7 @@ End Sub
 
 Private Sub Command12_Click()
     Set m_oHttpDownload = New cHttpDownload
-    m_oHttpDownload.UploadFile "http://www.unicontsoft.com/upload_errors.php?id=deldeldel", Environ$("TMP") & "\aaa.gif"
+    m_oHttpDownload.UploadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://www.unicontsoft.com/upload_errors.php?id=deldeldel", Environ$("TMP") & "\aaa.gif"
 End Sub
 
 Private Sub m_oHttpDownload_UploadProgress(ByVal BytesWritten As Double, ByVal BytesTotal As Double)
