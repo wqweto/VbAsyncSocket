@@ -51,6 +51,7 @@ Private Declare Function CryptAcquireContext Lib "advapi32" Alias "CryptAcquireC
 Private Declare Function CryptReleaseContext Lib "advapi32" (ByVal hProv As Long, ByVal dwFlags As Long) As Long
 Private Declare Function CryptGenRandom Lib "advapi32" (ByVal hProv As Long, ByVal dwLen As Long, ByVal pbBuffer As Long) As Long
 #If ImplUseLibSodium Then
+    Private Declare Function LoadLibrary Lib "kernel32" Alias "LoadLibraryA" (ByVal lpLibFileName As String) As Long
     '--- libsodium
     Private Declare Function sodium_init Lib "libsodium" () As Long
     Private Declare Function randombytes_buf Lib "libsodium" (ByVal lpOut As Long, ByVal lSize As Long) As Long
@@ -162,7 +163,9 @@ Public Function CryptoInit() As Boolean
     With m_uData
         #If ImplUseLibSodium Then
             If GetModuleHandle("libsodium.dll") = 0 Then
-                Call LoadLibrary(App.Path & "\libsodium.dll")
+                If LoadLibrary(App.Path & "\libsodium.dll") = 0 Then
+                    Call LoadLibrary(App.Path & "\..\..\lib\libsodium.dll")
+                End If
                 If sodium_init() < 0 Then
                     hResult = LNG_OUT_OF_MEMORY
                     sApiSource = "sodium_init"
