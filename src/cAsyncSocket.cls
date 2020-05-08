@@ -116,6 +116,7 @@ Private Const AF_INET                       As Long = 2
 Private Const ERR_TIMEOUT                   As Long = &H800705B4
 '--- for ioctlsocket
 Private Const FIONREAD                      As Long = &H4004667F
+Private Const FIONBIO                       As Long = &H8004667E
 '--- for WSAGetLastError
 Private Const WSABASEERR                    As Long = 10000
 Private Const WSAEINTR                      As Long = (WSABASEERR + 4)
@@ -316,6 +317,12 @@ End Property
 Property Get AvailableBytes() As Long
     If Not IOCtl(FIONREAD, AvailableBytes) Then
         AvailableBytes = SOCKET_ERROR
+    End If
+End Property
+
+Property Get BlockingMode() As Long
+    If Not IOCtl(FIONBIO, BlockingMode) Then
+        BlockingMode = SOCKET_ERROR
     End If
 End Property
 
