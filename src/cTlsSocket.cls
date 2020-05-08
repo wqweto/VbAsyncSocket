@@ -126,6 +126,9 @@ Private Const CERT_TRUST_IS_PARTIAL_CHAIN               As Long = &H10000
 Private Const CERT_FIND_EXISTING                        As Long = &HD0000
 '--- for CERT_ALT_NAME_ENTRY
 Private Const CERT_ALT_NAME_DNS_NAME                    As Long = 3
+'--- for WSAGetLastError
+Private Const WSABASEERR                                As Long = 10000
+Private Const WSAEWOULDBLOCK                            As Long = (WSABASEERR + 35)
 '--- OIDs
 Private Const szOID_RSA_RSA                             As String = "1.2.840.113549.1.1.1"
 Private Const szOID_RSA_SSA_PSS                         As String = "1.2.840.113549.1.1.10"
@@ -535,6 +538,8 @@ Private m_lRecvSize             As Long
 Private m_baSend()              As Byte
 Private m_lSendPos              As Long
 Private m_lSendSize             As Long
+Private m_lSendBytes            As Long
+Private m_lLastSendBytes        As Long
 
 Private Enum UcsTlsStatesEnum
     ucsTlsStateNew
@@ -547,6 +552,7 @@ Private Enum UcsTlsStatesEnum
     ucsTlsStateExpectClientHello
     ucsTlsStateExpectClientFinished
     ucsTlsStatePostHandshake
+    ucsTlsStateShutdown
 End Enum
 
 Private Enum UcsTlsCryptoAlgorithmsEnum
@@ -713,8 +719,13 @@ Property Get LastErrorText() As String
     End If
 End Property
 
-Property Get LastError() As String
+Property Get LastError() As Long
     LastError = m_oSocket.LastError
+    If LastError = 0 Then
+        If LenB(LastErrorText) <> 0 Then
+            LastError = -1
+        End If
+    End If
 End Property
 
 Property Get IsClosed() As Boolean
@@ -734,7 +745,19 @@ Property Get AvailableBytes() As Long
 End Property
 
 Property Get LastSendBytes() As Long
-    LastSendBytes = m_oSocket.LastSendBytes
+    If m_bUseTls Then
+        LastSendBytes = m_lLastSendBytes
+    Else
+        LastSendBytes = m_oSocket.LastSendBytes
+    End If
+End Property
+
+Property Get LocalCertificates() As Collection
+    Set LocalCertificates = m_uCtx.LocalCertificates
+End Property
+
+Property Get HasPendingEvent() As Boolean
+    HasPendingEvent = m_oSocket.HasPendingEvent
 End Property
 
 Friend Property Get frRootStore() As Long
@@ -743,10 +766,6 @@ Friend Property Get frRootStore() As Long
     Else
         frRootStore = m_hRootStore
     End If
-End Property
-
-Property Get LocalCertificates() As Collection
-    Set LocalCertificates = m_uCtx.LocalCertificates
 End Property
 
 '=========================================================================
@@ -922,6 +941,7 @@ Public Function ReceiveArray( _
             Call CopyMemory(Buffer(0), m_baRecv(0), m_lRecvSize)
             m_lRecvSize = 0
         End If
+        m_oSocket.Receive 0, 0 '--- enable FD_READ
         '--- success
         ReceiveArray = True
     Else
@@ -969,6 +989,7 @@ Public Function SendArray( _
             GoTo QH
         End If
         lInputSize = pvArraySize(Buffer)
+        m_lSendBytes = m_lSendBytes + lInputSize
         If lInputSize <= TLS_MAX_PLAINTEXT_RECORD_SIZE Then
             bResult = pvTlsSend(m_uCtx, Buffer, lInputSize, m_baSend, m_lSendSize)
         Else
@@ -1031,8 +1052,10 @@ Public Function ShutDown() As Boolean
     
     On Error GoTo EH
     If m_bUseTls Then
-        If Not pvOnShutdown() Then
-            GoTo QH
+        If pvTlsIsReady(m_uCtx) And m_uCtx.State <> ucsTlsStateShutdown Then
+            If Not pvOnShutdown() Then
+                GoTo QH
+            End If
         End If
         '--- success
         ShutDown = True
@@ -1087,7 +1110,37 @@ Public Function Detach() As Long
 End Function
 
 Public Sub Close_()
-    m_oSocket.Close_
+    If m_bUseTls Then
+        If pvTlsIsReady(m_uCtx) And m_uCtx.State <> ucsTlsStateShutdown Then
+            If Not pvOnShutdown() Then
+                GoTo QH
+            End If
+        End If
+    Else
+        m_oSocket.Close_
+    End If
+QH:
+End Sub
+
+Public Sub PostEvent(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Optional ByVal Immediate As Boolean)
+    If Immediate Then
+        Select Case EventMask
+        Case ucsSfdRead
+            RaiseEvent OnReceive
+        Case ucsSfdWrite
+            RaiseEvent OnSend
+        Case ucsSfdConnect
+            RaiseEvent OnConnect
+        Case ucsSfdAccept
+            RaiseEvent OnAccept
+        Case ucsSfdClose
+            RaiseEvent OnClose
+            m_uCtx.State = ucsTlsStateClosed
+            m_bUseTls = False
+        End Select
+    Else
+        m_oSocket.PostEvent EventMask, Immediate
+    End If
 End Sub
 
 Public Function Bind(Optional SocketAddress As String, Optional ByVal SocketPort As Long) As Boolean
@@ -1357,7 +1410,7 @@ EH:
     Resume QH
 End Function
 
-Private Function pvOnReceive() As Boolean
+Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
     Const FUNC_NAME     As String = "pvOnReceive"
     Dim baRecv()        As Byte
     Dim baOutput()      As Byte
@@ -1366,7 +1419,11 @@ Private Function pvOnReceive() As Boolean
     Dim lPrevSize       As Long
     
     On Error GoTo EH
+    lPrevSize = m_lRecvSize
     Do
+        If pvTlsIsClosed(m_uCtx) Then
+            Exit Do
+        End If
         If Not m_oSocket.ReceiveArray(baRecv) Then
             GoTo QH
         End If
@@ -1380,9 +1437,15 @@ Private Function pvOnReceive() As Boolean
                 If Not m_oSocket.SendArray(baOutput) Then
                     GoTo QH
                 End If
+                If m_oSocket.LastError <> WSAEWOULDBLOCK Then
+                    m_oSocket.PostEvent ucsSfdWrite
+                    m_oSocket.frLastError = WSAEWOULDBLOCK
+                End If
             End If
             If pvTlsIsClosed(m_uCtx) Then
-                RaiseEvent OnClose
+                If pvOnBeforeNotify(ucsSfdClose) Then
+                    RaiseEvent OnClose
+                End If
                 GoTo QH
             End If
             If Not bResult Then
@@ -1402,21 +1465,25 @@ Private Function pvOnReceive() As Boolean
                     GoTo QH
                 End If
             End If
-            RaiseEvent OnConnect
+            If pvOnBeforeNotify(ucsSfdConnect) Then
+                RaiseEvent OnConnect
+            End If
         End If
-        lPrevSize = m_lRecvSize
         bResult = pvTlsReceive(m_uCtx, baRecv, -1, m_baRecv, m_lRecvSize)
-        If m_lRecvSize > lPrevSize Then
+    Loop While Flush
+    If m_lRecvSize > lPrevSize Then
+        If pvOnBeforeNotify(ucsSfdRead) Then
             RaiseEvent OnReceive
         End If
-        If pvTlsIsClosed(m_uCtx) Then
+    End If
+    If pvTlsIsClosed(m_uCtx) Then
+        If pvOnBeforeNotify(ucsSfdClose) Then
             RaiseEvent OnClose
         End If
-        If Not bResult Then
-            RaiseEvent OnError(-1, ucsSfdRead)
-            GoTo QH
-        End If
-    Loop
+    ElseIf Not bResult Then
+        RaiseEvent OnError(-1, ucsSfdRead)
+        GoTo QH
+    End If
     '--- success
     pvOnReceive = True
 QH:
@@ -1431,18 +1498,22 @@ Private Function pvOnSend() As Boolean
     Dim lBytes          As Long
     
     On Error GoTo EH
-    If pvTlsIsReady(m_uCtx) And m_lSendPos < m_lSendSize Then
-        lBytes = m_oSocket.Send(VarPtr(m_baSend(m_lSendPos)), m_lSendSize - m_lSendPos)
-        If lBytes < 0 Then
+    If Not pvTlsIsReady(m_uCtx) Then
+        GoTo QH
+    End If
+    Do While m_lSendPos < m_lSendSize
+        lBytes = m_oSocket.Send(VarPtr(m_baSend(m_lSendPos)), IIf(m_lSendSize - m_lSendPos > 32768, 32768, m_lSendSize - m_lSendPos))
+        If m_oSocket.LastError = WSAEWOULDBLOCK Then
+            Exit Do
+        ElseIf lBytes < 0 Then
             GoTo QH
         Else
             m_lSendPos = m_lSendPos + lBytes
-            RaiseEvent OnSend
         End If
-        If m_lSendPos >= m_lSendSize Then
-            m_lSendPos = 0
-            m_lSendSize = 0
-        End If
+    Loop
+    If m_oSocket.LastError <> WSAEWOULDBLOCK Then
+        m_oSocket.PostEvent ucsSfdWrite
+        m_oSocket.frLastError = WSAEWOULDBLOCK
     End If
     '--- success
     pvOnSend = True
@@ -1461,7 +1532,13 @@ Private Function pvOnShutdown() As Boolean
     If Not pvTlsShutdown(m_uCtx, baOutput, 0) Then
         GoTo QH
     End If
-    Call m_oSocket.SendArray(baOutput)
+    If Not m_oSocket.SendArray(baOutput) Then
+        GoTo QH
+    End If
+    If m_oSocket.LastError <> WSAEWOULDBLOCK Then
+        m_oSocket.PostEvent ucsSfdWrite
+        m_oSocket.frLastError = WSAEWOULDBLOCK
+    End If
     '--- success
     pvOnShutdown = True
 QH:
@@ -1469,6 +1546,13 @@ QH:
 EH:
     PrintError FUNC_NAME
     Resume QH
+End Function
+
+Private Function pvOnBeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum) As Boolean
+    Dim bCancel         As Boolean
+    
+    RaiseEvent BeforeNotify(EventMask, bCancel)
+    pvOnBeforeNotify = Not bCancel
 End Function
 
 '=========================================================================
@@ -1656,7 +1740,7 @@ Private Function pvTlsShutdown(uCtx As UcsTlsContext, baOutput() As Byte, lPos A
         '--- swap-in
         pvArraySwap .SendBuffer, .SendPos, baOutput, lPos
         .SendPos = pvTlsBuildAlert(uCtx, .SendBuffer, .SendPos, uscTlsAlertCloseNotify, TLS_ALERT_LEVEL_WARNING)
-        .State = ucsTlsStateClosed
+        .State = ucsTlsStateShutdown
         '--- success
         pvTlsShutdown = True
 QH:
@@ -1674,7 +1758,7 @@ Private Function pvTlsIsClosed(uCtx As UcsTlsContext) As Boolean
 End Function
 
 Private Function pvTlsIsReady(uCtx As UcsTlsContext) As Boolean
-    pvTlsIsReady = (uCtx.State = ucsTlsStatePostHandshake)
+    pvTlsIsReady = (uCtx.State >= ucsTlsStatePostHandshake)
 End Function
 
 Private Function pvTlsGetLastError(uCtx As UcsTlsContext) As String
@@ -5321,8 +5405,10 @@ End Sub
 
 Private Sub m_oSocket_OnReceive()
     If m_bUseTls Then
-        If Not pvOnReceive() Then
-            GoTo QH
+        If m_lRecvSize = 0 Or m_uCtx.State = ucsTlsStateShutdown Then
+            If Not pvOnReceive() Then
+                GoTo QH
+            End If
         End If
     Else
         RaiseEvent OnReceive
@@ -5332,8 +5418,21 @@ End Sub
 
 Private Sub m_oSocket_OnSend()
     If m_bUseTls Then
-        If Not pvOnSend() Then
+        If Not pvTlsIsReady(m_uCtx) Then
             GoTo QH
+        End If
+        If m_lSendPos >= m_lSendSize Then
+            m_lSendPos = 0
+            m_lSendSize = 0
+            m_lLastSendBytes = m_lSendBytes
+            m_lSendBytes = 0
+            If pvOnBeforeNotify(ucsSfdWrite) Then
+                RaiseEvent OnSend
+            End If
+        ElseIf m_lSendPos > 0 Then
+            If Not pvOnSend() Then
+                GoTo QH
+            End If
         End If
     Else
         RaiseEvent OnSend
@@ -5342,22 +5441,38 @@ QH:
 End Sub
 
 Private Sub m_oSocket_BeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Cancel As Boolean)
-    RaiseEvent BeforeNotify(EventMask, Cancel)
+    If Not m_bUseTls Then
+        RaiseEvent BeforeNotify(EventMask, Cancel)
+    End If
 End Sub
 
 Private Sub m_oSocket_OnAccept()
-    RaiseEvent OnAccept
+    If m_bUseTls Then
+        If pvOnBeforeNotify(ucsSfdAccept) Then
+            RaiseEvent OnAccept
+        End If
+    Else
+        RaiseEvent OnAccept
+    End If
 End Sub
 
 Private Sub m_oSocket_OnClose()
     If m_bUseTls Then
-        If Not pvTlsIsClosed(m_uCtx) Then
-            m_uCtx.State = ucsTlsStateClosed
+        If Not pvOnReceive(Flush:=True) Then
+            GoTo QH
+        End If
+        If pvTlsIsClosed(m_uCtx) Then
+            GoTo QH
+        End If
+        If pvOnBeforeNotify(ucsSfdClose) Then
             RaiseEvent OnClose
+            m_uCtx.State = ucsTlsStateClosed
+            m_bUseTls = False
         End If
     Else
         RaiseEvent OnClose
     End If
+QH:
 End Sub
 
 Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
