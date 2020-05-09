@@ -1143,7 +1143,7 @@ EH:
 End Function
 
 Public Function SyncReceiveText( _
-            Optional ByVal NeedLen As Long, _
+            Optional ByVal NeedLen As Long = 1, _
             Optional ByVal Timeout As Long, _
             Optional HostAddress As String = STR_CHR1, _
             Optional HostPort As Long, _
@@ -1169,10 +1169,12 @@ Public Function SyncReceiveText( _
                 GoTo QH
             End If
         End If
-        bResult = SyncReceiveArray(baBuffer, NeedLen - Len(SyncReceiveText), Timeout - lElapsed, HostAddress, HostPort)
-        ReDim Preserve baText(0 To UBound(baText) + UBound(baBuffer) + 1) As Byte
-        Call CopyMemory(baText(UBound(baText) - UBound(baBuffer)), baBuffer(0), UBound(baBuffer) + 1)
-        SyncReceiveText = FromTextArray(baText, CodePage)
+        bResult = SyncReceiveArray(baBuffer, 0, Timeout - lElapsed, HostAddress, HostPort)
+        If UBound(baBuffer) >= 0 Then
+            ReDim Preserve baText(0 To UBound(baText) + UBound(baBuffer) + 1) As Byte
+            Call CopyMemory(baText(UBound(baText) - UBound(baBuffer)), baBuffer(0), UBound(baBuffer) + 1)
+            SyncReceiveText = FromTextArray(baText, CodePage)
+        End If
         If Not bResult Then
             GoTo QH
         End If
