@@ -1075,38 +1075,6 @@ Public Function GetErrorDescription(ByVal ErrorCode As Long) As String
     End If
 End Function
 
-'= forwarded =============================================================
-
-Public Function Create( _
-            Optional ByVal SocketPort As Long, _
-            Optional ByVal SocketType As UcsAsyncSocketTypeEnum = ucsSckStream, _
-            Optional ByVal EventMask As UcsAsyncSocketEventMaskEnum = ucsSfdAll, _
-            Optional SocketAddress As String) As Boolean
-    Create = m_oSocket.Create(SocketPort, SocketType, EventMask, SocketAddress)
-End Function
-
-Public Function GetSockName(SocketAddress As String, SocketPort As Long) As Boolean
-    GetSockName = m_oSocket.GetSockName(SocketAddress, SocketPort)
-End Function
-
-Public Function GetPeerName(PeerAddress As String, PeerPort As Long) As Boolean
-    GetPeerName = m_oSocket.GetPeerName(PeerAddress, PeerPort)
-End Function
-
-Public Function GetLocalHost(HostName As String, HostAddress As String) As Boolean
-    GetLocalHost = m_oSocket.GetLocalHost(HostName, HostAddress)
-End Function
-
-Public Function Attach( _
-            ByVal SocketHandle As Long, _
-            Optional ByVal EventMask As UcsAsyncSocketEventMaskEnum = ucsSfdAll) As Boolean
-    Attach = m_oSocket.Attach(SocketHandle, EventMask)
-End Function
-
-Public Function Detach() As Long
-    Detach = m_oSocket.Detach()
-End Function
-
 Public Sub Close_()
     If m_bUseTls Then
         If pvTlsIsReady(m_uCtx) And m_uCtx.State <> ucsTlsStateShutdown Then
@@ -1140,6 +1108,38 @@ Public Sub PostEvent(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Optional By
         m_oSocket.PostEvent EventMask, Immediate
     End If
 End Sub
+
+'= forwarded =============================================================
+
+Public Function Create( _
+            Optional ByVal SocketPort As Long, _
+            Optional ByVal SocketType As UcsAsyncSocketTypeEnum = ucsSckStream, _
+            Optional ByVal EventMask As UcsAsyncSocketEventMaskEnum = ucsSfdAll, _
+            Optional SocketAddress As String) As Boolean
+    Create = m_oSocket.Create(SocketPort, SocketType, EventMask, SocketAddress)
+End Function
+
+Public Function GetSockName(SocketAddress As String, SocketPort As Long) As Boolean
+    GetSockName = m_oSocket.GetSockName(SocketAddress, SocketPort)
+End Function
+
+Public Function GetPeerName(PeerAddress As String, PeerPort As Long) As Boolean
+    GetPeerName = m_oSocket.GetPeerName(PeerAddress, PeerPort)
+End Function
+
+Public Function GetLocalHost(HostName As String, HostAddress As String) As Boolean
+    GetLocalHost = m_oSocket.GetLocalHost(HostName, HostAddress)
+End Function
+
+Public Function Attach( _
+            ByVal SocketHandle As Long, _
+            Optional ByVal EventMask As UcsAsyncSocketEventMaskEnum = ucsSfdAll) As Boolean
+    Attach = m_oSocket.Attach(SocketHandle, EventMask)
+End Function
+
+Public Function Detach() As Long
+    Detach = m_oSocket.Detach()
+End Function
 
 Public Function Bind(Optional SocketAddress As String, Optional ByVal SocketPort As Long) As Boolean
     Bind = m_oSocket.Bind(SocketAddress, SocketPort)
@@ -1457,6 +1457,9 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
             If pvOnBeforeNotify(ucsSfdConnect) Then
                 RaiseEvent OnConnect
             End If
+            If pvOnBeforeNotify(ucsSfdWrite) Then
+                RaiseEvent OnSend
+            End If
             baRecv = vbNullString
         End If
         bResult = pvTlsReceive(m_uCtx, baRecv, -1, m_baRecv, m_lRecvSize)
@@ -1514,13 +1517,12 @@ End Function
 
 Private Function pvOnShutdown() As Boolean
     Const FUNC_NAME     As String = "pvOnShutdown"
-    Dim baOutput()      As Byte
     
     On Error GoTo EH
-    If Not pvTlsShutdown(m_uCtx, baOutput, 0) Then
+    If Not pvTlsShutdown(m_uCtx, m_uCtx.SendBuffer, m_uCtx.SendPos) Then
         GoTo QH
     End If
-    If Not m_oSocket.SendArray(baOutput) Then
+    If Not pvOnSend() Then
         GoTo QH
     End If
     '--- success
