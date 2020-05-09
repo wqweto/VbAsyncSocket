@@ -535,9 +535,6 @@ Private Sub m_oSocket_OnConnect()
                 sPostData, CodePage:=ucsScpAcp) Then
             pvSetError m_oSocket.LastError
         End If
-        If Not m_oSocket.HasPendingEvent Then
-            m_oSocket.PostEvent ucsSfdWrite
-        End If
     End If
     Exit Sub
 EH:
