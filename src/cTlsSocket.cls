@@ -709,21 +709,24 @@ Property Get SocketHandle() As Long
     SocketHandle = m_oSocket.SocketHandle
 End Property
 
-Property Get LastErrorText() As String
-    If m_oSocket.LastError <> 0 Then
-        LastErrorText = m_oSocket.GetErrorDescription(m_oSocket.LastError)
-    Else
-        LastErrorText = pvTlsGetLastError(m_uCtx)
-    End If
-End Property
-
-Property Get LastError() As Long
-    LastError = m_oSocket.LastError
-    If LastError = 0 Then
-        If LenB(LastErrorText) <> 0 Then
-            LastError = -1
+Property Get LastError() As VBA.ErrObject
+    Set LastError = Err
+    With LastError
+        If m_oSocket.LastError <> 0 Then
+            .Description = m_oSocket.GetErrorDescription(m_oSocket.LastError)
+            .Number = m_oSocket.LastError
+            .Source = "cAsyncSocket"
+        Else
+            .Description = pvTlsGetLastError(m_uCtx)
+            If LenB(.Description) <> 0 And .Description <> "Close notify." Then
+                .Number = vbObjectError
+                .Source = MODULE_NAME
+            Else
+                .Number = 0
+                .Source = vbNullString
+            End If
         End If
-    End If
+    End With
 End Property
 
 Property Get IsClosed() As Boolean
@@ -756,6 +759,10 @@ End Property
 
 Property Get HasPendingEvent() As Boolean
     HasPendingEvent = m_oSocket.HasPendingEvent
+End Property
+
+Property Get RemoteHostName() As String
+    RemoteHostName = m_uCtx.RemoteHostName
 End Property
 
 Friend Property Get frRootStore() As Long
@@ -868,11 +875,12 @@ Public Function StartTls( _
     If m_uCtx.State > ucsTlsStateClosed Then
         GoTo QH
     End If
+    m_bUseTls = True
     If LenB(RemoteHostName) <> 0 Then
         m_sRemoteHostName = RemoteHostName
     End If
-    If LocalFeatures = 0 Then
-        m_eLocalFeatures = ucsTlsSupportAll Or IIf(OsVersion < ucsOsvXp, ucsTlsIgnoreServerCertificateErrors, 0)
+    If (LocalFeatures And ucsTlsSupportAll) = 0 Then
+        m_eLocalFeatures = LocalFeatures Or ucsTlsSupportAll Or IIf(OsVersion < ucsOsvXp, ucsTlsIgnoreServerCertificateErrors, 0)
     Else
         m_eLocalFeatures = LocalFeatures
     End If
@@ -999,7 +1007,7 @@ Public Function SendArray( _
             Loop While lPos < lInputSize And bResult
         End If
         If Not bResult Then
-            RaiseEvent OnError(-1, ucsSfdWrite)
+            RaiseEvent OnError(vbObjectError, ucsSfdWrite)
             GoTo QH
         End If
         If pvTlsIsReady(m_uCtx) Then
@@ -1068,7 +1076,7 @@ EH:
 End Function
 
 Public Function GetErrorDescription(ByVal ErrorCode As Long) As String
-    If ErrorCode = -1 Then
+    If ErrorCode = vbObjectError Then
         GetErrorDescription = pvTlsGetLastError(m_uCtx)
     Else
         GetErrorDescription = m_oSocket.GetErrorDescription(ErrorCode)
@@ -1222,7 +1230,7 @@ EH:
 End Function
 
 Public Function SyncReceiveText( _
-            Optional ByVal NeedLen As Long, _
+            Optional ByVal NeedLen As Long = 1, _
             Optional ByVal Timeout As Long, _
             Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As String
     Const FUNC_NAME     As String = "SyncReceiveText"
@@ -1331,6 +1339,31 @@ EH:
     PrintError FUNC_NAME
 End Function
 
+Public Function SyncStartTls( _
+            Optional RemoteHostName As String, _
+            Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum, _
+            Optional ByVal Timeout As Long) As Boolean
+    Const FUNC_NAME     As String = "SyncStartTls"
+    
+    On Error GoTo EH
+    If Not StartTls(RemoteHostName, LocalFeatures) Then
+        GoTo QH
+    End If
+    If Timeout = 0 Then
+        Timeout = DEF_TIMEOUT
+    End If
+    If Not SyncWaitForEvent(Timeout, ucsSfdConnect) Then
+        GoTo QH
+    End If
+    '--- success
+    SyncStartTls = True
+QH:
+    Exit Function
+EH:
+    PrintError FUNC_NAME
+    Resume Next
+End Function
+
 Public Function SyncWaitForEvent( _
             ByVal Timeout As Long, _
             Optional ByVal EventMask As UcsAsyncSocketEventMaskEnum = ucsSfdAll) As Boolean
@@ -1373,7 +1406,7 @@ Public Function SyncWaitForEvent( _
                 GoTo QH
             End If
             m_oSocket.SyncProcessMsgQueue
-            If m_oSocket.LastError <> 0 Then
+            If LastError <> 0 Then
                 GoTo QH
             End If
         Loop
@@ -1423,9 +1456,6 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
         If Not m_oSocket.ReceiveArray(baRecv) Then
             GoTo QH
         End If
-        If pvArraySize(baRecv) <= 0 Then
-            Exit Do
-        End If
         If Not pvTlsIsReady(m_uCtx) Then
             bResult = pvTlsHandshake(m_uCtx, baRecv, -1, m_uCtx.SendBuffer, m_uCtx.SendPos)
             If Not pvOnSend() Then
@@ -1438,7 +1468,7 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
                 GoTo QH
             End If
             If Not bResult Then
-                RaiseEvent OnError(-1, ucsSfdRead)
+                RaiseEvent OnError(vbObjectError, ucsSfdRead)
                 GoTo QH
             End If
             If Not pvTlsIsReady(m_uCtx) Then
@@ -1446,11 +1476,11 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
             End If
             If Not m_uCtx.IsServer And (m_uCtx.LocalFeatures And ucsTlsIgnoreServerCertificateErrors) = 0 Then
                 If m_uCtx.RemoteCertificates Is Nothing Then
-                    RaiseEvent OnError(-1, ucsSfdRead)
+                    RaiseEvent OnError(vbObjectError, ucsSfdRead)
                     GoTo QH
                 End If
                 If Not pvPkiCertChainValidate(m_uCtx.RemoteHostName, m_uCtx.RemoteCertificates, frRootStore, m_uCtx.LastError) Then
-                    RaiseEvent OnError(-1, ucsSfdRead)
+                    RaiseEvent OnError(vbObjectError, ucsSfdRead)
                     GoTo QH
                 End If
             End If
@@ -1474,7 +1504,7 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
             RaiseEvent OnClose
         End If
     ElseIf Not bResult Then
-        RaiseEvent OnError(-1, ucsSfdRead)
+        RaiseEvent OnError(vbObjectError, ucsSfdRead)
         GoTo QH
     End If
     '--- success
