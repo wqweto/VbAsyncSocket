@@ -91,6 +91,7 @@ Private Declare Function GetAsyncKeyState Lib "user32" (ByVal vKey As Long) As I
 '=========================================================================
 
 Private WithEvents m_oSocket    As cTlsSocket
+Attribute m_oSocket.VB_VarHelpID = -1
 Private m_sServerName           As String
 Private WithEvents m_oServerSocket As cTlsSocket
 Attribute m_oServerSocket.VB_VarHelpID = -1
@@ -149,13 +150,13 @@ Private Sub Form_Load()
     End If
     Set m_oServerSocket = New cTlsSocket
     m_oServerSocket.PkiPemImportRootCaCertStore App.Path & "\ca-bundle.pem"
-'    ChDir App.Path
-'    If Not m_oServerSocket.PkiPemImportCertificates(Split(PEM_FILES, "|")) Then
-'        If Not m_oServerSocket.PkiPkcs12ImportCertificates(PFX_FILE, PFX_PASSWORD) Then
-'            MsgBox "Error starting TLS server on localhost:10443" & vbCrLf & vbCrLf & "No private key found!", vbExclamation
-'            GoTo QH
-'        End If
-'    End If
+    ChDir App.Path
+    If Not m_oServerSocket.PkiPemImportCertificates(Split(PEM_FILES, "|")) Then
+        If Not m_oServerSocket.PkiPkcs12ImportCertificates(PFX_FILE, PFX_PASSWORD) Then
+            MsgBox "Error starting TLS server on localhost:10443" & vbCrLf & vbCrLf & "No private key found!", vbExclamation
+            GoTo QH
+        End If
+    End If
     If Not m_oServerSocket.Create(SocketPort:=10443, SocketAddress:="localhost") Then
         GoTo QH
     End If
@@ -248,12 +249,12 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
     If m_sServerName <> uRemote.Host & ":" & uRemote.Port Or m_oSocket Is Nothing Then
         Set m_oSocket = New cTlsSocket
         If Not m_oSocket.SyncConnect(uRemote.Host, uRemote.Port) Then
-            sError = m_oSocket.LastError
+            sError = m_oSocket.LastError.Description
             GoTo QH
         End If
         m_sServerName = uRemote.Host & ":" & uRemote.Port
 '        If Not m_oSocket.SyncWaitForEvent(2000, ucsSfdConnect) Then
-'            sError = m_oSocket.LastError
+'            sError = m_oSocket.LastError.Description
 '            GoTo QH
 '        End If
     End If
@@ -262,7 +263,7 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
                "Connection: keep-alive" & vbCrLf & _
                "Host: " & uRemote.Host & vbCrLf & vbCrLf
     If Not m_oSocket.SyncSendArray(StrConv(sRequest, vbFromUnicode)) Then
-        sError = m_oSocket.LastError
+        sError = m_oSocket.LastError.Description
         GoTo QH
     End If
     lContentLength = -1
@@ -274,7 +275,7 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
                 Exit Do
             End If
             If Not bResult Then
-                sError = m_oSocket.LastError
+                sError = m_oSocket.LastError.Description
                 GoTo QH
             End If
         Else
@@ -310,7 +311,7 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
             End If
         End If
         If Not bResult Then
-            sError = m_oSocket.LastError
+            sError = m_oSocket.LastError.Description
             GoTo QH
         End If
     Loop
@@ -430,6 +431,6 @@ Private Sub m_oSocket_OnClose()
     Debug.Print "m_oSocket_OnClose", Timer
 End Sub
 
-Private Sub m_oSocket_OnError()
-    Debug.Print "m_oSocket_OnError, m_oSocket.LastError=" & m_oSocket.LastError, Timer
+Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
+    Debug.Print "m_oSocket_OnError, m_oSocket.LastError=&H" & Hex$(m_oSocket.LastError.Number) & ", " & m_oSocket.LastError.Description, Timer
 End Sub

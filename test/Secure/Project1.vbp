@@ -6,6 +6,7 @@ Module=mdTlsCrypto; ..\..\src\mdTlsCrypto.bas
 Class=cRequestHandler; cRequestHandler.cls
 Class=cTlsSocket; ..\..\src\cTlsSocket.cls
 Form=Form2.frm
+IconForm="Form2"
 Startup="Form2"
 HelpFile=""
 Title="Project1"
