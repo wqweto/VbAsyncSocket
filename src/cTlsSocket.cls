@@ -1461,17 +1461,16 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
             If Not pvOnSend() Then
                 GoTo QH
             End If
+            If Not bResult Then
+                RaiseEvent OnError(vbObjectError, ucsSfdRead)
+            End If
             If pvTlsIsClosed(m_uCtx) Then
                 If pvOnBeforeNotify(ucsSfdClose) Then
                     RaiseEvent OnClose
                 End If
                 GoTo QH
             End If
-            If Not bResult Then
-                RaiseEvent OnError(vbObjectError, ucsSfdRead)
-                GoTo QH
-            End If
-            If Not pvTlsIsReady(m_uCtx) Then
+            If Not pvTlsIsReady(m_uCtx) Or Not bResult Then
                 GoTo QH
             End If
             If Not m_uCtx.IsServer And (m_uCtx.LocalFeatures And ucsTlsIgnoreServerCertificateErrors) = 0 Then
