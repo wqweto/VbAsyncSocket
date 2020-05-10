@@ -148,6 +148,17 @@ Attribute m_oHttpDownload.VB_VarHelpID = -1
 Private m_oRateLimiter As cRateLimiter
 Private m_dblStartTimerEx As Double
 
+Private Type UcsParsedUrl
+    Protocol        As String
+    Host            As String
+    Port            As Long
+    Path            As String
+    QueryString     As String
+    Anchor          As String
+    User            As String
+    Pass            As String
+End Type
+
 Private Sub Command1_Click()
     Dim sName As String
     Dim sAddr As String
@@ -302,7 +313,7 @@ Private Sub Command5_Click()
     Screen.MousePointer = vbHourglass
     sUrl = "https://www.google.com"
     If chkProxy.Value = vbChecked Then
-        sProxy = "socks5://" & txtProxy.Text
+        sProxy = txtProxy.Text
     End If
     Debug.Print Format$(TimerEx, "0.000"), "Open " & sUrl
 Repeat:
@@ -351,36 +362,30 @@ End Sub
 
 Private Function pvInitHttpRequest(sUrl As String, Optional sProxyUrl As String, Optional ByVal LocalFeature As UcsTlsLocalFeaturesEnum) As cTlsSocket
     Dim oRetVal         As cTlsSocket
-    Dim sProto          As String
-    Dim sHost           As String
-    Dim lPort           As Long
-    Dim sPath           As String
-    Dim sProxyHost      As String
-    Dim lProxyPort      As Long
-    Dim sProxyUser      As String
-    Dim sProxyPass      As String
+    Dim uRemote         As UcsParsedUrl
+    Dim uProxy          As UcsParsedUrl
     Dim baBuffer()      As Byte
     
-    If Not pvParseUrl(sUrl, sProto, sHost, lPort, sPath) Then
+    If Not pvParseUrl(sUrl, uRemote) Then
         GoTo QH
     End If
     Set oRetVal = New cTlsSocket
-    If Not pvParseUrl(sProxyUrl, vbNullString, sProxyHost, lProxyPort, vbNullString, sProxyUser, sProxyPass) Then
-        If Not oRetVal.SyncConnect(sHost, lPort, UseTls:=False) Then
+    If Not pvParseUrl(sProxyUrl, uProxy, "socks5") Then
+        If Not oRetVal.SyncConnect(uRemote.Host, uRemote.Port, UseTls:=False) Then
             GoTo QH
         End If
-        Debug.Print Format$(TimerEx, "0.000"), "Connected to " & sHost & ":" & lPort
+        Debug.Print Format$(TimerEx, "0.000"), "Connected to " & uRemote.Host & ":" & uRemote.Port
     Else
-        If Not oRetVal.SyncConnect(sProxyHost, lProxyPort, UseTls:=False) Then
+        If Not oRetVal.SyncConnect(uProxy.Host, uProxy.Port, UseTls:=False) Then
             GoTo QH
         End If
-        Debug.Print Format$(TimerEx, "0.000"), "Tunnel to " & sProxyHost & ":" & lProxyPort
-        If LenB(sProxyUser) <> 0 Then
-            If Not oRetVal.SyncSendArray(pvToByteArray(5, 2, 0, 2)) Then
+        Debug.Print Format$(TimerEx, "0.000"), "Tunnel to " & uProxy.Host & ":" & uProxy.Port
+        If LenB(uProxy.User) <> 0 Then
+            If Not oRetVal.SyncSendArray(pvArrayByte(5, 2, 0, 2)) Then
                 GoTo QH
             End If
         Else
-            If Not oRetVal.SyncSendArray(pvToByteArray(5, 1, 0)) Then
+            If Not oRetVal.SyncSendArray(pvArrayByte(5, 1, 0)) Then
                 GoTo QH
             End If
         End If
@@ -392,12 +397,12 @@ Private Function pvInitHttpRequest(sUrl As String, Optional sProxyUrl As String,
         End If
         Debug.Print Format$(TimerEx, "0.000"), "Proxy auth method chosen: " & baBuffer(1)
         If baBuffer(1) = 2 Then
-            oRetVal.SyncSendArray pvToByteArray(1)
-            baBuffer = oRetVal.Socket.ToTextArray(sProxyUser, ucsScpUtf8)
-            oRetVal.SyncSendArray pvToByteArray(UBound(baBuffer) + 1)
+            oRetVal.SyncSendArray pvArrayByte(1)
+            baBuffer = oRetVal.Socket.ToTextArray(uProxy.User, ucsScpUtf8)
+            oRetVal.SyncSendArray pvArrayByte(UBound(baBuffer) + 1)
             oRetVal.SyncSendArray baBuffer
-            baBuffer = oRetVal.Socket.ToTextArray(sProxyPass, ucsScpUtf8)
-            oRetVal.SyncSendArray pvToByteArray(UBound(baBuffer) + 1)
+            baBuffer = oRetVal.Socket.ToTextArray(uProxy.Pass, ucsScpUtf8)
+            oRetVal.SyncSendArray pvArrayByte(UBound(baBuffer) + 1)
             oRetVal.SyncSendArray baBuffer
             If Not oRetVal.SyncReceiveArray(baBuffer) Then
                 GoTo QH
@@ -410,18 +415,18 @@ Private Function pvInitHttpRequest(sUrl As String, Optional sProxyUrl As String,
                 GoTo QH
             End If
         End If
-        oRetVal.SyncSendArray pvToByteArray(5, 1, 0, 3) '--- 5 = version, 1 = TCP stream conn, 0 = reserved, 3 = domain name
-        baBuffer = oRetVal.Socket.ToTextArray(sHost, ucsScpUtf8)
-        oRetVal.SyncSendArray pvToByteArray(UBound(baBuffer) + 1)
+        oRetVal.SyncSendArray pvArrayByte(5, 1, 0, 3) '--- 5 = version, 1 = TCP stream conn, 0 = reserved, 3 = domain name
+        baBuffer = oRetVal.ToTextArray(uRemote.Host, ucsScpUtf8)
+        oRetVal.SyncSendArray pvArrayByte(UBound(baBuffer) + 1)
         oRetVal.SyncSendArray baBuffer
-        oRetVal.SyncSendArray pvToByteArray(lPort \ &H100, lPort And &HFF)
+        oRetVal.SyncSendArray pvArrayByte(uRemote.Port \ &H100, uRemote.Port And &HFF)
         If Not oRetVal.SyncReceiveArray(baBuffer) Then
             GoTo QH
         End If
         If UBound(baBuffer) < 3 Then
             GoTo QH
         End If
-        Debug.Print Format$(TimerEx, "0.000"), "Proxy connection to " & sHost & ":" & lPort & " status: " & baBuffer(1)
+        Debug.Print Format$(TimerEx, "0.000"), "Proxy connection to " & uRemote.Host & ":" & uRemote.Port & " status: " & baBuffer(1)
         If baBuffer(1) <> 0 Then
             GoTo QH
         End If
@@ -429,14 +434,14 @@ Private Function pvInitHttpRequest(sUrl As String, Optional sProxyUrl As String,
             Debug.Print Format$(TimerEx, "0.000"), "Connection info: " & baBuffer(4) & "." & baBuffer(5) & "." & baBuffer(6) & "." & baBuffer(7) & ":" & baBuffer(8) * 256& + baBuffer(9)
         End If
     End If
-    If LCase$(sProto) = "https" Then
-        If Not oRetVal.SyncStartTls(sHost, LocalFeature) Then
+    If LCase$(uRemote.Protocol) = "https" Then
+        If Not oRetVal.SyncStartTls(uRemote.Host, LocalFeature) Then
             GoTo QH
         End If
         Debug.Print Format$(TimerEx, "0.000"), "TLS handshake complete"
     End If
-    If Not oRetVal.SyncSendText("GET " & sPath & " HTTP/1.0" & vbCrLf & _
-            "Host: " & sHost & vbCrLf & _
+    If Not oRetVal.SyncSendText("GET " & uRemote.Path & uRemote.QueryString & " HTTP/1.0" & vbCrLf & _
+            "Host: " & uRemote.Host & vbCrLf & _
             "Connection: close" & vbCrLf & vbCrLf) Then
         GoTo QH
     End If
@@ -451,43 +456,38 @@ QH:
     End If
 End Function
 
-Private Function pvParseUrl( _
-            sUrl As String, _
-            sProto As String, _
-            sHost As String, _
-            lPort As Long, _
-            sPath As String, _
-            Optional sUser As String, _
-            Optional sPass As String) As Boolean
+Private Function pvParseUrl(sUrl As String, uParsed As UcsParsedUrl, Optional DefProtocol As String) As Boolean
     With CreateObject("VBScript.RegExp")
         .Global = True
-        .Pattern = "^(.*)://(?:(?:([^:]*):)?([^@]*)@)?([A-Za-z0-9\-\.]+)(:[0-9]+)?(.*)$"
+        .Pattern = "^(?:(?:(.+):)?//)?(?:(?:([^:]*):)?([^@]*)@)?([A-Za-z0-9\-\.]+)(:[0-9]+)?(/[^?#]*)?(\?[^#]*)?(#.*)?$"
         With .Execute(sUrl)
             If .Count > 0 Then
                 With .Item(0).SubMatches
-                    sProto = .Item(0)
-                    sUser = .Item(1)
-                    If LenB(sUser) = 0 Then
-                        sUser = .Item(2)
+                    uParsed.Protocol = IIf(LenB(.Item(0)) = 0, DefProtocol, .Item(0))
+                    uParsed.User = .Item(1)
+                    If LenB(uParsed.User) = 0 Then
+                        uParsed.User = .Item(2)
                     Else
-                        sPass = .Item(2)
+                        uParsed.Pass = .Item(2)
                     End If
-                    sHost = .Item(3)
-                    lPort = Val(Mid$(.Item(4), 2))
-                    If lPort = 0 Then
-                        Select Case LCase$(sProto)
+                    uParsed.Host = .Item(3)
+                    uParsed.Port = Val(Mid$(.Item(4), 2))
+                    If uParsed.Port = 0 Then
+                        Select Case LCase$(uParsed.Protocol)
                         Case "https"
-                            lPort = 443
+                            uParsed.Port = 443
                         Case "socks5"
-                            lPort = 1080
+                            uParsed.Port = 1080
                         Case Else
-                            lPort = 80
+                            uParsed.Port = 80
                         End Select
                     End If
-                    sPath = .Item(5)
-                    If LenB(sPath) = 0 Then
-                        sPath = "/"
+                    uParsed.Path = .Item(5)
+                    If LenB(uParsed.Path) = 0 Then
+                        uParsed.Path = "/"
                     End If
+                    uParsed.QueryString = .Item(6)
+                    uParsed.Anchor = .Item(7)
                 End With
                 pvParseUrl = True
             End If
@@ -495,7 +495,7 @@ Private Function pvParseUrl( _
     End With
 End Function
 
-Private Function pvToByteArray(ParamArray A() As Variant) As Byte()
+Private Function pvArrayByte(ParamArray A() As Variant) As Byte()
     Dim baRetVal()      As Byte
     Dim lIdx            As Long
     
@@ -503,7 +503,7 @@ Private Function pvToByteArray(ParamArray A() As Variant) As Byte()
     For lIdx = 0 To UBound(A)
         baRetVal(lIdx) = A(lIdx)
     Next
-    pvToByteArray = baRetVal
+    pvArrayByte = baRetVal
 End Function
 
 Private Sub Command6_Click()
@@ -513,7 +513,7 @@ Private Sub Command6_Click()
     
     sUrl = "https://server.cryptomix.com/secure/"
     If chkProxy.Value = vbChecked Then
-        sProxy = "socks5://" & txtProxy.Text
+        sProxy = txtProxy.Text
     End If
     Debug.Print Format$(TimerEx, "0.000"), "Open " & sUrl
     Set oTlsSocket = pvInitHttpRequest(sUrl, sProxy)
@@ -636,11 +636,10 @@ Private Sub Command8_Click()
 '    sUrl = "https://www.howsmyssl.com/a/check"
     sUrl = "https://expired.badssl.com/"
     If chkProxy.Value = vbChecked Then
-        sProxy = "socks5://" & txtProxy.Text
+        sProxy = txtProxy.Text
     End If
     With pvInitHttpRequest(sUrl, sProxy, ucsTlsIgnoreServerCertificateErrors)
-        DoEvents: DoEvents: DoEvents
-        sResponse = sResponse & .SyncReceiveText
+        sResponse = sResponse & .SyncReceiveText(1)
     End With
     Debug.Print Format$(TimerEx, "0.000"), sResponse
 End Sub
@@ -692,9 +691,10 @@ End Sub
 
 Private Sub m_oHttpDownload_DownloadProgress(ByVal BytesRead As Double, ByVal BytesTotal As Double)
     Debug.Print Format$(TimerEx, "0.000"), "Downloaded " & BytesRead & " from " & BytesTotal & " @ " & Format$(BytesRead / (TimerEx - m_dblStartTimerEx) / 1024, "0.0") & "KB/s"
-    Caption = "Downloaded " & BytesRead & " from " & BytesTotal
+    Caption = "Downloaded " & BytesRead & " from " & BytesTotal & " @ " & Format$(BytesRead / (TimerEx - m_dblStartTimerEx) / 1024, "0.0") & "KB/s"
 '    If BytesRead > 2000000 Then
-'        m_oHttpDownload.CancelDownload
+'        m_oHttpDownload.CancelOperation
+'        Set m_oRateLimiter = Nothing
 '    End If
 End Sub
 
