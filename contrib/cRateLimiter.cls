@@ -284,3 +284,11 @@ Private Sub m_oSocket_BeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnu
 EH:
     PrintError FUNC_NAME
 End Sub
+
+'=========================================================================
+' Base class events
+'=========================================================================
+
+Private Sub Class_Terminate()
+    Set m_oSocket = Nothing
+End Sub

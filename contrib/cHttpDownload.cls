@@ -159,6 +159,7 @@ Public Sub CancelOperation()
     Const FUNC_NAME     As String = "CancelOperation"
     
     On Error GoTo EH
+    m_oSocket.Close_
     Set m_oSocket = Nothing
     Set m_pFileStream = Nothing
     m_lCallbackPtr = 0
