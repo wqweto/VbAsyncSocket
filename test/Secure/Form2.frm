@@ -250,9 +250,6 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
     pvAppendLogText txtResult, "Connecting to " & uRemote.Host & vbCrLf
     If m_sServerName <> uRemote.Host & ":" & uRemote.Port Or m_oSocket Is Nothing Then
         Set m_oSocket = New cTlsSocket
-        If uRemote.Host = "localhost" Then
-            m_oSocket.PkiPkcs12ImportCertificates App.Path & "\client1.full.pfx"
-        End If
         If Not m_oSocket.SyncConnect(uRemote.Host, uRemote.Port, _
                 LocalFeatures:=IIf(pvIsKnownBadCertificate(uRemote.Host), ucsTlsIgnoreServerCertificateErrors, 0), _
                 RootCa:=m_oRootCa) Then
@@ -273,13 +270,13 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
     Do
         bResult = m_oSocket.SyncReceiveArray(baRecv, Timeout:=5000)
         If UBound(baRecv) < 0 Then
+            If m_oSocket.LastError <> 0 Then
+                sError = m_oSocket.LastError.Description
+                GoTo QH
+            End If
             If m_oSocket.IsClosed Then
                 Set m_oSocket = Nothing
                 Exit Do
-            End If
-            If Not bResult Then
-                sError = m_oSocket.LastError.Description
-                GoTo QH
             End If
         Else
             HttpsRequest = HttpsRequest & StrConv(baRecv, vbUnicode)
@@ -425,6 +422,17 @@ Private Function pvSetVisible(oCtl As Object, ByVal bValue As Boolean) As Boolea
     oCtl.Visible = bValue
     pvSetVisible = True
 End Function
+
+Private Sub m_oSocket_OnClientCertificate(CaDn As Object, Confirmed As Boolean)
+    Dim baDName()       As Byte
+    
+    If m_oSocket.LocalCertificates Is Nothing Then
+        If SearchCollection(CaDn, 1, RetVal:=baDName) Then
+            Debug.Print "Certificate authority DN for client certificate:" & vbCrLf & DesignDumpArray(baDName)
+        End If
+        Confirmed = m_oSocket.PkiPkcs12ImportCertificates(App.Path & "\client1.full.pfx")
+    End If
+End Sub
 
 Private Sub m_oSocket_OnResolve(IpAddress As String)
     Debug.Print "m_oSocket_OnResolve, IpAddress=" & IpAddress, Timer
