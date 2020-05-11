@@ -250,6 +250,9 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
     pvAppendLogText txtResult, "Connecting to " & uRemote.Host & vbCrLf
     If m_sServerName <> uRemote.Host & ":" & uRemote.Port Or m_oSocket Is Nothing Then
         Set m_oSocket = New cTlsSocket
+        If uRemote.Host = "localhost" Then
+            m_oSocket.PkiPkcs12ImportCertificates App.Path & "\client1.full.pfx"
+        End If
         If Not m_oSocket.SyncConnect(uRemote.Host, uRemote.Port, _
                 LocalFeatures:=IIf(pvIsKnownBadCertificate(uRemote.Host), ucsTlsIgnoreServerCertificateErrors, 0), _
                 RootCa:=m_oRootCa) Then
