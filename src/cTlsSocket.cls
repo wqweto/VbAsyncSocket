@@ -3200,7 +3200,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
     lCipherPref = 1000
     With uCtx
         If SearchCollection(.LocalCertificates, 1, RetVal:=baCert) Then
-            If Not pvCryptoAsn1DecodeCertificate(baCert, uCertInfo) Then
+            If Not pvAsn1DecodeCertificate(baCert, uCertInfo) Then
                 sError = ERR_UNSUPPORTED_CERTIFICATE
                 eAlertCode = uscTlsAlertHandshakeFailure
                 GoTo QH
@@ -3332,7 +3332,7 @@ Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, ba
     
     On Error GoTo EH
     With uCtx
-        If Not pvCryptoAsn1DecodeCertificate(baCert, uCertInfo) Then
+        If Not pvAsn1DecodeCertificate(baCert, uCertInfo) Then
             sError = ERR_UNSUPPORTED_CERTIFICATE
             eAlertCode = uscTlsAlertHandshakeFailure
             GoTo QH
@@ -3485,7 +3485,7 @@ Private Sub pvTlsSetupExchRsaCertificate(uCtx As UcsTlsContext, baCert() As Byte
         .ExchAlgo = ucsTlsAlgoExchCertificate
         pvTlsArrayRandom .LocalExchPrivate, TLS_HELLO_RANDOM_SIZE + TLS_HELLO_RANDOM_SIZE \ 2 '--- always 48
         pvWriteLong .LocalExchPrivate, 0, TLS_LOCAL_LEGACY_VERSION, Size:=2
-        If Not pvCryptoAsn1DecodeCertificate(baCert, uCertInfo) Then
+        If Not pvAsn1DecodeCertificate(baCert, uCertInfo) Then
             Err.Raise vbObjectError, FUNC_NAME, ERR_UNSUPPORTED_CERTIFICATE
         End If
         If Not pvCryptoEmePkcs1Encode(baEnc, .LocalExchPrivate, uCertInfo.BitLen) Then
@@ -4012,7 +4012,7 @@ Private Sub pvTlsSignatureSign(baPrivKey() As Byte, ByVal lSignatureType As Long
     Dim baTemp()        As Byte
     
     Debug.Print "Signing with " & pvTlsSignatureTypeName(lSignatureType) & " signature", Timer
-    If Not pvCryptoAsn1DecodePrivateKey(baPrivKey, uKeyInfo) Then
+    If Not pvAsn1DecodePrivateKey(baPrivKey, uKeyInfo) Then
         Err.Raise vbObjectError, FUNC_NAME, ERR_UNSUPPORTED_PRIVATE_KEY
     End If
     lHashSize = pvTlsSignatureHashSize(lSignatureType)
@@ -4077,7 +4077,7 @@ Private Function pvTlsSignatureVerify(baCert() As Byte, ByVal lSignatureType As 
     Dim baDecr()        As Byte
     
     On Error GoTo EH
-    If Not pvCryptoAsn1DecodeCertificate(baCert, uCertInfo) Then
+    If Not pvAsn1DecodeCertificate(baCert, uCertInfo) Then
         sError = ERR_UNSUPPORTED_CERTIFICATE
         eAlertCode = uscTlsAlertHandshakeFailure
         GoTo QH
@@ -4188,86 +4188,6 @@ Private Function pvTlsSignatureHashSize(ByVal lSignatureType As Long) As Long
     Case ucsTlsAlgoDigestSha512
         pvTlsSignatureHashSize = 64
     End Select
-End Function
-
-Private Function pvAsn1DecodeEccSignature(baRetVal() As Byte, baDerSig() As Byte, ByVal lCurveSize As Long) As Boolean
-    Const FUNC_NAME     As String = "pvAsn1DecodeEccSignature"
-    Dim lType           As Long
-    Dim lPos            As Long
-    Dim lSize           As Long
-    Dim cStack          As Collection
-    Dim baTemp()        As Byte
-    
-    pvArrayAllocate baRetVal, 64, FUNC_NAME & ".baRetVal"
-    '--- ECDSA-Sig-Value ::= SEQUENCE { r INTEGER, s INTEGER }
-    lPos = pvReadLong(baDerSig, 0, lType)
-    If lType <> LNG_ANS1_TYPE_SEQUENCE Then
-        GoTo QH
-    End If
-    lPos = pvReadBeginOfBlock(baDerSig, lPos, cStack)
-        lPos = pvReadLong(baDerSig, lPos, lType)
-        If lType <> LNG_ANS1_TYPE_INTEGER Then
-            GoTo QH
-        End If
-        lPos = pvReadLong(baDerSig, lPos, lSize)
-        lPos = pvReadArray(baDerSig, lPos, baTemp, lSize)
-        If lSize <= lCurveSize Then
-            pvWriteArray baRetVal, lCurveSize - lSize, baTemp
-        Else
-            pvWriteBuffer baRetVal, 0, VarPtr(baTemp(lSize - lCurveSize)), lCurveSize
-        End If
-        lPos = pvReadLong(baDerSig, lPos, lType)
-        If lType <> LNG_ANS1_TYPE_INTEGER Then
-            GoTo QH
-        End If
-        lPos = pvReadLong(baDerSig, lPos, lSize)
-        lPos = pvReadArray(baDerSig, lPos, baTemp, lSize)
-        If lSize <= lCurveSize Then
-            pvWriteArray baRetVal, lCurveSize + lCurveSize - lSize, baTemp
-        Else
-            pvWriteBuffer baRetVal, lCurveSize, VarPtr(baTemp(lSize - lCurveSize)), lCurveSize
-        End If
-    lPos = pvReadEndOfBlock(baDerSig, lPos, cStack)
-    '--- success
-    pvAsn1DecodeEccSignature = True
-QH:
-End Function
-
-Private Function pvAsn1EncodeEccSignature(baRetVal() As Byte, baPlainSig() As Byte, ByVal lPartSize As Long) As Boolean
-    Dim lPos            As Long
-    Dim cStack          As Collection
-    Dim lStart          As Long
-    
-    lPos = pvWriteLong(baRetVal, lPos, LNG_ANS1_TYPE_SEQUENCE)
-    lPos = pvWriteBeginOfBlock(baRetVal, lPos, cStack)
-        lPos = pvWriteLong(baRetVal, lPos, LNG_ANS1_TYPE_INTEGER)
-        lPos = pvWriteBeginOfBlock(baRetVal, lPos, cStack)
-            For lStart = 0 To lPartSize - 1
-                If baPlainSig(lStart) <> 0 Then
-                    Exit For
-                End If
-            Next
-            If (baPlainSig(lStart) And &H80) <> 0 Then
-                lPos = pvWriteLong(baRetVal, lPos, 0)
-            End If
-            lPos = pvWriteBuffer(baRetVal, lPos, VarPtr(baPlainSig(lStart)), lPartSize - lStart)
-        lPos = pvWriteEndOfBlock(baRetVal, lPos, cStack)
-        lPos = pvWriteLong(baRetVal, lPos, LNG_ANS1_TYPE_INTEGER)
-        lPos = pvWriteBeginOfBlock(baRetVal, lPos, cStack)
-            For lStart = 0 To lPartSize - 1
-                If baPlainSig(lPartSize + lStart) <> 0 Then
-                    Exit For
-                End If
-            Next
-            If (baPlainSig(lPartSize + lStart) And &H80) <> 0 Then
-                lPos = pvWriteLong(baRetVal, lPos, 0)
-            End If
-            lPos = pvWriteBuffer(baRetVal, lPos, VarPtr(baPlainSig(lPartSize + lStart)), lPartSize - lStart)
-        lPos = pvWriteEndOfBlock(baRetVal, lPos, cStack)
-    lPos = pvWriteEndOfBlock(baRetVal, lPos, cStack)
-    pvAsn1EncodeEccSignature = baRetVal
-    '--- success
-    pvAsn1EncodeEccSignature = True
 End Function
 
 '= buffer management =====================================================
@@ -4583,7 +4503,7 @@ Private Function pvCryptoEmsaPkcs1Encode(baRetVal() As Byte, baMessage() As Byte
     
     '--- from RFC 8017, Section 9.2.
     pvArrayHash lHashSize, baMessage, baHash
-    If Not pvCryptoAsn1EncodePkcs1SignatureHash(baHash, baDerHash) Then
+    If Not pvAsn1EncodePkcs1SignatureHash(baHash, baDerHash) Then
         GoTo QH
     End If
     pvArrayAllocate baRetVal, (lBitLen + 7) \ 8, FUNC_NAME & ".baRetVal"
@@ -4609,7 +4529,7 @@ Private Function pvCryptoEmsaPkcs1Decode(baMessage() As Byte, baEnc() As Byte, B
         GoTo QH
     End If
     pvArrayHash lHashSize, baMessage, baHash
-    If Not pvCryptoAsn1EncodePkcs1SignatureHash(baHash, baDerHash) Then
+    If Not pvAsn1EncodePkcs1SignatureHash(baHash, baDerHash) Then
         GoTo QH
     End If
     For lPos = 2 To UBound(baEnc) - UBound(baDerHash) - 3
@@ -4777,8 +4697,8 @@ Private Function pvCryptoEmsaPssDecode(baMessage() As Byte, baEnc() As Byte, ByV
 QH:
 End Function
 
-Private Function pvCryptoAsn1DecodePrivateKey(baPrivKey() As Byte, uRetVal As UcsKeyInfo) As Boolean
-    Const FUNC_NAME     As String = "pvCryptoAsn1DecodePrivateKey"
+Private Function pvAsn1DecodePrivateKey(baPrivKey() As Byte, uRetVal As UcsKeyInfo) As Boolean
+    Const FUNC_NAME     As String = "pvAsn1DecodePrivateKey"
     Dim lPkiPtr         As Long
     Dim uPrivKey        As CRYPT_PRIVATE_KEY_INFO
     Dim lKeyPtr         As Long
@@ -4834,7 +4754,7 @@ Private Function pvCryptoAsn1DecodePrivateKey(baPrivKey() As Byte, uRetVal As Uc
         GoTo QH
     End If
     '--- success
-    pvCryptoAsn1DecodePrivateKey = True
+    pvAsn1DecodePrivateKey = True
 QH:
     If lKeyPtr <> 0 Then
         Call LocalFree(lKeyPtr)
@@ -4847,8 +4767,8 @@ QH:
     End If
 End Function
 
-Private Function pvCryptoAsn1DecodeCertificate(baCert() As Byte, uRetVal As UcsKeyInfo) As Boolean
-    Const FUNC_NAME     As String = "pvCryptoAsn1DecodeCertificate"
+Private Function pvAsn1DecodeCertificate(baCert() As Byte, uRetVal As UcsKeyInfo) As Boolean
+    Const FUNC_NAME     As String = "pvAsn1DecodeCertificate"
     Dim pCertContext    As Long
     Dim lPtr            As Long
     Dim uPublicKeyInfo  As CERT_PUBLIC_KEY_INFO
@@ -4901,7 +4821,7 @@ Private Function pvCryptoAsn1DecodeCertificate(baCert() As Byte, uRetVal As UcsK
         pvArrayReverse uRetVal.Modulus
     End If
     '--- success
-    pvCryptoAsn1DecodeCertificate = True
+    pvAsn1DecodeCertificate = True
 QH:
     If hKey <> 0 Then
         Call CryptDestroyKey(hKey)
@@ -4917,8 +4837,8 @@ QH:
     End If
 End Function
 
-Private Function pvCryptoAsn1EncodePkcs1SignatureHash(baHash() As Byte, baRetVal() As Byte) As Boolean
-    Const FUNC_NAME     As String = "pvCryptoAsn1EncodePkcs1SignatureHash"
+Private Function pvAsn1EncodePkcs1SignatureHash(baHash() As Byte, baRetVal() As Byte) As Boolean
+    Const FUNC_NAME     As String = "pvAsn1EncodePkcs1SignatureHash"
     Dim baPrefix()      As Byte
     
     Select Case UBound(baHash) + 1
@@ -4933,8 +4853,88 @@ Private Function pvCryptoAsn1EncodePkcs1SignatureHash(baHash() As Byte, baRetVal
     Call CopyMemory(baRetVal(0), baPrefix(0), UBound(baPrefix) + 1)
     Call CopyMemory(baRetVal(UBound(baPrefix) + 1), baHash(0), UBound(baHash) + 1)
     '--- success
-    pvCryptoAsn1EncodePkcs1SignatureHash = True
+    pvAsn1EncodePkcs1SignatureHash = True
 QH:
+End Function
+
+Private Function pvAsn1DecodeEccSignature(baRetVal() As Byte, baDerSig() As Byte, ByVal lCurveSize As Long) As Boolean
+    Const FUNC_NAME     As String = "pvAsn1DecodeEccSignature"
+    Dim lType           As Long
+    Dim lPos            As Long
+    Dim lSize           As Long
+    Dim cStack          As Collection
+    Dim baTemp()        As Byte
+    
+    pvArrayAllocate baRetVal, 64, FUNC_NAME & ".baRetVal"
+    '--- ECDSA-Sig-Value ::= SEQUENCE { r INTEGER, s INTEGER }
+    lPos = pvReadLong(baDerSig, 0, lType)
+    If lType <> LNG_ANS1_TYPE_SEQUENCE Then
+        GoTo QH
+    End If
+    lPos = pvReadBeginOfBlock(baDerSig, lPos, cStack)
+        lPos = pvReadLong(baDerSig, lPos, lType)
+        If lType <> LNG_ANS1_TYPE_INTEGER Then
+            GoTo QH
+        End If
+        lPos = pvReadLong(baDerSig, lPos, lSize)
+        lPos = pvReadArray(baDerSig, lPos, baTemp, lSize)
+        If lSize <= lCurveSize Then
+            pvWriteArray baRetVal, lCurveSize - lSize, baTemp
+        Else
+            pvWriteBuffer baRetVal, 0, VarPtr(baTemp(lSize - lCurveSize)), lCurveSize
+        End If
+        lPos = pvReadLong(baDerSig, lPos, lType)
+        If lType <> LNG_ANS1_TYPE_INTEGER Then
+            GoTo QH
+        End If
+        lPos = pvReadLong(baDerSig, lPos, lSize)
+        lPos = pvReadArray(baDerSig, lPos, baTemp, lSize)
+        If lSize <= lCurveSize Then
+            pvWriteArray baRetVal, lCurveSize + lCurveSize - lSize, baTemp
+        Else
+            pvWriteBuffer baRetVal, lCurveSize, VarPtr(baTemp(lSize - lCurveSize)), lCurveSize
+        End If
+    lPos = pvReadEndOfBlock(baDerSig, lPos, cStack)
+    '--- success
+    pvAsn1DecodeEccSignature = True
+QH:
+End Function
+
+Private Function pvAsn1EncodeEccSignature(baRetVal() As Byte, baPlainSig() As Byte, ByVal lPartSize As Long) As Boolean
+    Dim lPos            As Long
+    Dim cStack          As Collection
+    Dim lStart          As Long
+    
+    lPos = pvWriteLong(baRetVal, lPos, LNG_ANS1_TYPE_SEQUENCE)
+    lPos = pvWriteBeginOfBlock(baRetVal, lPos, cStack)
+        lPos = pvWriteLong(baRetVal, lPos, LNG_ANS1_TYPE_INTEGER)
+        lPos = pvWriteBeginOfBlock(baRetVal, lPos, cStack)
+            For lStart = 0 To lPartSize - 1
+                If baPlainSig(lStart) <> 0 Then
+                    Exit For
+                End If
+            Next
+            If (baPlainSig(lStart) And &H80) <> 0 Then
+                lPos = pvWriteLong(baRetVal, lPos, 0)
+            End If
+            lPos = pvWriteBuffer(baRetVal, lPos, VarPtr(baPlainSig(lStart)), lPartSize - lStart)
+        lPos = pvWriteEndOfBlock(baRetVal, lPos, cStack)
+        lPos = pvWriteLong(baRetVal, lPos, LNG_ANS1_TYPE_INTEGER)
+        lPos = pvWriteBeginOfBlock(baRetVal, lPos, cStack)
+            For lStart = 0 To lPartSize - 1
+                If baPlainSig(lPartSize + lStart) <> 0 Then
+                    Exit For
+                End If
+            Next
+            If (baPlainSig(lPartSize + lStart) And &H80) <> 0 Then
+                lPos = pvWriteLong(baRetVal, lPos, 0)
+            End If
+            lPos = pvWriteBuffer(baRetVal, lPos, VarPtr(baPlainSig(lPartSize + lStart)), lPartSize - lStart)
+        lPos = pvWriteEndOfBlock(baRetVal, lPos, cStack)
+    lPos = pvWriteEndOfBlock(baRetVal, lPos, cStack)
+    pvAsn1EncodeEccSignature = baRetVal
+    '--- success
+    pvAsn1EncodeEccSignature = True
 End Function
 
 '=========================================================================
