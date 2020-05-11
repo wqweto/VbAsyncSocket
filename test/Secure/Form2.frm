@@ -142,7 +142,7 @@ Private Sub Form_Load()
     If txtResult.Font.Name = "Arial" Then
         txtResult.Font.Name = "Courier New"
     End If
-    For Each vElem In Split("cert-test.sandbox.google.com|tls13.1d.pw|localhost:44330|tls.ctf.network|www.mikestoolbox.org|swifttls.org|tls13.pinterjann.is|rsa8192.badssl.com|rsa4096.badssl.com|rsa2048.badssl.com|ecc384.badssl.com|ecc256.badssl.com|dir.bg|host.bg|bgdev.org|cnn.com|gmail.com|google.com|saas.bg|saas.bg:465", "|")
+    For Each vElem In Split("cert-test.sandbox.google.com|tls13.1d.pw|localhost:44330|tls.ctf.network|www.mikestoolbox.org|swifttls.org|tls13.pinterjann.is|rsa8192.badssl.com|rsa4096.badssl.com|rsa2048.badssl.com|ecc384.badssl.com|ecc256.badssl.com|dir.bg|host.bg|bgdev.org|cnn.com|gmail.com|google.com|saas.bg|saas.bg:465|www.cloudflare.com|devblogs.microsoft.com|www.brentozar.com|ayende.com/blog|www.nerds2nerds.com|robert.ocallahan.org|distrowatch.com", "|")
         cobUrl.AddItem vElem
     Next
     sAddr = GetSetting(App.Title, "Form1", "Url", cobUrl.Text)
@@ -271,7 +271,7 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
     End If
     lContentLength = -1
     Do
-        bResult = m_oSocket.SyncReceiveArray(baRecv, Timeout:=15000)
+        bResult = m_oSocket.SyncReceiveArray(baRecv, Timeout:=5000)
         If UBound(baRecv) < 0 Then
             If m_oSocket.IsClosed Then
                 Set m_oSocket = Nothing
@@ -309,7 +309,7 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
                 Exit Do
             End If
         ElseIf sEncoding = "chunked" Then
-            If Right$(HttpsRequest, 7) = vbCrLf & "0" & vbCrLf & vbCrLf Then
+            If Right$(HttpsRequest, 5) = "0" & vbCrLf & vbCrLf Then
                 Exit Do
             End If
         End If

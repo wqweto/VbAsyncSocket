@@ -1476,9 +1476,11 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
     Dim baRecv()        As Byte
     Dim bResult         As Boolean
     Dim lPrevSize       As Long
+    Dim bPrevIsClosed   As Boolean
     
     On Error GoTo EH
     lPrevSize = m_lRecvSize
+    bPrevIsClosed = pvTlsIsClosed(m_uCtx)
     Do
         If pvTlsIsClosed(m_uCtx) Then
             Exit Do
@@ -1527,17 +1529,13 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
         If pvOnBeforeNotify(ucsSfdRead) Then
             RaiseEvent OnReceive
         End If
-    End If
-    If Not bResult Then
-        RaiseEvent OnError(vbObjectError, ucsSfdRead)
-    End If
-    If pvTlsIsClosed(m_uCtx) Then
-        If pvOnBeforeNotify(ucsSfdClose) Then
-            RaiseEvent OnClose
+        If Not bResult Then
+            RaiseEvent OnError(vbObjectError, ucsSfdRead)
+            GoTo QH
         End If
     End If
-    If Not bResult Then
-        GoTo QH
+    If bResult And pvTlsIsClosed(m_uCtx) <> bPrevIsClosed Then
+        RaiseEvent OnError(vbObjectError, ucsSfdRead)
     End If
     '--- success
     pvOnReceive = True
@@ -1701,10 +1699,7 @@ Private Sub m_oSocket_OnClose()
     On Error GoTo EH
     If m_bUseTls Then
         If Not pvOnReceive(Flush:=True) Then
-            GoTo QH
-        End If
-        If pvTlsIsClosed(m_uCtx) Then
-            GoTo QH
+            'GoTo QH
         End If
         If pvOnBeforeNotify(ucsSfdClose) Then
             RaiseEvent OnClose
