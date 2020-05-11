@@ -96,6 +96,7 @@ Private m_sServerName           As String
 Private WithEvents m_oServerSocket As cTlsSocket
 Attribute m_oServerSocket.VB_VarHelpID = -1
 Private m_cRequestHandlers      As Collection
+Private m_oRootCa               As cTlsSocket
 
 Private Type UcsParsedUrl
     Protocol        As String
@@ -148,13 +149,14 @@ Private Sub Form_Load()
     If LenB(sAddr) <> 0 Then
         cobUrl.Text = sAddr
     End If
+    Set m_oRootCa = New cTlsSocket
+    m_oRootCa.PkiPemImportRootCaCertStore App.Path & "\ca-bundle.pem"
     Set m_oServerSocket = New cTlsSocket
-    m_oServerSocket.PkiPemImportRootCaCertStore App.Path & "\ca-bundle.pem"
     ChDir App.Path
     If Not m_oServerSocket.PkiPemImportCertificates(Split(PEM_FILES, "|")) Then
         If Not m_oServerSocket.PkiPkcs12ImportCertificates(PFX_FILE, PFX_PASSWORD) Then
-            MsgBox "Error starting TLS server on localhost:10443" & vbCrLf & vbCrLf & "No private key found!", vbExclamation
-            GoTo QH
+'            MsgBox "Error starting TLS server on localhost:10443" & vbCrLf & vbCrLf & "No private key found!", vbExclamation
+'            GoTo QH
         End If
     End If
     If Not m_oServerSocket.Create(SocketPort:=10443, SocketAddress:="localhost") Then
@@ -248,15 +250,13 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
     pvAppendLogText txtResult, "Connecting to " & uRemote.Host & vbCrLf
     If m_sServerName <> uRemote.Host & ":" & uRemote.Port Or m_oSocket Is Nothing Then
         Set m_oSocket = New cTlsSocket
-        If Not m_oSocket.SyncConnect(uRemote.Host, uRemote.Port) Then
+        If Not m_oSocket.SyncConnect(uRemote.Host, uRemote.Port, _
+                LocalFeatures:=IIf(pvIsKnownBadCertificate(uRemote.Host), ucsTlsIgnoreServerCertificateErrors, 0), _
+                RootCa:=m_oRootCa) Then
             sError = m_oSocket.LastError.Description
             GoTo QH
         End If
         m_sServerName = uRemote.Host & ":" & uRemote.Port
-'        If Not m_oSocket.SyncWaitForEvent(2000, ucsSfdConnect) Then
-'            sError = m_oSocket.LastError.Description
-'            GoTo QH
-'        End If
     End If
     '--- send TLS application data and wait for reply
     sRequest = "GET " & uRemote.Path & uRemote.QueryString & " HTTP/1.1" & vbCrLf & _
@@ -324,6 +324,18 @@ QH:
     If LenB(sError) <> 0 Then
         Set m_oSocket = Nothing
     End If
+End Function
+
+Private Function pvIsKnownBadCertificate(sHost As String) As Boolean
+    Const STR_HOSTS     As String = "mikestoolbox.org|localhost"
+    Dim vElem           As Variant
+    
+    For Each vElem In Split(STR_HOSTS, "|")
+        If Right$(LCase$(sHost), Len(vElem)) = vElem Then
+            pvIsKnownBadCertificate = True
+            Exit For
+        End If
+    Next
 End Function
 
 Private Function ParseUrl(sUrl As String, uParsed As UcsParsedUrl, Optional DefProtocol As String) As Boolean

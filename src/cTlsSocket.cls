@@ -531,7 +531,7 @@ Private m_sRemoteHostName       As String
 Private m_eLocalFeatures        As UcsTlsLocalFeaturesEnum
 Private m_uCtx                  As UcsTlsContext
 Private m_hRootStore            As Long
-Private m_oRootStoreFwd         As cTlsSocket
+Private m_oRootCa               As cTlsSocket
 '--- socket buffers
 Private m_baRecv()              As Byte
 Private m_lRecvSize             As Long
@@ -766,8 +766,8 @@ Property Get RemoteHostName() As String
 End Property
 
 Friend Property Get frRootStore() As Long
-    If Not m_oRootStoreFwd Is Nothing Then
-        frRootStore = m_oRootStoreFwd.frRootStore
+    If Not m_oRootCa Is Nothing Then
+        frRootStore = m_oRootCa.frRootStore
     Else
         frRootStore = m_hRootStore
     End If
@@ -845,13 +845,15 @@ Public Function Connect( _
             HostAddress As String, _
             ByVal HostPort As Long, _
             Optional ByVal UseTls As Boolean = True, _
-            Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum) As Boolean
+            Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum, _
+            Optional RootCa As cTlsSocket) As Boolean
     Const FUNC_NAME     As String = "Connect"
     
     On Error GoTo EH
     m_bUseTls = UseTls
     m_sRemoteHostName = HostAddress
     m_eLocalFeatures = LocalFeatures
+    Set m_oRootCa = RootCa
     If Not m_oSocket.Connect(HostAddress, HostPort) Then
         GoTo QH
     End If
@@ -866,7 +868,8 @@ End Function
 
 Public Function StartTls( _
             Optional RemoteHostName As String, _
-            Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum) As Boolean
+            Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum, _
+            Optional RootCa As cTlsSocket) As Boolean
     Const FUNC_NAME     As String = "StartTls"
     Dim bResult         As Boolean
     Dim baEmpty()       As Byte
@@ -883,6 +886,13 @@ Public Function StartTls( _
         m_eLocalFeatures = LocalFeatures Or ucsTlsSupportAll Or IIf(OsVersion < ucsOsvXp, ucsTlsIgnoreServerCertificateErrors, 0)
     Else
         m_eLocalFeatures = LocalFeatures
+    End If
+    If Not RootCa Is Nothing Then
+        Set m_oRootCa = RootCa
+        If m_hRootStore <> 0 Then
+            Call CertCloseStore(m_hRootStore, 0)
+            m_hRootStore = 0
+        End If
     End If
     If Not pvTlsInitClient(m_uCtx, m_sRemoteHostName, m_eLocalFeatures) Then
         GoTo QH
@@ -1164,7 +1174,13 @@ End Function
 '= sync ==================================================================
 
 #If ImplSync Then
-Public Function SyncConnect(HostAddress As String, ByVal HostPort As Long, Optional ByVal Timeout As Long, Optional ByVal UseTls As Boolean = True) As Boolean
+Public Function SyncConnect( _
+            HostAddress As String, _
+            ByVal HostPort As Long, _
+            Optional ByVal Timeout As Long, _
+            Optional ByVal UseTls As Boolean = True, _
+            Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum, _
+            Optional RootCa As cTlsSocket) As Boolean
     Const FUNC_NAME     As String = "SyncConnect"
     
     On Error GoTo EH
@@ -1172,7 +1188,7 @@ Public Function SyncConnect(HostAddress As String, ByVal HostPort As Long, Optio
         If Timeout = 0 Then
             Timeout = DEF_TIMEOUT
         End If
-        If Not Connect(HostAddress, HostPort, UseTls:=UseTls) Then
+        If Not Connect(HostAddress, HostPort, UseTls:=UseTls, LocalFeatures:=LocalFeatures, RootCa:=RootCa) Then
             GoTo QH
         End If
         If Not SyncWaitForEvent(Timeout, ucsSfdConnect) Then
@@ -4724,16 +4740,10 @@ Public Function PkiPkcs12ImportCertificates(sPfxFile As String, sPassword As Str
     End If
 End Function
 
-Public Function PkiPemImportRootCaCertStore(Optional CaBundlePemFile As String, Optional RootFwd As cTlsSocket) As Boolean
+Public Function PkiPemImportRootCaCertStore(Optional CaBundlePemFile As String, Optional RootCa As cTlsSocket) As Boolean
     Dim hCertStore      As Long
     
-    If LenB(CaBundlePemFile) = 0 Then
-        Set m_oRootStoreFwd = RootFwd
-        If m_hRootStore <> 0 Then
-            Call CertCloseStore(m_hRootStore, 0)
-            m_hRootStore = 0
-        End If
-    Else
+    If LenB(CaBundlePemFile) <> 0 Then
         hCertStore = pvPkiPemImportRootCaCertStore(CaBundlePemFile)
         If hCertStore = 0 Then
             GoTo QH
@@ -4742,6 +4752,13 @@ Public Function PkiPemImportRootCaCertStore(Optional CaBundlePemFile As String, 
             Call CertCloseStore(m_hRootStore, 0)
         End If
         m_hRootStore = hCertStore
+        Set m_oRootCa = Nothing
+    Else
+        Set m_oRootCa = RootCa
+        If m_hRootStore <> 0 Then
+            Call CertCloseStore(m_hRootStore, 0)
+            m_hRootStore = 0
+        End If
     End If
     '--- success
     PkiPemImportRootCaCertStore = True
@@ -4998,9 +5015,14 @@ Private Function pvPkiCertChainValidate(sRemoteHostName As String, cCerts As Col
     Loop
     '--- build custom chain engine that trusts the additional root CA certificates if provided
     If hRootStore <> 0 Then
-        uEngineConfig.cbSize = Len(uEngineConfig) - IIf(OsVersion < ucsOsvWin7, 12, 0)
-        uEngineConfig.cAdditionalStore = 1
-        uEngineConfig.rghAdditionalStore = VarPtr(hRootStore)
+        If OsVersion < ucsOsvWin7 Then
+            uEngineConfig.cbSize = Len(uEngineConfig) - 12
+            uEngineConfig.cAdditionalStore = 1
+            uEngineConfig.rghAdditionalStore = VarPtr(hRootStore)
+        Else
+            uEngineConfig.cbSize = Len(uEngineConfig)
+            uEngineConfig.hExclusiveRoot = hRootStore
+        End If
         If CertCreateCertificateChainEngine(uEngineConfig, hChainEngine) = 0 Then
             hResult = Err.LastDllError
             sApiSource = "CertCreateCertificateChainEngine"
