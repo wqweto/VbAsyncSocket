@@ -269,7 +269,7 @@ End Type
 
 Private Type UcsHelperWindowStateType
     hWnd                As Long
-    Subclass            As IUnknown
+    Notify              As IUnknown
     Cleanup             As IUnknown
     SocketPtr()         As Long
     Pos                 As Long
@@ -1623,13 +1623,11 @@ EH:
     GoTo QH
 End Function
 
-Private Function pvHandleNotify(ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long, Handled As Boolean) As Long
+Private Function pvHandleNotify(ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
     Const FUNC_NAME     As String = "pvHandleNotify"
     Dim lIdx            As Long
     
     On Error GoTo EH
-    pvHandleNotify = DefSubclassProc(hWnd, wMsg, wParam, lParam)
-    Handled = True
     If frMessageHWnd = 0 Then
         GoTo QH
     End If
@@ -1665,13 +1663,19 @@ Private Function pvToSocket(ByVal lPtr As Long) As cAsyncSocket
     Call vbaObjSetAddref(pvToSocket, lPtr)
 End Function
 
-Private Property Get pvAddressOfSubclassProc() As cAsyncSocket
-    Set pvAddressOfSubclassProc = InitAddressOfMethod(Me, 5)
+Private Property Get pvAddressOfNotifyProc() As cAsyncSocket
+    Set pvAddressOfNotifyProc = InitAddressOfMethod(Me, 4)
 End Property
 
-Public Function SubclassProc(ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long, Handled As Boolean) As Long
-Attribute SubclassProc.VB_MemberFlags = "40"
-    SubclassProc = pvHandleNotify(hWnd, wMsg, wParam, lParam, Handled)
+Public Function NotifyProc(ByVal lTablePtr As Long, ByVal lTableSize As Long, ByVal lStartIdx As Long, ByVal lEndIdx As Long) As Long
+Attribute NotifyProc.VB_MemberFlags = "40"
+    Dim uMsg        As APIMSG
+    
+    Do While lStartIdx <> lEndIdx
+        Call CopyMemory(uMsg.lMessage, ByVal UnsignedAdd(lTablePtr, 12 * lStartIdx), 12)
+        pvHandleNotify uMsg.lMessage, uMsg.wParam, uMsg.lParam
+        lStartIdx = (lStartIdx + 1) And (lTableSize - 1)
+    Loop
 End Function
 
 '= shared ================================================================
@@ -1704,7 +1708,7 @@ End Function
 '=========================================================================
 
 Private Function InitAddressOfMethod(pObj As Object, ByVal MethodParamCount As Long) As Object
-    Const STR_THUNK     As String = "6AAAAABag+oFV4v6ge9QEMEAgcekEcEAuP9EJAS5+QcAAPOri8LB4AgFuQAAAKuLwsHoGAUAjYEAq7gIAAArq7hEJASLq7hJCIsEq7iBi1Qkq4tEJAzB4AIFCIkCM6uLRCQMweASBcDCCACriTrHQgQBAAAAi0QkCIsAiUIIi0QkEIlCDIHqUBDBAIvCBTwRwQCri8IFUBHBAKuLwgVgEcEAq4vCBYQRwQCri8IFjBHBAKuLwgWUEcEAq4vCBZwRwQCri8IFpBHBALn5BwAAq4PABOL6i8dfgcJQEMEAi0wkEIkRK8LCEAAPHwCLVCQE/0IEi0QkDIkQM8DCDABmkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEg/gAfgPCBABZWotCDGgAgAAAagBSUf/gZpC4AUAAgMIIALgBQACAwhAAuAFAAIDCGAC4AUAAgMIkAA==" ' 25.3.2019 14:01:08
+    Dim STR_THUNK       As String: STR_THUNK = "6AAAAABag+oFV4v6ge9QEMEAgcekEcEAuP9EJAS5+QcAAPOri8LB4AgFuQAAAKuLwsHoGAUAjYEAq7gIAAArq7hEJASLq7hJCIsEq7iBi1Qkq4tEJAzB4AIFCIkCM6uLRCQMweASBcDCCACriTrHQgQBAAAAi0QkCIsAiUIIi0QkEIlCDIHqUBDBAIvCBTwRwQCri8IFUBHBAKuLwgVgEcEAq4vCBYQRwQCri8IFjBHBAKuLwgWUEcEAq4vCBZwRwQCri8IFpBHBALn5BwAAq4PABOL6i8dfgcJQEMEAi0wkEIkRK8LCEAAPHwCLVCQE/0IEi0QkDIkQM8DCDABmkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEg/gAfgPCBABZWotCDGgAgAAAagBSUf/gZpC4AUAAgMIIALgBQACAwhAAuAFAAIDCGAC4AUAAgMIkAA==" ' 25.3.2019 14:01:08
     Const THUNK_SIZE    As Long = 16728
     Dim hThunk          As Long
     Dim lSize           As Long
@@ -1714,26 +1718,26 @@ Private Function InitAddressOfMethod(pObj As Object, ByVal MethodParamCount As L
     Debug.Assert lSize = THUNK_SIZE
 End Function
 
-Private Function InitSubclassingThunk(ByVal hWnd As Long, pObj As Object, ByVal pfnCallback As Long) As IUnknown
-    Const STR_THUNK     As String = "6AAAAABag+oFgepwEN8AV1aLdCQUg8YIgz4AdC+L+oHHEBLfAIvCBQgR3wCri8IFRBHfAKuLwgVUEd8Aq4vCBXwR3wCruQkAAADzpYHCEBLfAFJqGP9SEFqL+IvCq7gBAAAAqzPAq4tEJAyri3QkFKWlg+8YagBX/3IM/3cM/1IYi0QkGIk4Xl+4RBLfAC1wEN8AwhAAZpCLRCQIgzgAdSqDeAQAdSSBeAjAAAAAdRuBeAwAAABGdRKLVCQE/0IEi0QkDIkQM8DCDAC4AkAAgMIMAJCLVCQE/0IEi0IEwgQADx8Ai1QkBP9KBItCBHUYiwpS/3EM/3IM/1Eci1QkBIsKUv9RFDPAwgQAkFWL7ItVGP9CBIsKi0EshcB0OFL/0FqJQgiD+AF1VIP4AHUJgX0MAwIAAHRGiwpS/1EwWoXAdTuLClJq8P9xJP9RKFqpAAAACHUoUjPAUFCNRCQEUI1EJARQ/3UU/3UQ/3UM/3UI/3IQ/1IUWVhahcl1E1KLCv91FP91EP91DP91CP9RIFpQUuhM////WF3CGAAPHwA=" ' 4.5.2020 19:23:44
-    Const THUNK_SIZE    As Long = 468
+Private Function InitAsyncSelectNotifyThunk(ByVal hWnd As Long, pObj As Object, ByVal pfnCallback As Long) As IUnknown
+    Dim STR_THUNK       As String: STR_THUNK = "6AAAAABagep1EMwAV1aLdCQUg8YIgz4AdDeL+oHHzBLMAIvCBRQRzACri8IFUBHMAKuLwgVgEcwAq4vCBYwRzACri8IFVBLMAKu5CQAAAPOlgcLMEswAi/qDxziLwqu4AQAAAKszwKuLRCQMqzPAq4t0JBSlpTPAq6uD7yRqAFf/cgz/dwz/UhSLRCQYiTheX7goE8wALXAQzAAFADAAAMIQAJCLRCQIgzgAdSqDeAQAdSSBeAjAAAAAdRuBeAwAAABGdRKLVCQE/0IEi0QkDIkQM8DCDAC4AkAAgMIMAJCLVCQE/0IEi0IEwgQADx8Ai1QkBP9KBItCBHUaUosKUv9xDP9yDP9RGFqLCv9yEGoA/1EkM8DCBAAPHwBVi+yLVRj/QgRSiwr/dRT/dRD/dQz/dQj/URxaUFZXjXoki0IgjTzHjTyHjXUMpaWlX17/QiCBYiD/AwAAi0IQhcB1d4sKi0EwhcB0KlL/0FqJQgiD+AF3T4sKUv9RNFqFwHVEiwpSavD/cSj/USxaqQAAAAh1Mf9yIFIzwFBU/3Ig/3IcaAAEAACNQiRQ/3IU/1IYWFpYiUIcO0IgdByLQgyFwHQV689Siwr/cRBqAGoAagD/USBaiUIQUugT////WF3CGABmkOgAAAAAWoHqWRLMAIHCBBPMAP9CBIsKi0EwhcB0DFL/0FqJQgiD+AF3RFKLCv9yEGoA/1EkWv9yIFIzwFBU/3Ig/3IcaAAEAACNQiRQ/3IU/1IYWFpYiUIcO0IgdAmLQgyFwHQC68/HQhAAAAAAUuiY/v//whAAkI1EQAGNREAB" ' 13.5.2020 16:40:47
+    Const THUNK_SIZE    As Long = 12984
     Static hThunk       As Long
     Dim aParams(0 To 10) As Long
     Dim lSize           As Long
-    
+
     aParams(0) = ObjPtr(pObj)
     aParams(1) = pfnCallback
     If hThunk = 0 Then
-        hThunk = pvThunkGlobalData("InitSubclassingThunk")
+        hThunk = pvThunkGlobalData("InitAsyncSelectNotifyThunk" & App.ThreadID)
     End If
     If hThunk = 0 Then
         hThunk = pvThunkAllocate(STR_THUNK, THUNK_SIZE)
-        aParams(2) = GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemAlloc")
-        aParams(3) = GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemFree")
         Call DefSubclassProc(0, 0, 0, 0)                                            '--- load comctl32
-        aParams(4) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 410)      '--- 410 = SetWindowSubclass ordinal
-        aParams(5) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 412)      '--- 412 = RemoveWindowSubclass ordinal
-        aParams(6) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 413)      '--- 413 = DefSubclassProc ordinal
+        aParams(2) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 410)      '--- 410 = SetWindowSubclass ordinal
+        aParams(3) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 412)      '--- 412 = RemoveWindowSubclass ordinal
+        aParams(4) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 413)      '--- 413 = DefSubclassProc ordinal
+        aParams(5) = GetProcAddress(GetModuleHandle("user32"), "SetTimer")
+        aParams(6) = GetProcAddress(GetModuleHandle("user32"), "KillTimer")
         '--- for IDE protection
         Debug.Assert pvThunkIdeOwner(aParams(7))
         If aParams(7) <> 0 Then
@@ -1741,9 +1745,9 @@ Private Function InitSubclassingThunk(ByVal hWnd As Long, pObj As Object, ByVal 
             aParams(9) = GetProcAddress(GetModuleHandle("vba6"), "EbMode")
             aParams(10) = GetProcAddress(GetModuleHandle("vba6"), "EbIsResetting")
         End If
-        pvThunkGlobalData("InitSubclassingThunk") = hThunk
+        pvThunkGlobalData("InitAsyncSelectNotifyThunk" & App.ThreadID) = hThunk
     End If
-    lSize = CallWindowProc(hThunk, hWnd, 0, VarPtr(aParams(0)), VarPtr(InitSubclassingThunk))
+    lSize = CallWindowProc(hThunk, hWnd, 0, VarPtr(aParams(0)), VarPtr(InitAsyncSelectNotifyThunk))
     Debug.Assert lSize = THUNK_SIZE
 End Function
 
@@ -1888,7 +1892,7 @@ Private Sub Class_Initialize()
             If WSAStartup(&H101, baWSAData(0)) = 0 Then
                 .hWnd = hWndHelper
                 Call SetWindowLong(hWndHelper, GWL_USERDATA, ObjPtr(Me))
-                Set .Subclass = InitSubclassingThunk(hWndHelper, Me, pvAddressOfSubclassProc.SubclassProc(0, 0, 0, 0, 0))
+                Set .Notify = InitAsyncSelectNotifyThunk(hWndHelper, Me, pvAddressOfNotifyProc.NotifyProc(0, 0, 0, 0))
                 Set .Cleanup = InitCleanupThunk(hWndHelper, "user32", "DestroyWindow")
             End If
             ReDim .SocketPtr(0 To 511) As Long
@@ -1901,9 +1905,17 @@ Private Sub Class_Terminate()
         pvClose
         Set m_oHelperWindow = Nothing
     Else
-        '-- terminate helper window
-        Call SetWindowLong(frMessageHWnd, GWL_USERDATA, 0)
-        Call WSACleanup
+        With m_uWindowState(0)
+            '--- terminate notifications
+            Debug.Assert ThunkPrivateData(.Notify, 1) = .hWnd
+            ThunkPrivateData(.Notify, 1) = 0
+            Set .Notify = Nothing
+            '--- terminate helper window
+            Call SetWindowLong(.hWnd, GWL_USERDATA, 0)
+            Set .Cleanup = Nothing
+            '--- terminate winsock
+            Call WSACleanup
+        End With
         Erase m_uWindowState
     End If
 End Sub
