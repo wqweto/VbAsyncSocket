@@ -1062,7 +1062,7 @@ static void ecc_point_decompress384(EccPoint384 *p_point, const uint8_t p_compre
     }
 }
 
-static int ecc_make_key384(uint8_t p_publicKey[ECC_BYTES_384+1], const uint8_t p_privateKey[ECC_BYTES_384])
+static int ecc_make_key384(uint8_t p_publicKey[2*ECC_BYTES_384+1], const uint8_t p_privateKey[ECC_BYTES_384])
 {
     uint64_t l_private[NUM_ECC_DIGITS_384];
     EccPoint384 l_public;
@@ -1085,12 +1085,13 @@ static int ecc_make_key384(uint8_t p_publicKey[ECC_BYTES_384+1], const uint8_t p
     if (EccPoint_isZero384(&l_public))
         return 0;
     
-    p_publicKey[0] = 2 + (l_public.y[0] & 0x01);
+    p_publicKey[0] = 4;
     ecc_native2bytes384(p_publicKey + 1, l_public.x);
+    ecc_native2bytes384(p_publicKey + ECC_BYTES_384 + 1, l_public.y);
     return 1;
 }
 
-static int ecdh_shared_secret384(const uint8_t p_publicKey[ECC_BYTES_384+1], const uint8_t p_privateKey[ECC_BYTES_384], uint8_t p_secret[ECC_BYTES_384])
+static int ecdh_shared_secret384(const uint8_t p_publicKey[2*ECC_BYTES_384+1], const uint8_t p_privateKey[ECC_BYTES_384], uint8_t p_secret[ECC_BYTES_384])
 {
     EccPoint384 l_public;
     uint64_t l_private[NUM_ECC_DIGITS_384];
@@ -1108,13 +1109,13 @@ static int ecdh_shared_secret384(const uint8_t p_publicKey[ECC_BYTES_384+1], con
     return !EccPoint_isZero384(&l_product);
 }
 
-static int ecdh_uncompress_key384(const uint8_t p_publicKey[ECC_BYTES_384 + 1], uint8_t p_uncompressedKey[2 * ECC_BYTES_384 + 1])
+static int ecdh_uncompress_key384(const uint8_t p_compressedKey[ECC_BYTES_384 + 1], uint8_t p_publicKey[2 * ECC_BYTES_384 + 1])
 {
     EccPoint384 l_public;
-    ecc_point_decompress384(&l_public, p_publicKey);
-    p_uncompressedKey[0] = 4;
-    ecc_native2bytes384(p_uncompressedKey + 1, l_public.x);
-    ecc_native2bytes384(p_uncompressedKey + ECC_BYTES_384 + 1, l_public.y);
+    ecc_point_decompress384(&l_public, p_compressedKey);
+    p_publicKey[0] = 4;
+    ecc_native2bytes384(p_publicKey + 1, l_public.x);
+    ecc_native2bytes384(p_publicKey + ECC_BYTES_384 + 1, l_public.y);
     return 1;
 }
 

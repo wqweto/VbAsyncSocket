@@ -12,6 +12,8 @@
  * <http://creativecommons.org/publicdomain/zero/1.0/>.
  */
 
+typedef void (*cf_gf128_mul_fn)(const cf_gf128 x, const cf_gf128 y, cf_gf128 out);
+
 /* Incremental GHASH computation. */
 typedef struct
 {
@@ -25,13 +27,28 @@ typedef struct
 #define STATE_INVALID 0
 #define STATE_AAD 1
 #define STATE_CIPHER 2
+  cf_gf128_mul_fn gf128_mul;
 } ghash_ctx;
+
+static inline int supports_pclmulqdq()
+{
+    int CPUInfo[4];
+    __cpuid(CPUInfo, 1);
+    return (CPUInfo[2] & (1 << 1));
+}
 
 static void ghash_init(ghash_ctx *ctx, uint8_t H[16])
 {
   memset(ctx, 0, sizeof *ctx);
   cf_gf128_frombytes_be(H, ctx->H);
   ctx->state = STATE_AAD;
+  if (supports_pclmulqdq()) {
+    DECLARE_PFN(cf_gf128_mul_fn,  cf_gf128_mul_fast);
+    ctx->gf128_mul = pfn_cf_gf128_mul_fast;
+  } else {
+    DECLARE_PFN(cf_gf128_mul_fn,  cf_gf128_mul);
+    ctx->gf128_mul = pfn_cf_gf128_mul;
+  }
 }
 
 static void ghash_block(void *vctx, const uint8_t *data)
@@ -40,7 +57,7 @@ static void ghash_block(void *vctx, const uint8_t *data)
   cf_gf128 gfdata;
   cf_gf128_frombytes_be(data, gfdata);
   cf_gf128_add(gfdata, ctx->Y, ctx->Y);
-  cf_gf128_mul(ctx->Y, ctx->H, ctx->Y);
+  ctx->gf128_mul(ctx->Y, ctx->H, ctx->Y);
 }
 
 static void ghash_add(ghash_ctx *ctx, const uint8_t *buf, size_t n)
@@ -245,36 +262,53 @@ x_err:
 #define AESGCM_IV_SIZE  12
 #define AESGCM_TAG_SIZE 16
 
+static void cf_aesgcm_setup(cf_prp *prp, void **prpctx, 
+                            cf_aes_context_ni *ctxni, cf_aes_context *ctx, 
+                            const uint8_t *k, const size_t klen)
+{
+    if (cf_aes_setup_ni(ctxni, k, klen)) {
+        DECLARE_PFN(cf_prp_block, cf_aes_encrypt_ni);
+        DECLARE_PFN(cf_prp_block, cf_aes_decrypt_ni);
+        prp->blocksz = AES_BLOCKSZ;
+        prp->encrypt = pfn_cf_aes_encrypt_ni;
+        prp->decrypt = pfn_cf_aes_decrypt_ni;
+        *prpctx = ctxni;
+    }
+    else {
+        cf_aes_init(ctx, k, klen);
+        DECLARE_PFN(cf_prp_block, cf_aes_encrypt);
+        DECLARE_PFN(cf_prp_block, cf_aes_decrypt);
+        prp->blocksz = AES_BLOCKSZ;
+        prp->encrypt = pfn_cf_aes_encrypt;
+        prp->decrypt = pfn_cf_aes_decrypt;
+        *prpctx = ctx;
+    }
+}
+typedef union {
+    cf_aes_context_ni ctxni;
+    cf_aes_context ctx;
+} cf_aes_context_u;
+
 static void cf_aesgcm_encrypt(uint8_t *c, uint8_t *mac, const uint8_t *m, const size_t mlen,
                               const uint8_t *ad, const size_t adlen,
                               const uint8_t *npub, const uint8_t *k, const size_t klen)
 {
-  DECLARE_PFN(cf_prp_block, cf_aes_encrypt);
-  DECLARE_PFN(cf_prp_block, cf_aes_decrypt);
-  const cf_prp cf_aes = {
-      AES_BLOCKSZ,
-      pfn_cf_aes_encrypt,
-      pfn_cf_aes_decrypt
-  };
-  cf_aes_context ctx;
-  cf_aes_init(&ctx, k, klen);
+    cf_prp prp;
+    void *prpctx;
+    cf_aes_context_u ctx;
 
-  cf_gcm_encrypt(&cf_aes, &ctx, m, mlen, ad, adlen, npub, AESGCM_IV_SIZE, c, mac, AESGCM_TAG_SIZE);
+    cf_aesgcm_setup(&prp, &prpctx, &ctx.ctxni, &ctx.ctx, k, klen);
+    cf_gcm_encrypt(&prp, prpctx, m, mlen, ad, adlen, npub, AESGCM_IV_SIZE, c, mac, AESGCM_TAG_SIZE);
 }
 
 static int cf_aesgcm_decrypt(uint8_t *m, const uint8_t *c, const size_t clen, const uint8_t *mac, 
                              const uint8_t *ad, const size_t adlen,
                              const uint8_t *npub, const uint8_t *k, const size_t klen)
 {
-  DECLARE_PFN(cf_prp_block, cf_aes_encrypt);
-  DECLARE_PFN(cf_prp_block, cf_aes_decrypt);
-  const cf_prp cf_aes = {
-      AES_BLOCKSZ,
-      pfn_cf_aes_encrypt,
-      pfn_cf_aes_decrypt
-  };
-  cf_aes_context ctx;
-  cf_aes_init(&ctx, k, klen);
+    cf_prp prp;
+    void *prpctx;
+    cf_aes_context_u ctx;
 
-  return cf_gcm_decrypt(&cf_aes, &ctx, c, clen, ad, adlen, npub, AESGCM_IV_SIZE, mac, AESGCM_TAG_SIZE, m);
+    cf_aesgcm_setup(&prp, &prpctx, &ctx.ctxni, &ctx.ctx, k, klen);
+    return cf_gcm_decrypt(&prp, prpctx, c, clen, ad, adlen, npub, AESGCM_IV_SIZE, mac, AESGCM_TAG_SIZE, m);
 }

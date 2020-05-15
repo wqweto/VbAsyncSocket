@@ -69,5 +69,8 @@
     <ClCompile Include="sshbn.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="sshaes.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

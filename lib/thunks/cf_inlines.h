@@ -97,7 +97,7 @@ static inline uint32_t mask_u32(uint32_t x, uint32_t y)
 {
   uint32_t diff = x ^ y;
   uint32_t diff_is_zero = ~diff & (diff - 1);
-  return - (diff_is_zero >> 31);
+  return ~(diff_is_zero >> 31) + 1;
 }
 
 /** Like memset(ptr, 0, len), but not allowed to be removed by

@@ -183,6 +183,7 @@ extern "C" {
     #include "aes.c"
     #include "gf128.c"
     #include "modes.c"
+    #include "sshaes.c"
     #include "gcm.c"
 #endif
 #ifdef IMPL_GMPRSA_THUNK
@@ -265,8 +266,6 @@ typedef struct _RSA_PUBLIC_KEY_XX
 
 void __cdecl main()
 {
-    RSA_PUBLIC_KEY_XX a;
-    printf("pubexp offset=%d\n", ((uint8_t *)&a.RsaPubKey.pubexp) - ((uint8_t *)&a));
 #ifdef IMPL_SHA256_THUNK
     printf("sizeof(cf_sha256_context)=%d\n", sizeof cf_sha256_context);
 #endif
@@ -367,7 +366,7 @@ void __cdecl main()
 #endif
 
 #ifdef IMPL_ECC256_THUNK
-    uint8_t pubkey[ECC_BYTES+1] = { 0 };
+    uint8_t pubkey[2*ECC_BYTES+1] = { 0 };
     uint8_t privkey[ECC_BYTES] = { 0 };
     uint8_t secret[ECC_BYTES] = { 0 };
     do {
@@ -407,6 +406,10 @@ void __cdecl main()
     uint8_t *mac = cyphertext + sizeof plaintext;
     pfn_cf_aesgcm_encrypt(cyphertext, mac, plaintext, sizeof plaintext, aad, sizeof aad, nonce, key, sizeof key);
     pfn_cf_aesgcm_decrypt(cyphertext, cyphertext, sizeof plaintext, mac, aad, sizeof aad, nonce, key, sizeof key);
+    const size_t lsize = 100 * 1024 * 1024;
+    uint8_t *lbuf = (uint8_t *)malloc(lsize + AESGCM_TAG_SIZE);
+    mac = lbuf + lsize;
+    pfn_cf_aesgcm_encrypt(lbuf, mac, lbuf, lsize, aad, sizeof aad, nonce, key, sizeof key);
 #endif
 #ifdef IMPL_GMPRSA_THUNK
     {
