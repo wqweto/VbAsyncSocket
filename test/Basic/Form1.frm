@@ -147,6 +147,7 @@ Private WithEvents m_oHttpDownload As cHttpDownload
 Attribute m_oHttpDownload.VB_VarHelpID = -1
 Private m_oRateLimiter As cRateLimiter
 Private m_dblStartTimerEx As Double
+Private m_dblNextTimerEx As Double
 
 Private Type UcsParsedUrl
     Protocol        As String
@@ -677,6 +678,7 @@ End Sub
 Private Sub Command11_Click()
     Set m_oHttpDownload = New cHttpDownload
     m_oHttpDownload.DownloadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://dl.unicontsoft.com/upload/pix/ss_vbyoga_flex_container.gif", Environ$("TMP") & "\aaa.gif"
+'    m_oHttpDownload.DownloadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://dl.unicontsoft.com/upload/aaa.zip", Environ$("TMP") & "\aaa.zip"
 End Sub
 
 Private Sub m_oHttpDownload_OperationStart()
@@ -690,8 +692,11 @@ Private Sub m_oHttpDownload_OperationStart()
 End Sub
 
 Private Sub m_oHttpDownload_DownloadProgress(ByVal BytesRead As Double, ByVal BytesTotal As Double)
-    Debug.Print Format$(TimerEx, "0.000"), "Downloaded " & BytesRead & " from " & BytesTotal & " @ " & Format$(BytesRead / (TimerEx - m_dblStartTimerEx) / 1024, "0.0") & "KB/s"
-    Caption = "Downloaded " & BytesRead & " from " & BytesTotal & " @ " & Format$(BytesRead / (TimerEx - m_dblStartTimerEx) / 1024, "0.0") & "KB/s"
+    If TimerEx > m_dblNextTimerEx + 0.1 Or BytesRead = BytesTotal Then
+        m_dblNextTimerEx = TimerEx
+        Debug.Print Format$(TimerEx, "0.000"), "Downloaded " & BytesRead & " from " & BytesTotal & " @ " & Format$(BytesRead / (TimerEx - m_dblStartTimerEx) / 1024, "0.0") & "KB/s"
+        Caption = "Downloaded " & BytesRead & " from " & BytesTotal & " @ " & Format$(BytesRead / (TimerEx - m_dblStartTimerEx) / 1024, "0.0") & "KB/s"
+    End If
 '    If BytesRead > 2000000 Then
 '        m_oHttpDownload.CancelOperation
 '        Set m_oRateLimiter = Nothing
@@ -714,8 +719,11 @@ Private Sub Command12_Click()
 End Sub
 
 Private Sub m_oHttpDownload_UploadProgress(ByVal BytesWritten As Double, ByVal BytesTotal As Double)
-    Debug.Print Format$(TimerEx, "0.000"), "Uploaded " & BytesWritten & " of " & BytesTotal & " @ " & Format$(BytesWritten / (TimerEx - m_dblStartTimerEx) / 1024, "0.0") & "KB/s"
-    Caption = "Uploaded " & BytesWritten & " of " & BytesTotal
+    If TimerEx > m_dblNextTimerEx + 0.1 Or BytesWritten = BytesTotal Then
+        m_dblNextTimerEx = TimerEx
+        Debug.Print Format$(TimerEx, "0.000"), "Uploaded " & BytesWritten & " of " & BytesTotal & " @ " & Format$(BytesWritten / (TimerEx - m_dblStartTimerEx) / 1024, "0.0") & "KB/s"
+        Caption = "Uploaded " & BytesWritten & " of " & BytesTotal & " @ " & Format$(BytesWritten / (TimerEx - m_dblStartTimerEx) / 1024, "0.0") & "KB/s"
+    End If
 End Sub
 
 Private Sub m_oHttpDownload_UploadComplete(ByVal LocalFileName As String)
