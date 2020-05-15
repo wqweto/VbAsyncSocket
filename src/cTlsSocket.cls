@@ -31,6 +31,7 @@ Attribute VB_Exposed = False
 ' Additional links with TLS 1.3 resources
 '   https://github.com/tlswg/tls13-spec/wiki/Implementations
 '   https://sans-io.readthedocs.io/how-to-sans-io.html
+'   https://www.davidwong.fr/tls13
 '
 '=========================================================================
 Option Explicit
@@ -55,6 +56,7 @@ Event OnSend()
 Event OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
 Event OnMessagePending(Handled As Boolean)
 Event BeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Cancel As Boolean)
+Event AfterNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum)
 Event OnClientCertificate(CaDn As Object, Confirmed As Boolean)
 
 '=========================================================================
@@ -971,7 +973,6 @@ Public Function ReceiveArray( _
             Call CopyMemory(Buffer(0), m_baRecv(0), m_lRecvSize)
             m_lRecvSize = 0
         End If
-        m_oSocket.Receive 0, 0 '--- enable FD_READ
         '--- success
         ReceiveArray = True
     Else
@@ -1137,6 +1138,10 @@ Public Sub PostEvent(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Optional By
             RaiseEvent OnClose
             m_uCtx.State = ucsTlsStateClosed
         End Select
+        RaiseEvent AfterNotify(EventMask)
+        If EventMask = ucsSfdRead And AvailableBytes = 0 Then
+            m_oSocket.Receive 0, 0 '--- enable FD_READ notification
+        End If
     Else
         m_oSocket.PostEvent EventMask, Immediate
     End If
@@ -1498,6 +1503,7 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
             If pvTlsIsClosed(m_uCtx) Then
                 If pvOnBeforeNotify(ucsSfdClose) Then
                     RaiseEvent OnClose
+                    RaiseEvent AfterNotify(ucsSfdClose)
                 End If
                 GoTo QH
             End If
@@ -1516,9 +1522,11 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
             End If
             If pvOnBeforeNotify(ucsSfdConnect) Then
                 RaiseEvent OnConnect
+                RaiseEvent AfterNotify(ucsSfdConnect)
             End If
             If pvOnBeforeNotify(ucsSfdWrite) Then
                 RaiseEvent OnSend
+                RaiseEvent AfterNotify(ucsSfdWrite)
             End If
             baRecv = vbNullString
         End If
@@ -1527,6 +1535,7 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
     If m_lRecvSize > lPrevSize Then
         If pvOnBeforeNotify(ucsSfdRead) Then
             RaiseEvent OnReceive
+            RaiseEvent AfterNotify(ucsSfdRead)
         End If
     End If
     If Not bResult Then
@@ -1545,10 +1554,12 @@ End Function
 Private Function pvOnSend() As Boolean
     Const FUNC_NAME     As String = "pvOnSend"
     Dim lBytes          As Long
+    Dim lBufferSize     As Long
     
     On Error GoTo EH
+    lBufferSize = m_oSocket.SockOpt(ucsSsoSendBuffer)
     Do While m_lSendActual < m_uCtx.SendPos
-        lBytes = IIf(m_uCtx.SendPos - m_lSendActual > TLS_MAX_PLAINTEXT_RECORD_SIZE, TLS_MAX_PLAINTEXT_RECORD_SIZE, m_uCtx.SendPos - m_lSendActual)
+        lBytes = IIf(m_uCtx.SendPos - m_lSendActual > lBufferSize, lBufferSize, m_uCtx.SendPos - m_lSendActual)
         lBytes = m_oSocket.Send(VarPtr(m_uCtx.SendBuffer(m_lSendActual)), lBytes)
         If m_oSocket.LastError = WSAEWOULDBLOCK Then
             Exit Do
@@ -1655,6 +1666,7 @@ Private Sub m_oSocket_OnSend()
             m_lSendBytes = 0
             If pvOnBeforeNotify(ucsSfdWrite) Then
                 RaiseEvent OnSend
+                RaiseEvent AfterNotify(ucsSfdWrite)
             End If
         End If
     Else
@@ -1667,12 +1679,6 @@ EH:
     Resume QH
 End Sub
 
-Private Sub m_oSocket_BeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Cancel As Boolean)
-    If Not m_bUseTls Then
-        RaiseEvent BeforeNotify(EventMask, Cancel)
-    End If
-End Sub
-
 Private Sub m_oSocket_OnAccept()
     Const FUNC_NAME     As String = "m_oSocket_OnAccept"
     
@@ -1680,6 +1686,7 @@ Private Sub m_oSocket_OnAccept()
     If m_bUseTls Then
         If pvOnBeforeNotify(ucsSfdAccept) Then
             RaiseEvent OnAccept
+            RaiseEvent AfterNotify(ucsSfdAccept)
         End If
     Else
         RaiseEvent OnAccept
@@ -1700,6 +1707,7 @@ Private Sub m_oSocket_OnClose()
         If pvOnBeforeNotify(ucsSfdClose) Then
             RaiseEvent OnClose
             m_uCtx.State = ucsTlsStateClosed
+            RaiseEvent AfterNotify(ucsSfdClose)
         End If
     Else
         RaiseEvent OnClose
@@ -1721,6 +1729,29 @@ End Sub
 
 Private Sub m_oSocket_OnResolve(IpAddress As String)
     RaiseEvent OnResolve(IpAddress)
+End Sub
+
+Private Sub m_oSocket_BeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Cancel As Boolean)
+    If Not m_bUseTls Then
+        RaiseEvent BeforeNotify(EventMask, Cancel)
+    End If
+End Sub
+
+Private Sub m_oSocket_AfterNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum)
+    Const FUNC_NAME     As String = "m_oSocket_AfterNotify"
+    
+    On Error GoTo EH
+    If m_bUseTls Then
+        If EventMask = ucsSfdRead And AvailableBytes = 0 Then
+            m_oSocket.Receive 0, 0 '--- enable FD_READ notification
+        End If
+    Else
+        RaiseEvent AfterNotify(EventMask)
+    End If
+    Exit Sub
+EH:
+    PrintError FUNC_NAME
+    Resume Next
 End Sub
 
 '=========================================================================
@@ -4462,6 +4493,8 @@ Private Function pvCryptoIsSupported(ByVal eAlgo As UcsTlsCryptoAlgorithmsEnum) 
         '--- signal if AES preferred over Chacha20
         #If ImplUseLibSodium Then
             pvCryptoIsSupported = (crypto_aead_aes256gcm_is_available() <> 0 And eAlgo = PREF + ucsTlsAlgoAeadAes256)
+        #Else
+            pvCryptoIsSupported = True
         #End If
     Case ucsTlsAlgoSignaturePkcsSha1
         pvCryptoIsSupported = False
@@ -5224,7 +5257,7 @@ Private Function pvPkiCertChainValidate(sRemoteHostName As String, cCerts As Col
                             Exit Do
                         End If
                     Else
-                        If LCase$(sRemoteHostName) = sDnsName Then
+                        If LCase$(sRemoteHostName) = sDnsName Or LCase$("www." & sRemoteHostName) = sDnsName Then
                             bValidName = True
                             Exit Do
                         End If

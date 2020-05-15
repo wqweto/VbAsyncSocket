@@ -43,6 +43,7 @@ Event OnSend()
 Event OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
 Event OnMessagePending(Handled As Boolean)
 Event BeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Cancel As Boolean)
+Event AfterNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum)
 
 '=========================================================================
 ' Public enums
@@ -1015,6 +1016,7 @@ Private Sub pvDoNotify(ByVal wParam As Long, ByVal lParam As Long)
     Case ucsSfdClose
         RaiseEvent OnClose
     End Select
+    RaiseEvent AfterNotify(eEvent)
 QH:
 End Sub
 
@@ -1719,8 +1721,8 @@ Private Function InitAddressOfMethod(pObj As Object, ByVal MethodParamCount As L
 End Function
 
 Private Function InitAsyncSelectNotifyThunk(ByVal hWnd As Long, pObj As Object, ByVal pfnCallback As Long) As IUnknown
-    Dim STR_THUNK       As String: STR_THUNK = "6AAAAABagep1EMwAV1aLdCQUg8YIgz4AdDeL+oHHzBLMAIvCBRQRzACri8IFUBHMAKuLwgVgEcwAq4vCBYwRzACri8IFVBLMAKu5CQAAAPOlgcLMEswAi/qDxziLwqu4AQAAAKszwKuLRCQMqzPAq4t0JBSlpTPAq6uD7yRqAFf/cgz/dwz/UhSLRCQYiTheX7goE8wALXAQzAAFADAAAMIQAJCLRCQIgzgAdSqDeAQAdSSBeAjAAAAAdRuBeAwAAABGdRKLVCQE/0IEi0QkDIkQM8DCDAC4AkAAgMIMAJCLVCQE/0IEi0IEwgQADx8Ai1QkBP9KBItCBHUaUosKUv9xDP9yDP9RGFqLCv9yEGoA/1EkM8DCBAAPHwBVi+yLVRj/QgRSiwr/dRT/dRD/dQz/dQj/URxaUFZXjXoki0IgjTzHjTyHjXUMpaWlX17/QiCBYiD/AwAAi0IQhcB1d4sKi0EwhcB0KlL/0FqJQgiD+AF3T4sKUv9RNFqFwHVEiwpSavD/cSj/USxaqQAAAAh1Mf9yIFIzwFBU/3Ig/3IcaAAEAACNQiRQ/3IU/1IYWFpYiUIcO0IgdByLQgyFwHQV689Siwr/cRBqAGoAagD/USBaiUIQUugT////WF3CGABmkOgAAAAAWoHqWRLMAIHCBBPMAP9CBIsKi0EwhcB0DFL/0FqJQgiD+AF3RFKLCv9yEGoA/1EkWv9yIFIzwFBU/3Ig/3IcaAAEAACNQiRQ/3IU/1IYWFpYiUIcO0IgdAmLQgyFwHQC68/HQhAAAAAAUuiY/v//whAAkI1EQAGNREAB" ' 13.5.2020 16:40:47
-    Const THUNK_SIZE    As Long = 12984
+    Dim STR_THUNK       As String: STR_THUNK = "6AAAAABagep1EDwAV1aLdCQUg8YIgz4AdDeL+oHH8BI8AIvCBRQRPACri8IFUBE8AKuLwgVgETwAq4vCBYwRPACri8IFeBI8AKu5CQAAAPOlgcLwEjwAi/qDxziLwqu4AQAAAKszwKuLRCQMqzPAq4t0JBSlpTPAq6urg+8oagBX/3IM/3cM/1IUi0QkGIk4Xl+4UBM8AC1wEDwABQAwAADCEACLRCQIgzgAdSqDeAQAdSSBeAjAAAAAdRuBeAwAAABGdRKLVCQE/0IEi0QkDIkQM8DCDAC4AkAAgMIMAJCLVCQE/0IEi0IEwgQADx8Ai1QkBP9KBItCBHUaUosKUv9xDP9yDP9RGFqLCv9yEGoA/1EkM8DCBAAPHwBVi+yLVRj/QgRSiwr/dRT/dRD/dQz/dQj/URxaUItCIEAl/wMAADtCHHQaUFZXjXooi0IgjTzHjTyHjXUMpaWlX16PQiCLQiSFwA+FkAAAAItCEIXAD4WFAAAAiwqLQTCFwHQqUv/QWolCCIP4AXddiwpS/1E0WoXAdVKLClJq8P9xKP9RLFqpAAAACHU/i0IUhcB0S8dCJAEAAAD/ciBSM8BQVP9yIP9yHGgABAAAjUIoUP9yFP9SGFhax0IkAAAAAFiJQhw7QiB0FevBUosK/3EQagBqAGoA/1EgWolCEFLo7v7//1hdwhgAkOgAAAAAWoHqfRI8AIHCKBM8AP9CBIsKi0EwhcB0DFL/0FqJQgiD+AF3RFKLCv9yEGoA/1EkWv9yIFIzwFBU/3Ig/3IcaAAEAACNQihQ/3IU/1IYWFpYiUIcO0IgdAmLQgyFwHQC68/HQhAAAAAAUuh0/v//whAAkA==" ' 15.5.2020 18:59:56
+    Const THUNK_SIZE    As Long = 13024
     Static hThunk       As Long
     Dim aParams(0 To 10) As Long
     Dim lSize           As Long
@@ -1907,8 +1909,8 @@ Private Sub Class_Terminate()
     Else
         With m_uWindowState(0)
             '--- terminate notifications
-            Debug.Assert ThunkPrivateData(.Notify, 1) = .hWnd
-            ThunkPrivateData(.Notify, 1) = 0
+            Debug.Assert ThunkPrivateData(.Notify, 3) = ObjPtr(Me)
+            ThunkPrivateData(.Notify, 3) = 0
             Set .Notify = Nothing
             '--- terminate helper window
             Call SetWindowLong(.hWnd, GWL_USERDATA, 0)
