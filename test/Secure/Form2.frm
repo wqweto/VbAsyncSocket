@@ -153,6 +153,9 @@ Private Sub Form_Load()
     m_oRootCa.PkiPemImportRootCaCertStore App.Path & "\ca-bundle.pem"
     Set m_oServerSocket = New cTlsSocket
     ChDir App.Path
+    If Not m_oServerSocket.StartServerTls() Then
+        GoTo QH
+    End If
     If Not m_oServerSocket.PkiPemImportCertificates(Split(PEM_FILES, "|")) Then
         If Not m_oServerSocket.PkiPkcs12ImportCertificates(PFX_FILE, PFX_PASSWORD) Then
 '            MsgBox "Error starting TLS server on localhost:10443" & vbCrLf & vbCrLf & "No private key found!", vbExclamation

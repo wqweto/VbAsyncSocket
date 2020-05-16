@@ -519,12 +519,13 @@ Private Const ERR_NO_PREVIOUS_SECRET                    As String = "Missing pre
 Private Const ERR_NO_REMOTE_RANDOM                      As String = "Missing remote random"
 Private Const ERR_NO_SERVER_CERTIFICATE                 As String = "Missing server certificate"
 Private Const ERR_NO_SUPPORTED_CIPHER_SUITE             As String = "Missing supported ciphersuite"
+Private Const ERR_NO_MATCHING_ALT_NAME                  As String = "No certificate subject name matches target host name"
 Private Const ERR_TRUST_IS_REVOKED                      As String = "Trust for this certificate or one of the certificates in the certificate chain has been revoked"
 Private Const ERR_TRUST_IS_PARTIAL_CHAIN                As String = "The certificate chain is not complete"
 Private Const ERR_TRUST_IS_UNTRUSTED_ROOT               As String = "The certificate or certificate chain is based on an untrusted root"
 Private Const ERR_TRUST_IS_NOT_TIME_VALID               As String = "The certificate has expired"
 Private Const ERR_TRUST_REVOCATION_STATUS_UNKNOWN       As String = "The revocation status of the certificate or one of the certificates in the certificate chain is unknown"
-Private Const ERR_NO_MATCHING_ALT_NAME                  As String = "No certificate subject name matches target host name"
+Private Const ERR_TLS_NOT_STARTED                       As String = "Server TLS engine not started"
 Private Const STR_CHR1                                  As String = "" '--- CHAR(1)
 Private Const DEF_TIMEOUT                               As Long = 5000
 
@@ -720,19 +721,17 @@ End Property
 Property Get LastError() As VBA.ErrObject
     Set LastError = Err
     With LastError
-        If m_oSocket.LastError <> 0 Then
+        .Description = pvTlsGetLastError(m_uCtx)
+        If LenB(.Description) <> 0 And .Description <> "Close notify." Then
+            .Number = vbObjectError
+            .Source = MODULE_NAME
+        ElseIf m_oSocket.LastError <> 0 Then
             .Description = m_oSocket.GetErrorDescription(m_oSocket.LastError)
             .Number = m_oSocket.LastError
             .Source = "cAsyncSocket"
         Else
-            .Description = pvTlsGetLastError(m_uCtx)
-            If LenB(.Description) <> 0 And .Description <> "Close notify." Then
-                .Number = vbObjectError
-                .Source = MODULE_NAME
-            Else
-                .Number = 0
-                .Source = vbNullString
-            End If
+            .Number = 0
+            .Source = vbNullString
         End If
     End With
 End Property
@@ -1442,9 +1441,12 @@ Public Function SyncWaitForEvent( _
                 GoTo QH
             End If
             m_oSocket.SyncProcessMsgQueue
-            If LastError <> 0 Then
+            Select Case LastError
+            Case 0, WSAEWOULDBLOCK
+                '--- do nothing
+            Case Else
                 GoTo QH
-            End If
+            End Select
         Loop
         '--- success
         SyncWaitForEvent = True
@@ -4975,11 +4977,15 @@ Public Function PkiPemImportCertificates(ByVal vPemFiles As Variant) As Boolean
     Dim cCerts          As Collection
     Dim baPrivKey()     As Byte
     
-    If pvPkiPemImportCertificates(vPemFiles, cCerts, baPrivKey) Then
-        Set m_uCtx.LocalCertificates = cCerts
-        m_uCtx.LocalPrivateKey = baPrivKey
-        '--- success
-        PkiPemImportCertificates = True
+    If m_bUseTls Then
+        If pvPkiPemImportCertificates(vPemFiles, cCerts, baPrivKey) Then
+            Set m_uCtx.LocalCertificates = cCerts
+            m_uCtx.LocalPrivateKey = baPrivKey
+            '--- success
+            PkiPemImportCertificates = True
+        End If
+    Else
+        Err.Raise vbObjectError, , ERR_TLS_NOT_STARTED
     End If
 End Function
 
@@ -4987,11 +4993,15 @@ Public Function PkiPkcs12ImportCertificates(sPfxFile As String, Optional Passwor
     Dim cCerts          As Collection
     Dim baPrivKey()     As Byte
     
-    If pvPkiPkcs12ImportCertificates(sPfxFile, Password & "", cCerts, baPrivKey) Then
-        Set m_uCtx.LocalCertificates = cCerts
-        m_uCtx.LocalPrivateKey = baPrivKey
-        '--- success
-        PkiPkcs12ImportCertificates = True
+    If m_bUseTls Then
+        If pvPkiPkcs12ImportCertificates(sPfxFile, Password & "", cCerts, baPrivKey) Then
+            Set m_uCtx.LocalCertificates = cCerts
+            m_uCtx.LocalPrivateKey = baPrivKey
+            '--- success
+            PkiPkcs12ImportCertificates = True
+        End If
+    Else
+        Err.Raise vbObjectError, , ERR_TLS_NOT_STARTED
     End If
 End Function
 
