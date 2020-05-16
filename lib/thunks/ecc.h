@@ -8,21 +8,21 @@
 #define secp192r1 24
 #define secp256r1 32
 #define secp384r1 48
-#ifndef ECC_CURVE
-    #define ECC_CURVE secp256r1
+#ifndef ECC_CURVE_256
+    #define ECC_CURVE_256 secp256r1
 #endif
 
-#if (ECC_CURVE != secp128r1 && ECC_CURVE != secp192r1 && ECC_CURVE != secp256r1 && ECC_CURVE != secp384r1)
-    #error "Must define ECC_CURVE to one of the available curves"
+#if (ECC_CURVE_256 != secp128r1 && ECC_CURVE_256 != secp192r1 && ECC_CURVE_256 != secp256r1 && ECC_CURVE_256 != secp384r1)
+    #error "Must define ECC_CURVE_256 to one of the available curves"
 #endif
 
-#define ECC_BYTES ECC_CURVE
-#define NUM_ECC_DIGITS (ECC_BYTES/8)
+#define ECC_BYTES_256 ECC_CURVE_256
+#define NUM_ECC_DIGITS_256 (ECC_BYTES_256/8)
 
 typedef struct EccPoint
 {
-    uint64_t x[NUM_ECC_DIGITS];
-    uint64_t y[NUM_ECC_DIGITS];
+    uint64_t x[NUM_ECC_DIGITS_256];
+    uint64_t y[NUM_ECC_DIGITS_256];
 } EccPoint;
 
 #ifdef __cplusplus
@@ -39,7 +39,7 @@ Outputs:
 
 Returns 1 if the key pair was generated successfully, 0 if an error occurred.
 */
-int ecc_make_key(uint8_t p_publicKey[ECC_BYTES+1], const uint8_t p_privateKey[ECC_BYTES]);
+int ecc_make_key256(uint8_t p_publicKey[ECC_BYTES_256+1], const uint8_t p_privateKey[ECC_BYTES_256]);
 
 /* ecdh_shared_secret() function.
 Compute a shared secret given your secret key and someone else's public key.
@@ -54,7 +54,7 @@ Outputs:
 
 Returns 1 if the shared secret was generated successfully, 0 if an error occurred.
 */
-int ecdh_shared_secret(const uint8_t p_publicKey[ECC_BYTES+1], const uint8_t p_privateKey[ECC_BYTES], uint8_t p_secret[ECC_BYTES]);
+int ecdh_shared_secret256(const uint8_t p_publicKey[ECC_BYTES_256+1], const uint8_t p_privateKey[ECC_BYTES_256], uint8_t p_secret[ECC_BYTES_256]);
 
 /* ecdsa_sign() function.
 Generate an ECDSA signature for a given hash value.
@@ -71,7 +71,7 @@ Outputs:
 
 Returns 1 if the signature generated successfully, 0 if an error occurred.
 */
-int ecdsa_sign(const uint8_t p_privateKey[ECC_BYTES], const uint8_t p_hash[ECC_BYTES], uint64_t k[NUM_ECC_DIGITS], uint8_t p_signature[ECC_BYTES*2]);
+int ecdsa_sign256(const uint8_t p_privateKey[ECC_BYTES_256], const uint8_t p_hash[ECC_BYTES_256], uint64_t k[NUM_ECC_DIGITS_256], uint8_t p_signature[ECC_BYTES_256*2]);
 
 /* ecdsa_verify() function.
 Verify an ECDSA signature.
@@ -86,7 +86,7 @@ Inputs:
 
 Returns 1 if the signature is valid, 0 if it is invalid.
 */
-int ecdsa_verify(const uint8_t p_publicKey[ECC_BYTES+1], const uint8_t p_hash[ECC_BYTES], const uint8_t p_signature[ECC_BYTES*2]);
+int ecdsa_verify256(const uint8_t p_publicKey[ECC_BYTES_256+1], const uint8_t p_hash[ECC_BYTES_256], const uint8_t p_signature[ECC_BYTES_256*2]);
 
 #ifdef __cplusplus
 } /* end of extern "C" */

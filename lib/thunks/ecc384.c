@@ -129,6 +129,7 @@ static int getRandomNumber(uint64_t *p_vli)
 
 #endif /* _WIN32 */
 
+#if 0
 static void vli_clear384(uint64_t *p_vli)
 {
     uint i;
@@ -343,7 +344,7 @@ static void vli_square384(uint64_t *p_result, uint64_t *p_left)
 
 #else /* #if SUPPORTS_INT128 */
 
-static uint128_t mul_64_64_384(uint64_t p_left, uint64_t p_right)
+static uint128_t mul_64_64(uint64_t p_left, uint64_t p_right)
 {
     uint128_t l_result;
     
@@ -370,7 +371,7 @@ static uint128_t mul_64_64_384(uint64_t p_left, uint64_t p_right)
     return l_result;
 }
 
-static uint128_t add_128_128_384(uint128_t a, uint128_t b)
+static uint128_t add_128_128(uint128_t a, uint128_t b)
 {
     uint128_t l_result;
     l_result.m_low = a.m_low + b.m_low;
@@ -391,8 +392,8 @@ static void vli_mult384(uint64_t *p_result, uint64_t *p_left, uint64_t *p_right)
         uint l_min = (k < NUM_ECC_DIGITS_384 ? 0 : (k + 1) - NUM_ECC_DIGITS_384);
         for(i=l_min; i<=k && i<NUM_ECC_DIGITS_384; ++i)
         {
-            uint128_t l_product = mul_64_64_384(p_left[i], p_right[k-i]);
-            r01 = add_128_128_384(r01, l_product);
+            uint128_t l_product = mul_64_64(p_left[i], p_right[k-i]);
+            r01 = add_128_128(r01, l_product);
             r2 += (r01.m_high < l_product.m_high);
         }
         p_result[k] = r01.m_low;
@@ -415,14 +416,14 @@ static void vli_square384(uint64_t *p_result, uint64_t *p_left)
         uint l_min = (k < NUM_ECC_DIGITS_384 ? 0 : (k + 1) - NUM_ECC_DIGITS_384);
         for(i=l_min; i<=k && i<=k-i; ++i)
         {
-            uint128_t l_product = mul_64_64_384(p_left[i], p_left[k-i]);
+            uint128_t l_product = mul_64_64(p_left[i], p_left[k-i]);
             if(i < k-i)
             {
                 r2 += l_product.m_high >> 63;
                 l_product.m_high = (l_product.m_high << 1) | (l_product.m_low >> 63);
                 l_product.m_low <<= 1;
             }
-            r01 = add_128_128_384(r01, l_product);
+            r01 = add_128_128(r01, l_product);
             r2 += (r01.m_high < l_product.m_high);
         }
         p_result[k] = r01.m_low;
@@ -435,7 +436,6 @@ static void vli_square384(uint64_t *p_result, uint64_t *p_left)
 }
 
 #endif /* SUPPORTS_INT128 */
-
 
 /* Computes p_result = (p_left + p_right) % p_mod.
    Assumes that p_left < p_mod and p_right < p_mod, p_result != p_mod. */
@@ -617,7 +617,7 @@ static void vli_mmod_fast384(uint64_t *p_result, uint64_t *p_product)
 
 #elif ECC_CURVE_384 == secp384r1
 
-static void omega_mult384(uint64_t *p_result, uint64_t *p_right)
+static void omega_mult(uint64_t *p_result, uint64_t *p_right)
 {
     uint64_t l_tmp[NUM_ECC_DIGITS_384];
     uint64_t l_carry, l_diff;
@@ -658,7 +658,7 @@ static void vli_mmod_fast384(uint64_t *p_result, uint64_t *p_product)
         
         vli_clear384(l_tmp);
         vli_clear384(l_tmp + NUM_ECC_DIGITS_384);
-        omega_mult384(l_tmp, p_product + NUM_ECC_DIGITS_384); /* tmp = w * c1 */
+        omega_mult(l_tmp, p_product + NUM_ECC_DIGITS_384); /* tmp = w * c1 */
         vli_clear384(p_product + NUM_ECC_DIGITS_384); /* p = c0 */
         
         /* (c1, c0) = c0 + w * c1 */
@@ -791,7 +791,7 @@ static void vli_modInv384(uint64_t *p_result, uint64_t *p_input, uint64_t *p_mod
     
     vli_set384(p_result, u);
 }
-
+#endif
 /* ------ Point operations ------ */
 
 /* Returns 1 if p_point is the point at infinity, 0 otherwise. */
