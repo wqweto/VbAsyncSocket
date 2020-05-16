@@ -103,11 +103,22 @@ void cf_gf128_mul(const cf_gf128 x, const cf_gf128 y, cf_gf128 out)
 #include <immintrin.h>
 
 /*
+ * Select appropriate inline keyword for the compiler
+ */
+#if defined __GNUC__ || defined __clang__
+#    define INLINE __inline__
+#elif defined (_MSC_VER)
+#    define INLINE __forceinline
+#else
+#    define INLINE
+#endif
+
+/*
  *  From https://www.intel.com/content/www/us/en/processors/carry-less-multiplication-instruction-in-gcm-mode-paper.html
  */
-static void gfmul(__m128i a, __m128i b, __m128i *res)
+static INLINE __m128i gfmul(__m128i a, __m128i b)
 {
-    __m128i tmp0, tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7, tmp8, tmp9;
+    __m128i tmp2, tmp3, tmp4, tmp5, tmp6, tmp7, tmp8, tmp9;
     tmp3 = _mm_clmulepi64_si128(a, b, 0x00);
     tmp4 = _mm_clmulepi64_si128(a, b, 0x10);
     tmp5 = _mm_clmulepi64_si128(a, b, 0x01);
@@ -143,26 +154,12 @@ static void gfmul(__m128i a, __m128i b, __m128i *res)
     tmp2 = _mm_xor_si128(tmp2, tmp8);
     tmp3 = _mm_xor_si128(tmp3, tmp2); 
     tmp6 = _mm_xor_si128(tmp6, tmp3);
-    *res = tmp6;
-}
-
-static inline void cf_gf128_reflect(const cf_gf128 x, cf_gf128 out)
-{
-    out[3] = x[0];
-    out[2] = x[1];
-    out[1] = x[2];
-    out[0] = x[3];    
+    return tmp6;
 }
 
 static void cf_gf128_mul_fast(const cf_gf128 x, const cf_gf128 y, cf_gf128 out)
 {
-    cf_gf128 tmp;
-    cf_gf128_reflect(x, tmp);
-    const __m128i a = _mm_loadu_si128((const __m128i*)tmp);
-    cf_gf128_reflect(y, tmp);
-    const __m128i b = _mm_loadu_si128((const __m128i*)tmp);
-    __m128i res;
-    gfmul(a, b, &res);
-    _mm_storeu_si128((__m128i*)tmp, res);
-    cf_gf128_reflect(tmp, out);
+    const __m128i a = _mm_shuffle_epi32(_mm_loadu_si128((const __m128i*)x), _MM_SHUFFLE(0, 1, 2, 3));
+    const __m128i b = _mm_shuffle_epi32(_mm_loadu_si128((const __m128i*)y), _MM_SHUFFLE(0, 1, 2, 3));
+    _mm_storeu_si128((__m128i*)out, _mm_shuffle_epi32(gfmul(a, b), _MM_SHUFFLE(0, 1, 2, 3)));
 }

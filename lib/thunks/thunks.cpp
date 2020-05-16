@@ -66,10 +66,10 @@ typedef struct {
     CoTaskMemFree_t m_CoTaskMemFree;
 #endif
 #ifdef IMPL_ECC256_THUNK
-    uint64_t m_curve_p[NUM_ECC_DIGITS];
-    uint64_t m_curve_b[NUM_ECC_DIGITS];
-    EccPoint m_curve_G;
-    uint64_t m_curve_n[NUM_ECC_DIGITS];
+    uint64_t m_curve_p_256[NUM_ECC_DIGITS_256];
+    uint64_t m_curve_b_256[NUM_ECC_DIGITS_256];
+    EccPoint m_curve_G_256;
+    uint64_t m_curve_n_256[NUM_ECC_DIGITS_256];
 #endif
 #ifdef IMPL_ECC384_THUNK
     uint64_t m_curve_p_384[NUM_ECC_DIGITS_384];
@@ -99,10 +99,10 @@ typedef struct {
 #endif
 } thunk_context_t;
 
-#define curve_p (getContext()->m_curve_p)
-#define curve_b (getContext()->m_curve_b)
-#define curve_G (getContext()->m_curve_G)
-#define curve_n (getContext()->m_curve_n)
+#define curve_p_256 (getContext()->m_curve_p_256)
+#define curve_b_256 (getContext()->m_curve_b_256)
+#define curve_G_256 (getContext()->m_curve_G_256)
+#define curve_n_256 (getContext()->m_curve_n_256)
 #define curve_p_384 (getContext()->m_curve_p_384)
 #define curve_b_384 (getContext()->m_curve_b_384)
 #define curve_G_384 (getContext()->m_curve_G_384)
@@ -217,8 +217,8 @@ static int endOfThunk() { return 0; }
 #endif
 #ifdef IMPL_ECC256_THUNK
     static int _getRandomNumber256(uint64_t *p_vli);
-    typedef int (*ecc_make_key_t)(uint8_t p_publicKey[ECC_BYTES+1], const uint8_t p_privateKey[ECC_BYTES]);
-    typedef int (*ecdh_shared_secret_t)(const uint8_t p_publicKey[ECC_BYTES+1], const uint8_t p_privateKey[ECC_BYTES], uint8_t p_secret[ECC_BYTES]);
+    typedef int (*ecc_make_key_t)(uint8_t p_publicKey[ECC_BYTES_256+1], const uint8_t p_privateKey[ECC_BYTES_256]);
+    typedef int (*ecdh_shared_secret_t)(const uint8_t p_publicKey[ECC_BYTES_256+1], const uint8_t p_privateKey[ECC_BYTES_256], uint8_t p_secret[ECC_BYTES_256]);
 #endif
 #ifdef IMPL_ECC384_THUNK
     static int _getRandomNumber384(uint64_t *p_vli);
@@ -282,10 +282,10 @@ void __cdecl main()
     ctx.m_CoTaskMemFree = (CoTaskMemFree_t)GetProcAddress(GetModuleHandle(L"ole32"), "CoTaskMemFree");
 #endif
 #ifdef IMPL_ECC256_THUNK
-    memcpy(&ctx.m_curve_p, &g_curve_p, sizeof g_curve_p);
-    memcpy(&ctx.m_curve_b, &g_curve_b, sizeof g_curve_b);
-    memcpy(&ctx.m_curve_G, &g_curve_G, sizeof g_curve_G);
-    memcpy(&ctx.m_curve_n, &g_curve_n, sizeof g_curve_p);
+    memcpy(&ctx.m_curve_p_256, &g_curve_p_256, sizeof g_curve_p_256);
+    memcpy(&ctx.m_curve_b_256, &g_curve_b_256, sizeof g_curve_b_256);
+    memcpy(&ctx.m_curve_G_256, &g_curve_G_256, sizeof g_curve_G_256);
+    memcpy(&ctx.m_curve_n_256, &g_curve_n_256, sizeof g_curve_p_256);
 #endif
 #ifdef IMPL_ECC384_THUNK
     memcpy(&ctx.m_curve_p_384, &g_curve_p_384, sizeof g_curve_p_384);
@@ -332,8 +332,8 @@ void __cdecl main()
     DECLARE_PFN(cf_curve25519_mul_t, cf_curve25519_mul);
 #endif
 #ifdef IMPL_ECC256_THUNK
-    DECLARE_PFN(ecc_make_key_t, ecc_make_key);
-    DECLARE_PFN(ecdh_shared_secret_t, ecdh_shared_secret);
+    DECLARE_PFN(ecc_make_key_t, ecc_make_key256);
+    DECLARE_PFN(ecdh_shared_secret_t, ecdh_shared_secret256);
 #endif
 #ifdef IMPL_SHA256_THUNK
     DECLARE_PFN(cf_sha256_init_t, cf_sha256_init);
@@ -366,14 +366,14 @@ void __cdecl main()
 #endif
 
 #ifdef IMPL_ECC256_THUNK
-    uint8_t pubkey[2*ECC_BYTES+1] = { 0 };
-    uint8_t privkey[ECC_BYTES] = { 0 };
-    uint8_t secret[ECC_BYTES] = { 0 };
+    uint8_t pubkey[2*ECC_BYTES_256+1] = { 0 };
+    uint8_t privkey[ECC_BYTES_256] = { 0 };
+    uint8_t secret[ECC_BYTES_256] = { 0 };
     do {
         _getRandomNumber256((uint64_t *)privkey);
-    } while (!ecc_make_key(pubkey, privkey));
-    pfn_ecc_make_key(pubkey, privkey);
-    pfn_ecdh_shared_secret(pubkey, privkey, secret);
+    } while (!ecc_make_key256(pubkey, privkey));
+    pfn_ecc_make_key256(pubkey, privkey);
+    pfn_ecdh_shared_secret256(pubkey, privkey, secret);
     #ifdef IMPL_CURVE25519
         pfn_cf_curve25519_mul(secret, privkey, pubkey);
     #endif
@@ -446,11 +446,11 @@ void __cdecl main()
     ((int *)hThunk)[idx++] = ((uint8_t *)cf_curve25519_mul_base - (uint8_t *)beginOfThunk);
 #endif
 #ifdef IMPL_ECC256_THUNK
-    ((int *)hThunk)[idx++] = ((uint8_t *)ecc_make_key - (uint8_t *)beginOfThunk);
-    ((int *)hThunk)[idx++] = ((uint8_t *)ecdh_shared_secret - (uint8_t *)beginOfThunk);
-    ((int *)hThunk)[idx++] = ((uint8_t *)ecdh_uncompress_key - (uint8_t *)beginOfThunk);
-    ((int *)hThunk)[idx++] = ((uint8_t *)ecdsa_sign - (uint8_t *)beginOfThunk);
-    ((int *)hThunk)[idx++] = ((uint8_t *)ecdsa_verify - (uint8_t *)beginOfThunk);
+    ((int *)hThunk)[idx++] = ((uint8_t *)ecc_make_key256 - (uint8_t *)beginOfThunk);
+    ((int *)hThunk)[idx++] = ((uint8_t *)ecdh_shared_secret256 - (uint8_t *)beginOfThunk);
+    ((int *)hThunk)[idx++] = ((uint8_t *)ecdh_uncompress_key256 - (uint8_t *)beginOfThunk);
+    ((int *)hThunk)[idx++] = ((uint8_t *)ecdsa_sign256 - (uint8_t *)beginOfThunk);
+    ((int *)hThunk)[idx++] = ((uint8_t *)ecdsa_verify256 - (uint8_t *)beginOfThunk);
 #endif
 #ifdef IMPL_ECC384_THUNK
     ((int *)hThunk)[idx++] = ((uint8_t *)ecc_make_key384 - (uint8_t *)beginOfThunk);
@@ -536,7 +536,7 @@ static int _getRandomNumber256(uint64_t *p_vli)
         return 0;
     }
 
-    CryptGenRandom(l_prov, ECC_BYTES, (BYTE *)p_vli);
+    CryptGenRandom(l_prov, ECC_BYTES_256, (BYTE *)p_vli);
     CryptReleaseContext(l_prov, 0);
     
     return 1;

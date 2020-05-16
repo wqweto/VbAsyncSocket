@@ -263,15 +263,15 @@ x_err:
 #define AESGCM_TAG_SIZE 16
 
 static void cf_aesgcm_setup(cf_prp *prp, void **prpctx, 
-                            cf_aes_context_ni *ctxni, cf_aes_context *ctx, 
+                            cf_aes_ni_context *ctxni, cf_aes_context *ctx, 
                             const uint8_t *k, const size_t klen)
 {
-    if (cf_aes_setup_ni(ctxni, k, klen)) {
-        DECLARE_PFN(cf_prp_block, cf_aes_encrypt_ni);
-        DECLARE_PFN(cf_prp_block, cf_aes_decrypt_ni);
+    if (cf_aes_ni_setup(ctxni, k, klen)) {
+        DECLARE_PFN(cf_prp_block, cf_aes_ni_encrypt);
+        DECLARE_PFN(cf_prp_block, cf_aes_ni_decrypt);
         prp->blocksz = AES_BLOCKSZ;
-        prp->encrypt = pfn_cf_aes_encrypt_ni;
-        prp->decrypt = pfn_cf_aes_decrypt_ni;
+        prp->encrypt = pfn_cf_aes_ni_encrypt;
+        prp->decrypt = pfn_cf_aes_ni_decrypt;
         *prpctx = ctxni;
     }
     else {
@@ -285,7 +285,7 @@ static void cf_aesgcm_setup(cf_prp *prp, void **prpctx,
     }
 }
 typedef union {
-    cf_aes_context_ni ctxni;
+    cf_aes_ni_context ctxni;
     cf_aes_context ctx;
 } cf_aes_context_u;
 
