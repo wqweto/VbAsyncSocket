@@ -519,6 +519,7 @@ Private Const ERR_NO_PREVIOUS_SECRET                    As String = "Missing pre
 Private Const ERR_NO_REMOTE_RANDOM                      As String = "Missing remote random"
 Private Const ERR_NO_SERVER_CERTIFICATE                 As String = "Missing server certificate"
 Private Const ERR_NO_SUPPORTED_CIPHER_SUITE             As String = "Missing supported ciphersuite"
+Private Const ERR_NO_PRIVATE_KEY                        As String = "Missing server private key"
 Private Const ERR_NO_MATCHING_ALT_NAME                  As String = "No certificate subject name matches target host name"
 Private Const ERR_TRUST_IS_REVOKED                      As String = "Trust for this certificate or one of the certificates in the certificate chain has been revoked"
 Private Const ERR_TRUST_IS_PARTIAL_CHAIN                As String = "The certificate chain is not complete"
@@ -631,7 +632,7 @@ Private Type UcsTlsContext
     LocalExchPublic()   As Byte
     LocalExchRsaEncrPriv() As Byte
     LocalCertificates   As Collection
-    LocalPrivateKey()   As Byte
+    LocalPrivateKey     As Collection
     LocalSignatureType  As Long
     RemoteSessionID()   As Byte
     RemoteExchRandom()  As Byte
@@ -772,8 +773,8 @@ Property Get LocalCertificates() As Collection
     Set LocalCertificates = m_uCtx.LocalCertificates
 End Property
 
-Property Get LocalPrivateKey() As Byte()
-    LocalPrivateKey = m_uCtx.LocalPrivateKey
+Property Get LocalPrivateKey() As Collection
+    Set LocalPrivateKey = m_uCtx.LocalPrivateKey
 End Property
 
 Friend Property Get frRootStore() As Long
@@ -788,26 +789,46 @@ End Property
 ' Methods
 '=========================================================================
 
-Public Function Listen(Optional ByVal ConnectionBacklog As Long = 5) As Boolean
-    Const FUNC_NAME     As String = "Listen"
+Public Function InitServerTls( _
+            Optional PemFiles As String, _
+            Optional PfxFile As String, _
+            Optional Password As String, _
+            Optional Certificates As Collection, _
+            Optional PrivateKey As Collection) As Boolean
+    Dim cCerts          As Collection
+    Dim cPrivKey        As Collection
     
-    On Error GoTo EH
     If m_bUseTls Then
-        If m_uCtx.LocalCertificates Is Nothing Then
-            If Not pvPkiGenerSelfSignedCertificate(m_uCtx.LocalCertificates, m_uCtx.LocalPrivateKey) Then
-                GoTo QH
-            End If
+        GoTo QH
+    End If
+    If pvCollectionCount(Certificates) > 0 And pvCollectionCount(PrivateKey) > 0 Then
+        Set cCerts = Certificates
+        Set cPrivKey = PrivateKey
+        GoTo StartTls
+    End If
+    If LenB(PemFiles) <> 0 Then
+        If pvPkiPemImportCertificates(Split(PemFiles, "|"), cCerts, cPrivKey) Then
+            GoTo StartTls
         End If
     End If
-    If Not m_oSocket.Listen(ConnectionBacklog) Then
+    If LenB(PfxFile) <> 0 Then
+        If pvPkiPkcs12ImportCertificates(PfxFile, Password, cCerts, cPrivKey) Then
+            GoTo StartTls
+        End If
+    End If
+    If Not pvPkiGenerSelfSignedCertificate(cCerts, cPrivKey) Then
+        GoTo QH
+    End If
+StartTls:
+    m_bUseTls = True
+    m_oSocket.GetPeerName m_sRemoteHostName, 0
+    m_eLocalFeatures = ucsTlsSupportTls13
+    If Not pvTlsInitServer(m_uCtx, m_sRemoteHostName, cCerts, cPrivKey) Then
         GoTo QH
     End If
     '--- success
-    Listen = True
+    InitServerTls = True
 QH:
-    Exit Function
-EH:
-    PrintError FUNC_NAME
 End Function
 
 Public Function Accept( _
@@ -825,7 +846,7 @@ Public Function Accept( _
         GoTo QH
     End If
     If UseTls Then
-        If Not ConnectedSocket.StartServerTls(m_uCtx.LocalCertificates, m_uCtx.LocalPrivateKey) Then
+        If Not ConnectedSocket.InitServerTls(Certificates:=m_uCtx.LocalCertificates, PrivateKey:=m_uCtx.LocalPrivateKey) Then
             GoTo QH
         End If
     End If
@@ -836,20 +857,6 @@ QH:
 EH:
     PrintError FUNC_NAME
     Resume QH
-End Function
-
-Public Function StartServerTls( _
-            Optional Certificates As Collection, _
-            Optional PrivateKey As Variant) As Boolean
-    m_bUseTls = True
-    m_oSocket.GetPeerName m_sRemoteHostName, 0
-    m_eLocalFeatures = ucsTlsSupportTls13
-    If Not pvTlsInitServer(m_uCtx, m_sRemoteHostName, Certificates, PrivateKey) Then
-        GoTo QH
-    End If
-    '--- success
-    StartServerTls = True
-QH:
 End Function
 
 Public Function Connect( _
@@ -885,7 +892,7 @@ Public Function StartTls( _
     Dim bResult         As Boolean
     Dim baEmpty()       As Byte
     Dim cCerts          As Collection
-    Dim baPrivKey()     As Byte
+    Dim cPrivKey        As Collection
     
     On Error GoTo EH
     If m_uCtx.State > ucsTlsStateClosed Then
@@ -908,12 +915,12 @@ Public Function StartTls( _
         End If
     End If
     Set cCerts = m_uCtx.LocalCertificates
-    baPrivKey = m_uCtx.LocalPrivateKey
+    Set cPrivKey = m_uCtx.LocalPrivateKey
     If Not pvTlsInitClient(m_uCtx, m_sRemoteHostName, m_eLocalFeatures) Then
         GoTo QH
     End If
     Set m_uCtx.LocalCertificates = cCerts
-    m_uCtx.LocalPrivateKey = baPrivKey
+    Set m_uCtx.LocalPrivateKey = cPrivKey
     bResult = pvTlsHandshake(m_uCtx, baEmpty, 0, m_uCtx.SendBuffer, m_uCtx.SendPos)
     If Not pvOnSend() Then
         GoTo QH
@@ -1154,6 +1161,10 @@ Public Function Create( _
             Optional ByVal EventMask As UcsAsyncSocketEventMaskEnum = ucsSfdAll, _
             Optional SocketAddress As String) As Boolean
     Create = m_oSocket.Create(SocketPort, SocketType, EventMask, SocketAddress)
+End Function
+
+Public Function Listen(Optional ByVal ConnectionBacklog As Long = 5) As Boolean
+    Listen = m_oSocket.Listen(ConnectionBacklog)
 End Function
 
 Public Function GetSockName(SocketAddress As String, SocketPort As Long) As Boolean
@@ -1810,7 +1821,7 @@ Private Function pvTlsInitServer( _
             uCtx As UcsTlsContext, _
             Optional RemoteHostName As String, _
             Optional Certificates As Collection, _
-            Optional PrivateKey As Variant) As Boolean
+            Optional PrivateKey As Collection) As Boolean
     Dim uEmpty          As UcsTlsContext
     
     On Error GoTo EH
@@ -1824,9 +1835,7 @@ Private Function pvTlsInitServer( _
         .RemoteHostName = RemoteHostName
         .LocalFeatures = ucsTlsSupportTls13
         Set .LocalCertificates = Certificates
-        If Not IsMissing(PrivateKey) Then
-            .LocalPrivateKey = PrivateKey
-        End If
+        Set .LocalPrivateKey = PrivateKey
         pvTlsArrayRandom .LocalExchRandom, TLS_HELLO_RANDOM_SIZE
     End With
     uCtx = uEmpty
@@ -4033,16 +4042,19 @@ Private Function pvTlsSignatureTypeName(ByVal lSignatureType As Long) As String
     End Select
 End Function
 
-Private Sub pvTlsSignatureSign(baPrivKey() As Byte, ByVal lSignatureType As Long, baVerifyData() As Byte, baSignature() As Byte)
+Private Sub pvTlsSignatureSign(cPrivKey As Collection, ByVal lSignatureType As Long, baVerifyData() As Byte, baSignature() As Byte)
     Const FUNC_NAME     As String = "pvTlsSignatureSign"
     Dim uKeyInfo        As UcsKeyInfo
     Dim lHashSize       As Long
     Dim baEnc()         As Byte
     Dim baVerifyHash()  As Byte
     Dim baTemp()        As Byte
-    
     Debug.Print "Signing with " & pvTlsSignatureTypeName(lSignatureType) & " signature", Timer
-    If Not pvAsn1DecodePrivateKey(baPrivKey, uKeyInfo) Then
+        
+    If Not SearchCollection(cPrivKey, 1, baTemp) Then
+        Err.Raise vbObjectError, FUNC_NAME, ERR_NO_PRIVATE_KEY
+    End If
+    If Not pvAsn1DecodePrivateKey(baTemp, uKeyInfo) Then
         Err.Raise vbObjectError, FUNC_NAME, ERR_UNSUPPORTED_PRIVATE_KEY
     End If
     lHashSize = pvTlsSignatureHashSize(lSignatureType)
@@ -4973,14 +4985,14 @@ End Function
 ' PKI
 '=========================================================================
 
-Public Function PkiPemImportCertificates(ByVal vPemFiles As Variant) As Boolean
+Public Function PkiPemImportCertificates(PemFiles As String) As Boolean
     Dim cCerts          As Collection
-    Dim baPrivKey()     As Byte
-    
+    Dim cPrivKey        As Collection
+
     If m_bUseTls Then
-        If pvPkiPemImportCertificates(vPemFiles, cCerts, baPrivKey) Then
+        If pvPkiPemImportCertificates(Split(PemFiles, "|"), cCerts, cPrivKey) Then
             Set m_uCtx.LocalCertificates = cCerts
-            m_uCtx.LocalPrivateKey = baPrivKey
+            Set m_uCtx.LocalPrivateKey = cPrivKey
             '--- success
             PkiPemImportCertificates = True
         End If
@@ -4991,12 +5003,12 @@ End Function
 
 Public Function PkiPkcs12ImportCertificates(sPfxFile As String, Optional Password As String) As Boolean
     Dim cCerts          As Collection
-    Dim baPrivKey()     As Byte
-    
+    Dim cPrivKey        As Collection
+
     If m_bUseTls Then
-        If pvPkiPkcs12ImportCertificates(sPfxFile, Password & "", cCerts, baPrivKey) Then
+        If pvPkiPkcs12ImportCertificates(sPfxFile, Password & "", cCerts, cPrivKey) Then
             Set m_uCtx.LocalCertificates = cCerts
-            m_uCtx.LocalPrivateKey = baPrivKey
+            Set m_uCtx.LocalPrivateKey = cPrivKey
             '--- success
             PkiPkcs12ImportCertificates = True
         End If
@@ -5032,21 +5044,20 @@ End Function
 
 '= private ===============================================================
 
-Private Function pvPkiPemImportCertificates(ByVal vPemFiles As Variant, cCerts As Collection, baPrivKey() As Byte) As Boolean
+Private Function pvPkiPemImportCertificates(ByVal vPemFiles As Variant, cCerts As Collection, cPrivKey As Collection) As Boolean
     Dim vElem           As Variant
     Dim sPemText        As String
-    Dim cKeys           As Collection
     
     If VarType(vPemFiles) = vbString Then
         vPemFiles = Array(vPemFiles)
     End If
     For Each vElem In vPemFiles
         sPemText = StrConv(CStr(ReadBinaryFile(CStr(vElem))), vbUnicode)
-        pvPkiPemGetTextPortions sPemText, "PRIVATE KEY", cKeys
-        pvPkiPemGetTextPortions sPemText, "EC PRIVATE KEY", cKeys
+        pvPkiPemGetTextPortions sPemText, "PRIVATE KEY", cPrivKey
+        pvPkiPemGetTextPortions sPemText, "EC PRIVATE KEY", cPrivKey
         pvPkiPemGetTextPortions sPemText, "CERTIFICATE", cCerts
     Next
-    If SearchCollection(cKeys, 1, RetVal:=baPrivKey) Then
+    If pvCollectionCount(cPrivKey) > 0 Then
         '--- success
         pvPkiPemImportCertificates = True
     End If
@@ -5091,7 +5102,7 @@ QH:
     End If
 End Function
 
-Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As String, cCerts As Collection, baPrivKey() As Byte) As Boolean
+Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As String, cCerts As Collection, cPrivKey As Collection) As Boolean
     Const FUNC_NAME     As String = "pvPkiPkcs12ImportCertificates"
     Dim baPfx()         As Byte
     Dim uBlob           As CRYPT_BLOB_DATA
@@ -5120,7 +5131,7 @@ Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As 
         If pCertContext = 0 Then
             Exit Do
         End If
-        If pvPkiAppendCertContext(pCertContext, cCerts, baPrivKey) Then
+        If pvPkiAppendCertContext(pCertContext, cCerts, cPrivKey) Then
             '--- success
             pvPkiPkcs12ImportCertificates = True
         End If
@@ -5131,7 +5142,7 @@ QH:
     End If
 End Function
 
-Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, baPrivKey() As Byte, Optional ByVal Subject As String) As Boolean
+Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey As Collection, Optional ByVal Subject As String) As Boolean
     Const FUNC_NAME     As String = "pvPkiGenerSelfSignedCertificate"
     Dim hProv           As Long
     Dim hKey            As Long
@@ -5180,7 +5191,7 @@ Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, baPrivKey
         .dwKeySpec = AT_SIGNATURE
     End With
     pCertContext = CertCreateSelfSignCertificate(hProv, uName, 0, uInfo, 0, ByVal 0, uExpire, 0)
-    If pvPkiAppendCertContext(pCertContext, cCerts, baPrivKey) Then
+    If pvPkiAppendCertContext(pCertContext, cCerts, cPrivKey) Then
         '--- success
         pvPkiGenerSelfSignedCertificate = True
     End If
@@ -5395,10 +5406,11 @@ Private Function pvPkiPemGetTextPortions(sContents As String, sBoundary As Strin
     Set pvPkiPemGetTextPortions = RetVal
 End Function
 
-Private Function pvPkiAppendCertContext(ByVal pCertContext As Long, cCerts As Collection, baPrivKey() As Byte) As Boolean
+Private Function pvPkiAppendCertContext(ByVal pCertContext As Long, cCerts As Collection, cPrivKey As Collection) As Boolean
     Const FUNC_NAME     As String = "pvPkiAppendCertContext"
     Dim uCertContext    As CERT_CONTEXT
     Dim baBuffer()      As Byte
+    Dim baPrivKey()     As Byte
     
     Call CopyMemory(uCertContext, ByVal pCertContext, Len(uCertContext))
     If uCertContext.cbCertEncoded > 0 Then
@@ -5416,6 +5428,8 @@ Private Function pvPkiAppendCertContext(ByVal pCertContext As Long, cCerts As Co
             cCerts.Remove cCerts.Count
             cCerts.Add baBuffer, Before:=1
         End If
+        Set cPrivKey = New Collection
+        cPrivKey.Add baPrivKey
         '--- success
         pvPkiAppendCertContext = True
     End If
