@@ -386,6 +386,7 @@ End Type
 '=========================================================================
 
 Private Const STR_VL_ALERTS                             As String = "0|Close notify|10|Unexpected message|20|Bad record mac|40|Handshake failure|42|Bad certificate|44|Certificate revoked|45|Certificate expired|46|Certificate unknown|47|Illegal parameter|48|Unknown certificate authority|50|Decode error|51|Decrypt error|70|Protocol version|80|Internal error|90|User canceled|109|Missing extension|112|Unrecognized name|116|Certificate required|120|No application protocol"
+Private Const STR_VL_STATE                              As String = "0|New|1|Closed|2|HandshakeStart|3|ExpectServerHello|4|ExpectExtensions|5|ExpectServerFinished|6|ExpectClientHello|7|ExpectClientFinished|8|PostHandshake|9|Shutdown"
 Private Const STR_VL_HANDSHAKE_TYPE                     As String = "1|CLIENT_HELLO|2|SERVER_HELLO|4|NEW_SESSION_TICKET|5|END_OF_EARLY_DATA|8|ENCRYPTED_EXTENSIONS|11|CERTIFICATE|12|SERVER_KEY_EXCHANGE|13|CERTIFICATE_REQUEST|14|SERVER_HELLO_DONE|15|CERTIFICATE_VERIFY|16|CLIENT_KEY_EXCHANGE|20|FINISHED|24|KEY_UPDATE|25|COMPRESSED_CERTIFICATE|254|MESSAGE_HASH"
 Private Const STR_VL_EXTENSION_TYPE                     As String = "0|SERVER_NAME|5|STATUS_REQUEST|10|SUPPORTED_GROUPS|11|EC_POINT_FORMAT|13|SIGNATURE_ALGORITHMS|16|ALPN|27|COMPRESS_CERTIFICATE|41|PRE_SHARED_KEY|42|EARLY_DATA|43|SUPPORTED_VERSIONS|44|COOKIE|45|PSK_KEY_EXCHANGE_MODES|47|CERTIFICATE_AUTHORITIES|51|KEY_SHARE|&HFF01|RENEGOTIATION_INFO"
 Private Const STR_UNKNOWN                               As String = "Unknown (%1)"
@@ -504,7 +505,7 @@ Private Const ERR_CALL_FAILED                           As String = "Call failed
 Private Const ERR_RECORD_TOO_BIG                        As String = "Record size too big"
 Private Const ERR_FATAL_ALERT                           As String = "Received fatal alert"
 Private Const ERR_UNEXPECTED_RECORD_TYPE                As String = "Unexpected record type (%1)"
-Private Const ERR_UNEXPECTED_MSG_TYPE                   As String = "Unexpected message type for %1 (%2)"
+Private Const ERR_UNEXPECTED_MSG_TYPE                   As String = "Unexpected message type for %1 state (%2)"
 Private Const ERR_INVALID_STATE_HANDSHAKE               As String = "Invalid state for handshake content (%1)"
 Private Const ERR_INVALID_SIZE_KEY_SHARE                As String = "Invalid data size for key share"
 Private Const ERR_INVALID_REMOTE_KEY                    As String = "Invalid remote key size"
@@ -543,18 +544,18 @@ Private m_lSendActual           As Long
 Private m_lSendBytes            As Long
 Private m_lLastSendBytes        As Long
 
-Private Enum UcsTlsStatesEnum
-    ucsTlsStateNew
-    ucsTlsStateClosed
-    ucsTlsStateHandshakeStart
-    ucsTlsStateExpectServerHello
-    ucsTlsStateExpectExtensions
-    ucsTlsStateExpectServerFinished     '--- not used in TLS 1.3
+Private Enum UcsTlsStatesEnum '--- sync w/ UcsTlsStatesEnum
+    ucsTlsStateNew = 0
+    ucsTlsStateClosed = 1
+    ucsTlsStateHandshakeStart = 2
+    ucsTlsStateExpectServerHello = 3
+    ucsTlsStateExpectExtensions = 4
+    ucsTlsStateExpectServerFinished = 5     '--- not used in TLS 1.3
     '--- server states
-    ucsTlsStateExpectClientHello
-    ucsTlsStateExpectClientFinished
-    ucsTlsStatePostHandshake
-    ucsTlsStateShutdown
+    ucsTlsStateExpectClientHello = 6
+    ucsTlsStateExpectClientFinished = 7
+    ucsTlsStatePostHandshake = 8
+    ucsTlsStateShutdown = 9
 End Enum
 
 Private Enum UcsTlsCryptoAlgorithmsEnum
@@ -2018,7 +2019,20 @@ Private Function pvTlsGetLastAlert(uCtx As UcsTlsContext, Optional AlertCode As 
     End If
 End Function
 
-#If ImplUseDebugLog Then
+Private Function pvTlsGetStateAsText(ByVal lState As Long) As String
+    Static vTexts       As Variant
+    
+    If IsEmpty(vTexts) Then
+        vTexts = SplitOrReindex(STR_VL_STATE, "|")
+    End If
+    If lState <= UBound(vTexts) Then
+        pvTlsGetStateAsText = vTexts(lState)
+    End If
+    If LenB(pvTlsGetStateAsText) = 0 Then
+        pvTlsGetStateAsText = Replace(STR_UNKNOWN, "%1", lState)
+    End If
+End Function
+
 Private Function pvTlsGetHandshakeType(ByVal lType As Long) As String
     Static vTexts       As Variant
     
@@ -2033,6 +2047,7 @@ Private Function pvTlsGetHandshakeType(ByVal lType As Long) As String
     End If
 End Function
 
+#If ImplUseDebugLog Then
 Private Function pvTlsGetExtensionType(ByVal lType As Long) As String
     Static vTexts       As Variant
     
@@ -2802,7 +2817,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                     lPos = lMessagePos
                     Exit Do
                 End If
-'                DebugLog MODULE_NAME, FUNC_NAME, "lMessageType=" & pvTlsGetHandshakeType(lMessageType)
+'                DebugLog MODULE_NAME, FUNC_NAME, ".State=" & pvTlsGetStateAsText(.State) & ", lMessageType=" & pvTlsGetHandshakeType(lMessageType)
                 Select Case .State
                 Case ucsTlsStateExpectServerHello
                     Select Case lMessageType
@@ -2821,9 +2836,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                             .State = ucsTlsStateExpectExtensions
                         End If
                     Case Else
-                        sError = Replace(Replace(ERR_UNEXPECTED_MSG_TYPE, "%1", "ucsTlsStateExpectServerHello"), "%2", lMessageType)
-                        eAlertCode = uscTlsAlertUnexpectedMessage
-                        GoTo QH
+                        GoTo UnexpectedMessageType
                     End Select
                     pvWriteBuffer .HandshakeMessages, pvArraySize(.HandshakeMessages), VarPtr(baInput(lMessagePos)), lMessageSize + 4
                     '--- post-process ucsTlsStateExpectServerHello
@@ -2965,12 +2978,10 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                             '--- not used past handshake
                             Erase .HandshakeMessages
                         Else
-                            GoTo InvalidState
+                            GoTo UnexpectedMessageType
                         End If
                     Case Else
-                        sError = Replace(Replace(ERR_UNEXPECTED_MSG_TYPE, "%1", "ucsTlsStateExpectServerFinished"), "%2", lMessageType)
-                        eAlertCode = uscTlsAlertUnexpectedMessage
-                        GoTo QH
+                        GoTo UnexpectedMessageType
                     End Select
                 Case ucsTlsStateExpectClientHello
                     Select Case lMessageType
@@ -2980,9 +2991,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                         End If
                         .State = ucsTlsStateExpectClientFinished
                     Case Else
-                        sError = Replace(Replace(ERR_UNEXPECTED_MSG_TYPE, "%1", "ucsTlsStateExpectClientHello"), "%2", lMessageType)
-                        eAlertCode = uscTlsAlertUnexpectedMessage
-                        GoTo QH
+                        GoTo UnexpectedMessageType
                     End Select
                     pvWriteBuffer .HandshakeMessages, pvArraySize(.HandshakeMessages), VarPtr(baInput(lMessagePos)), lMessageSize + 4
                     '--- post-process ucsTlsStateExpectClientHello
@@ -3005,9 +3014,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                         End If
                         .State = ucsTlsStatePostHandshake
                     Case Else
-                        sError = Replace(Replace(ERR_UNEXPECTED_MSG_TYPE, "%1", "ucsTlsStateExpectClientFinished"), "%2", lMessageType)
-                        eAlertCode = uscTlsAlertUnexpectedMessage
-                        GoTo QH
+                        GoTo UnexpectedMessageType
                     End Select
                     '--- post-process ucsTlsStateExpectClientFinished
                     If .State = ucsTlsStatePostHandshake Then
@@ -3020,13 +3027,17 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                 Case ucsTlsStatePostHandshake
                     Select Case lMessageType
                     Case 0 '--- Hello Request
-                        Debug.Assert lMessageSize = 0
-                        #If ImplUseDebugLog Then
-                            DebugLog MODULE_NAME, FUNC_NAME, "Received empty message (Hello Request). Will renegotiate"
-                        #End If
-                        .State = ucsTlsStateHandshakeStart
-                        .ExchGroup = 0
-                        .CipherSuite = 0
+                        If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
+                            Debug.Assert lMessageSize = 0
+                            #If ImplUseDebugLog Then
+                                DebugLog MODULE_NAME, FUNC_NAME, "Received empty message (Hello Request). Will renegotiate"
+                            #End If
+                            .State = ucsTlsStateHandshakeStart
+                            .ExchGroup = 0
+                            .CipherSuite = 0
+                        Else
+                            GoTo UnexpectedMessageType
+                        End If
                     Case TLS_HANDSHAKE_TYPE_NEW_SESSION_TICKET
                         lPos = pvReadArray(baInput, lPos, baMessage, lMessageSize)
                         If Not .RemoteTickets Is Nothing Then
@@ -3050,13 +3061,13 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                         End If
                         lPos = lPos + lMessageSize
                     Case Else
-                        sError = Replace(Replace(ERR_UNEXPECTED_MSG_TYPE, "%1", "ucsTlsStatePostHandshake"), "%2", lMessageType)
+UnexpectedMessageType:
+                        sError = Replace(Replace(ERR_UNEXPECTED_MSG_TYPE, "%1", pvTlsGetStateAsText(.State)), "%2", pvTlsGetHandshakeType(lMessageType))
                         eAlertCode = uscTlsAlertUnexpectedMessage
                         GoTo QH
                     End Select
                 Case Else
-InvalidState:
-                    sError = Replace(ERR_INVALID_STATE_HANDSHAKE, "%1", .State)
+                    sError = Replace(ERR_INVALID_STATE_HANDSHAKE, "%1", pvTlsGetStateAsText(.State))
                     eAlertCode = uscTlsAlertHandshakeFailure
                     GoTo QH
                 End Select
