@@ -142,6 +142,8 @@ Option Explicit
 DefObj A-Z
 Private Const MODULE_NAME = "Form1"
 
+#Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
+
 Private WithEvents m_oSocket As cAsyncSocket
 Attribute m_oSocket.VB_VarHelpID = -1
 Private WithEvents m_oHttpDownload As cHttpDownload
@@ -149,6 +151,8 @@ Attribute m_oHttpDownload.VB_VarHelpID = -1
 Private m_oRateLimiter As cRateLimiter
 Private m_dblStartTimerEx As Double
 Private m_dblNextTimerEx As Double
+Private WithEvents m_oClientSocket As cTlsSocket
+Attribute m_oClientSocket.VB_VarHelpID = -1
 
 Private Type UcsParsedUrl
     Protocol        As String
@@ -261,7 +265,7 @@ Private Sub Command10_Click()
             If Not .SyncReceiveArray(baBuffer, 10000, Timeout:=LNG_TIMEOUT) Then
                 If UBound(baBuffer) >= 0 Then
                     DebugLog MODULE_NAME, FUNC_NAME, "<-" & FromUtf8Array(baBuffer)
-                    DebugLog MODULE_NAME, FUNC_NAME, "Trimmed", UBound(baBuffer) + 1 & " bytes"
+                    DebugLog MODULE_NAME, FUNC_NAME, "Trimmed " & UBound(baBuffer) + 1 & " bytes"
                 End If
                 GoTo QH
             End If
@@ -269,7 +273,7 @@ Private Sub Command10_Click()
         End If
         Exit Sub
 QH:
-        DebugLog MODULE_NAME, FUNC_NAME, "Error", .GetErrorDescription(.LastError)
+        DebugLog MODULE_NAME, FUNC_NAME, "Error: " & .GetErrorDescription(.LastError)
     End With
 End Sub
 
@@ -302,7 +306,7 @@ Private Sub Command4_Click()
     Exit Sub
 QH:
     With oTlsSocket.LastError
-        DebugLog MODULE_NAME, FUNC_NAME, Hex$(.Number) & ": " & .Description & " at " & .Source
+        DebugLog MODULE_NAME, FUNC_NAME, "&H" & Hex$(.Number) & " " & .Description & " at " & .Source, vbLogEventTypeError
     End With
     Screen.MousePointer = vbDefault
 End Sub
@@ -361,13 +365,17 @@ Repeat:
 QH:
     If Not oTlsSocket Is Nothing Then
         With oTlsSocket.LastError
-            DebugLog MODULE_NAME, FUNC_NAME, Hex$(.Number) & ": " & .Description & " at " & .Source
+            DebugLog MODULE_NAME, FUNC_NAME, "&H" & Hex$(.Number) & " " & .Description & " at " & .Source, vbLogEventTypeError
         End With
     End If
     Screen.MousePointer = vbDefault
 End Sub
 
-Private Function pvInitHttpRequest(sUrl As String, Optional sProxyUrl As String, Optional ByVal LocalFeature As UcsTlsLocalFeaturesEnum) As cTlsSocket
+Private Function pvInitHttpRequest( _
+            sUrl As String, Optional sProxyUrl As String, _
+            Optional ByVal LocalFeature As UcsTlsLocalFeaturesEnum, _
+            Optional PfxFile As String, _
+            Optional Password As String) As cTlsSocket
     Const FUNC_NAME     As String = "pvInitHttpRequest"
     Dim oRetVal         As cTlsSocket
     Dim uRemote         As UcsParsedUrl
@@ -378,6 +386,7 @@ Private Function pvInitHttpRequest(sUrl As String, Optional sProxyUrl As String,
         GoTo QH
     End If
     Set oRetVal = New cTlsSocket
+    Set m_oClientSocket = oRetVal
     If Not pvParseUrl(sProxyUrl, uProxy, "socks5") Then
         If Not oRetVal.SyncConnect(uRemote.Host, uRemote.Port, UseTls:=False) Then
             GoTo QH
@@ -443,6 +452,11 @@ Private Function pvInitHttpRequest(sUrl As String, Optional sProxyUrl As String,
         End If
     End If
     If LCase$(uRemote.Protocol) = "https" Then
+        If LenB(PfxFile) <> 0 Then
+            If Not oRetVal.PkiPkcs12ImportCertificates(PfxFile, Password) Then
+                GoTo QH
+            End If
+        End If
         If Not oRetVal.SyncStartTls(uRemote.Host, LocalFeature) Then
             GoTo QH
         End If
@@ -459,10 +473,24 @@ Private Function pvInitHttpRequest(sUrl As String, Optional sProxyUrl As String,
 QH:
     If Not oRetVal Is Nothing Then
         With oRetVal.LastError
-            DebugLog MODULE_NAME, FUNC_NAME, "&H" & Hex$(.Number) & ": " & .Description & " at " & .Source
+            DebugLog MODULE_NAME, FUNC_NAME, "&H" & Hex$(.Number) & " " & .Description & " at " & .Source, vbLogEventTypeError
         End With
     End If
 End Function
+
+Private Sub m_oClientSocket_OnClientCertificate(CaDn As Object, Confirmed As Boolean)
+    #If ImplUseDebugLog Then
+        DebugLog MODULE_NAME, "m_oClientSocket_OnClientCertificate", "TODO: Show choose certificate dialog"
+    #End If
+End Sub
+
+Private Sub m_oClientSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
+    If m_oClientSocket.LastError <> 0 Then
+        #If ImplUseDebugLog Then
+            DebugLog MODULE_NAME, "m_oClientSocket_OnError", "LastError=&H" & Hex$(m_oClientSocket.LastError.Number) & " " & m_oClientSocket.LastError.Description, vbLogEventTypeError
+        #End If
+    End If
+End Sub
 
 Private Function pvParseUrl(sUrl As String, uParsed As UcsParsedUrl, Optional DefProtocol As String) As Boolean
     With CreateObject("VBScript.RegExp")
@@ -525,18 +553,17 @@ Private Sub Command6_Click()
         sProxy = txtProxy.Text
     End If
     DebugLog MODULE_NAME, FUNC_NAME, "Open " & sUrl
-    Set oTlsSocket = pvInitHttpRequest(sUrl, sProxy)
+    Set oTlsSocket = pvInitHttpRequest(sUrl, sProxy, PfxFile:=App.Path & "\..\Secure\client1.full.pfx")
     If oTlsSocket Is Nothing Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, oTlsSocket.SyncReceiveText()
     DebugLog MODULE_NAME, FUNC_NAME, oTlsSocket.SyncReceiveText()
     DebugLog MODULE_NAME, FUNC_NAME, "Done"
     Exit Sub
 QH:
     If Not oTlsSocket Is Nothing Then
         With oTlsSocket.LastError
-            DebugLog MODULE_NAME, FUNC_NAME, Hex$(.Number) & ": " & .Description & " at " & .Source
+            DebugLog MODULE_NAME, FUNC_NAME, "&H" & Hex$(.Number) & " " & .Description & " at " & .Source, vbLogEventTypeError
         End With
     End If
 End Sub
@@ -557,27 +584,27 @@ Private Sub Command7_Click()
     If LenB(sResponse) = 0 Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "->" & sResponse
+    DebugLog MODULE_NAME, FUNC_NAME, "->" & pvTrimNewLine(sResponse)
     sRequest = "HELO " & pvGetExternalIP & vbCrLf
     If Not oTlsSocket.SyncSendText(sRequest) Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "<-" & sRequest
+    DebugLog MODULE_NAME, FUNC_NAME, "<-" & pvTrimNewLine(sRequest)
     sResponse = oTlsSocket.SyncReceiveText()
     If LenB(sResponse) = 0 Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "->" & sResponse
+    DebugLog MODULE_NAME, FUNC_NAME, "->" & pvTrimNewLine(sResponse)
     sRequest = "STARTTLS" & vbCrLf
     If Not oTlsSocket.SyncSendText(sRequest) Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "<-" & sRequest
+    DebugLog MODULE_NAME, FUNC_NAME, "<-" & pvTrimNewLine(sRequest)
     sResponse = oTlsSocket.SyncReceiveText()
     If LenB(sResponse) = 0 Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "->" & sResponse
+    DebugLog MODULE_NAME, FUNC_NAME, "->" & pvTrimNewLine(sResponse)
     If Not oTlsSocket.SyncStartTls("smtp.gmail.com") Then
         GoTo QH
     End If
@@ -586,30 +613,38 @@ Private Sub Command7_Click()
     If Not oTlsSocket.SyncSendText(sRequest) Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "<-" & sRequest
+    DebugLog MODULE_NAME, FUNC_NAME, "<-" & pvTrimNewLine(sRequest)
     sResponse = oTlsSocket.SyncReceiveText()
     If LenB(sResponse) = 0 Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "->" & sResponse
+    DebugLog MODULE_NAME, FUNC_NAME, "->" & pvTrimNewLine(sResponse)
     sRequest = "QUIT" & vbCrLf
     If Not oTlsSocket.SyncSendText(sRequest) Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "<-" & sRequest
+    DebugLog MODULE_NAME, FUNC_NAME, "<-" & pvTrimNewLine(sRequest)
     sResponse = oTlsSocket.SyncReceiveText()
     If LenB(sResponse) = 0 Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "->" & sResponse
+    DebugLog MODULE_NAME, FUNC_NAME, "->" & pvTrimNewLine(sResponse)
     Screen.MousePointer = vbDefault
     Exit Sub
 QH:
     With oTlsSocket.LastError
-        DebugLog MODULE_NAME, FUNC_NAME, Hex$(.Number) & ": " & .Description & " at " & .Source
+        DebugLog MODULE_NAME, FUNC_NAME, "&H" & Hex$(.Number) & " " & .Description & " at " & .Source, vbLogEventTypeError
     End With
     Screen.MousePointer = vbDefault
 End Sub
+
+Private Function pvTrimNewLine(sText As String) As String
+    If Right$(sText, 2) = vbCrLf Then
+        pvTrimNewLine = Left$(sText, Len(sText) - 2)
+    Else
+        pvTrimNewLine = sText
+    End If
+End Function
 
 Private Function pvGetExternalIP() As String
     Dim sResponse     As String
