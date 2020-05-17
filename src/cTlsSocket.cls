@@ -1524,12 +1524,15 @@ Renegotiate:
             If Not pvTlsIsReady(m_uCtx) Or Not bResult Then
                 GoTo QH
             End If
-            If Not m_uCtx.IsServer And (m_uCtx.LocalFeatures And ucsTlsIgnoreServerCertificateErrors) = 0 Then
-                If m_uCtx.RemoteCertificates Is Nothing Then
+            If Not m_uCtx.IsServer Then
+                If (m_uCtx.LocalFeatures And ucsTlsIgnoreServerCertificateErrors) <> 0 Then
+                    #If ImplUseDebugLog Then
+                        DebugLog MODULE_NAME, FUNC_NAME, "Will skip server certificate checks for " & m_uCtx.RemoteHostName
+                    #End If
+                ElseIf m_uCtx.RemoteCertificates Is Nothing Then
                     RaiseEvent OnError(vbObjectError, ucsSfdRead)
                     GoTo QH
-                End If
-                If Not pvPkiCertChainValidate(m_uCtx.RemoteHostName, m_uCtx.RemoteCertificates, frRootStore, m_uCtx.LastError) Then
+                ElseIf Not pvPkiCertChainValidate(m_uCtx.RemoteHostName, m_uCtx.RemoteCertificates, frRootStore, m_uCtx.LastError) Then
                     RaiseEvent OnError(vbObjectError, ucsSfdRead)
                     GoTo QH
                 End If
