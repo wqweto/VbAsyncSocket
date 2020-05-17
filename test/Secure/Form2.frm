@@ -71,6 +71,8 @@ Option Explicit
 DefObj A-Z
 Private Const MODULE_NAME As String = "Form1"
 
+#Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
+
 '=========================================================================
 ' API
 '=========================================================================
@@ -153,14 +155,9 @@ Private Sub Form_Load()
     m_oRootCa.PkiPemImportRootCaCertStore App.Path & "\ca-bundle.pem"
     Set m_oServerSocket = New cTlsSocket
     ChDir App.Path
-    If Not m_oServerSocket.StartServerTls() Then
+    If Not m_oServerSocket.InitServerTls(PemFiles:=PEM_FILES, PfxFile:=PFX_FILE, Password:=PFX_PASSWORD) Then
+        MsgBox "Error starting TLS server on localhost:10443" & vbCrLf & vbCrLf & "No private key found!", vbExclamation
         GoTo QH
-    End If
-    If Not m_oServerSocket.PkiPemImportCertificates(Split(PEM_FILES, "|")) Then
-        If Not m_oServerSocket.PkiPkcs12ImportCertificates(PFX_FILE, PFX_PASSWORD) Then
-'            MsgBox "Error starting TLS server on localhost:10443" & vbCrLf & vbCrLf & "No private key found!", vbExclamation
-'            GoTo QH
-        End If
     End If
     If Not m_oServerSocket.Create(SocketPort:=10443, SocketAddress:="localhost") Then
         GoTo QH
@@ -170,7 +167,9 @@ Private Sub Form_Load()
     End If
     Set m_cRequestHandlers = New Collection
     m_oServerSocket.Socket.GetSockName sAddr, lPort
-    Debug.Print "Listening on " & sAddr & ":" & lPort
+    #If ImplUseDebugLog Then
+        DebugLog MODULE_NAME, "Form_Load", "Listening on " & sAddr & ":" & lPort
+    #End If
 QH:
     Exit Sub
 EH:
@@ -232,6 +231,7 @@ End Sub
 '=========================================================================
 
 Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As String
+    Const FUNC_NAME     As String = "HttpsRequest"
     Const HDR_CONTENT_LENGTH As String = "content-length:"
     Const HDR_TRANSFER_ENCODING As String = "transfer-encoding:"
     Const HDR_CONNECTION As String = "connection:"
@@ -283,7 +283,9 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
             End If
         Else
             HttpsRequest = HttpsRequest & StrConv(baRecv, vbUnicode)
-'            Debug.Print "Len(HttpsRequest)=" & Len(HttpsRequest), Timer
+            #If ImplUseDebugLog Then
+'                DebugLog MODULE_NAME, FUNC_NAME, "Len(HttpsRequest)=" & Len(HttpsRequest)
+            #End If
         End If
         If IsEmpty(vHeaders) Then
             lHeaderLength = InStr(1, HttpsRequest, vbCrLf & vbCrLf) - 1
@@ -304,7 +306,9 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
         If lContentLength >= 0 Then
             If Len(HttpsRequest) >= lHeaderLength + lContentLength Then
                 If Len(HttpsRequest) <> lHeaderLength + lContentLength Then
-                    Debug.Print "Warning: Received " & Len(HttpsRequest) & " instead of " & lHeaderLength + lContentLength
+                    #If ImplUseDebugLog Then
+                        DebugLog MODULE_NAME, FUNC_NAME, "Received " & Len(HttpsRequest) & " instead of " & lHeaderLength + lContentLength, vbLogEventTypeWarning
+                    #End If
                 End If
                 Exit Do
             End If
@@ -431,32 +435,48 @@ Private Sub m_oSocket_OnClientCertificate(CaDn As Object, Confirmed As Boolean)
     
     If m_oSocket.LocalCertificates Is Nothing Then
         If SearchCollection(CaDn, 1, RetVal:=baDName) Then
-            Debug.Print "Certificate authority DN for client certificate:" & vbCrLf & DesignDumpArray(baDName)
+            #If ImplUseDebugLog Then
+                DebugLog MODULE_NAME, "m_oSocket_OnClientCertificate", "Certificate authority DN for client certificate:" & vbCrLf & DesignDumpArray(baDName)
+            #End If
         End If
         Confirmed = m_oSocket.PkiPkcs12ImportCertificates(App.Path & "\client1.full.pfx")
     End If
 End Sub
 
 Private Sub m_oSocket_OnResolve(IpAddress As String)
-    Debug.Print "m_oSocket_OnResolve, IpAddress=" & IpAddress, Timer
+    #If ImplUseDebugLog Then
+        DebugLog MODULE_NAME, "m_oSocket_OnResolve", "IpAddress=" & IpAddress
+    #End If
 End Sub
 
 Private Sub m_oSocket_OnConnect()
-    Debug.Print "m_oSocket_OnConnect", Timer
+    #If ImplUseDebugLog Then
+        DebugLog MODULE_NAME, "m_oSocket_OnConnect", "Raised"
+    #End If
 End Sub
 
 Private Sub m_oSocket_OnReceive()
-    Debug.Print "m_oSocket_OnReceive", Timer
+    #If ImplUseDebugLog Then
+        DebugLog MODULE_NAME, "m_oSocket_OnReceive", "Raised"
+    #End If
 End Sub
 
 Private Sub m_oSocket_OnSend()
-    Debug.Print "m_oSocket_OnSend", Timer
+    #If ImplUseDebugLog Then
+        DebugLog MODULE_NAME, "m_oSocket_OnSend", "Raised"
+    #End If
 End Sub
 
 Private Sub m_oSocket_OnClose()
-    Debug.Print "m_oSocket_OnClose", Timer
+    #If ImplUseDebugLog Then
+        DebugLog MODULE_NAME, "m_oSocket_OnClose", "Raised"
+    #End If
 End Sub
 
 Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
-    Debug.Print "m_oSocket_OnError, m_oSocket.LastError=&H" & Hex$(m_oSocket.LastError.Number) & ", " & m_oSocket.LastError.Description, Timer
+    If m_oSocket.LastError <> 0 Then
+        #If ImplUseDebugLog Then
+            DebugLog MODULE_NAME, "m_oSocket_OnError", "LastError=&H" & Hex$(m_oSocket.LastError.Number) & " " & m_oSocket.LastError.Description, vbLogEventTypeError
+        #End If
+    End If
 End Sub

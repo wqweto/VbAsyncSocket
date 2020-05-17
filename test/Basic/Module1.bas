@@ -49,3 +49,9 @@ Public Function At(vArray As Variant, ByVal lIdx As Long) As Variant
 QH:
 End Function
 
+Public Sub DebugLog(sModule As String, sFunction As String, sText As String, Optional ByVal eType As LogEventTypeConstants = vbLogEventTypeInformation)
+    Debug.Print Format$(TimerEx, "0.000"), Switch( _
+        eType = vbLogEventTypeError, "[ERROR]", _
+        eType = vbLogEventTypeWarning, "[WARN]", _
+        True, "[INFO]") & " " & sText & " [" & sModule & "." & sFunction & "]"
+End Sub

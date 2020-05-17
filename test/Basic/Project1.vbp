@@ -22,7 +22,7 @@ RevisionVer=0
 AutoIncrementVer=0
 ServerSupportFiles=0
 VersionCompanyName="Unicontsoft"
-CondComp="ASYNCSOCKET_USE_LIBSODIUM = 0 : Dummy = 1"
+CondComp="ASYNCSOCKET_USE_LIBSODIUM = 0 : USE_DEBUG_LOG = 1 : Dummy = 1"
 CompilationType=0
 OptimizationType=2
 FavorPentiumPro(tm)=0

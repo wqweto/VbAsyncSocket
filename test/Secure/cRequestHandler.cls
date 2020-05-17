@@ -70,7 +70,9 @@ Private Function HandleRequest(sText As String) As Boolean
     On Error GoTo EH
     vSplit = Split(sText, vbCrLf)
     vSplit = Split(vSplit(0), " ")
-    Debug.Print "HandleRequest, Path=" & vSplit(1)
+    #If ImplUseDebugLog Then
+        DebugLog MODULE_NAME, FUNC_NAME, "Path=" & vSplit(1)
+    #End If
     sRetVal = "<html><body>" & Now & "</body></html>"
     sRetVal = "HTTP/1.0 200 Ok" & vbCrLf & _
         "Content-Type: text/html; charset=UTF-8" & vbCrLf & _
@@ -96,7 +98,11 @@ Private Sub m_oSocket_OnClose()
 End Sub
 
 Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
-    Debug.Print "Error in handler: " & m_oSocket.LastError.Description
+    If m_oSocket.LastError <> 0 Then
+        #If ImplUseDebugLog Then
+            DebugLog MODULE_NAME, "m_oSocket_OnError", "&H" & Hex$(m_oSocket.LastError) & " " & m_oSocket.LastError.Description, vbLogEventTypeError
+        #End If
+    End If
     Parent.frRemoveHandler m_sKey
 End Sub
 

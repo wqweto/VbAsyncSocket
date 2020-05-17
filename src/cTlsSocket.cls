@@ -2639,6 +2639,7 @@ EH:
 End Function
 
 Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize As Long, sError As String, eAlertCode As UcsTlsAlertDescriptionsEnum) As Long
+    Const FUNC_NAME     As String = "pvTlsParseRecord"
     Dim lRecordPos      As Long
     Dim lRecordSize     As Long
     Dim lRecordType     As Long
@@ -2700,7 +2701,9 @@ HandleAlertContent:
                         GoTo QH
                     Case TLS_ALERT_LEVEL_WARNING
                         .LastAlertCode = baInput(lPos + 1)
-                        Debug.Print pvTlsGetLastAlert(uCtx) & " (TLS_ALERT_LEVEL_WARNING)", Timer
+                        #If ImplUseDebugLog Then
+                            DebugLog MODULE_NAME, FUNC_NAME, pvTlsGetLastAlert(uCtx) & " (TLS_ALERT_LEVEL_WARNING)"
+                        #End If
                         If .LastAlertCode = uscTlsAlertCloseNotify Then
                             .State = ucsTlsStateClosed
                         End If
@@ -2807,6 +2810,7 @@ EH:
 End Function
 
 Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, lPos As Long, ByVal lEnd As Long, ByVal lRecordProtocol As Long, sError As String, eAlertCode As UcsTlsAlertDescriptionsEnum) As Boolean
+    Const FUNC_NAME     As String = "pvTlsParseHandshake"
     Dim lMessagePos     As Long
     Dim lMessageSize    As Long
     Dim lMessageType    As Long
@@ -3067,7 +3071,9 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                             .RemoteTickets.Add baMessage
                         End If
                     Case TLS_HANDSHAKE_TYPE_KEY_UPDATE
-                        Debug.Print "Received TLS_HANDSHAKE_TYPE_KEY_UPDATE", Timer
+                        #If ImplUseDebugLog Then
+                            DebugLog MODULE_NAME, FUNC_NAME, "Received TLS_HANDSHAKE_TYPE_KEY_UPDATE"
+                        #End If
                         If lMessageSize = 1 Then
                             lRequestUpdate = baInput(lPos)
                         Else
@@ -3105,6 +3111,7 @@ EH:
 End Function
 
 Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput() As Byte, lPos As Long, ByVal lRecordProtocol As Long, sError As String, eAlertCode As UcsTlsAlertDescriptionsEnum) As Boolean
+    Const FUNC_NAME     As String = "pvTlsParseHandshakeServerHello"
     Static baHelloRetryRandom() As Byte
     Dim lSize           As Long
     Dim lEnd            As Long
@@ -3138,7 +3145,9 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
         lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
         lPos = pvReadLong(baInput, lPos, lCipherSuite, Size:=2)
         pvTlsSetupCipherSuite uCtx, lCipherSuite
-        Debug.Print "Using " & pvTlsCipherSuiteName(.CipherSuite) & " from " & .RemoteHostName, Timer
+        #If ImplUseDebugLog Then
+            DebugLog MODULE_NAME, FUNC_NAME, "Using " & pvTlsCipherSuiteName(.CipherSuite) & " from " & .RemoteHostName
+        #End If
         If .HelloRetryRequest Then
             .HelloRetryCipherSuite = lCipherSuite
         End If
@@ -3202,6 +3211,7 @@ EH:
 End Function
 
 Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput() As Byte, lPos As Long, ByVal lRecordProtocol As Long, sError As String, eAlertCode As UcsTlsAlertDescriptionsEnum) As Boolean
+    Const FUNC_NAME     As String = "pvTlsParseHandshakeClientHello"
     Dim lSize           As Long
     Dim lEnd            As Long
     Dim lLegacyVersion  As Long
@@ -3260,7 +3270,9 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
             GoTo QH
         End If
         pvTlsSetupCipherSuite uCtx, lCipherSuite
-        Debug.Print "Using " & pvTlsCipherSuiteName(.CipherSuite) & " from " & .RemoteHostName, Timer
+        #If ImplUseDebugLog Then
+            DebugLog MODULE_NAME, FUNC_NAME, "Using " & pvTlsCipherSuiteName(.CipherSuite) & " from " & .RemoteHostName
+        #End If
         lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack)
             lPos = pvReadLong(baInput, lPos, lLegacyCompress)
         lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
@@ -4049,8 +4061,10 @@ Private Sub pvTlsSignatureSign(cPrivKey As Collection, ByVal lSignatureType As L
     Dim baEnc()         As Byte
     Dim baVerifyHash()  As Byte
     Dim baTemp()        As Byte
-    Debug.Print "Signing with " & pvTlsSignatureTypeName(lSignatureType) & " signature", Timer
         
+    #If ImplUseDebugLog Then
+        DebugLog MODULE_NAME, FUNC_NAME, "Signing with " & pvTlsSignatureTypeName(lSignatureType) & " signature"
+    #End If
     If Not SearchCollection(cPrivKey, 1, baTemp) Then
         Err.Raise vbObjectError, FUNC_NAME, ERR_NO_PRIVATE_KEY
     End If
@@ -4189,7 +4203,9 @@ InvalidSignature:
     '--- success
     pvTlsSignatureVerify = True
 QH:
-    Debug.Print IIf(pvTlsSignatureVerify, IIf(bSkip, "Skipping ", IIf(bDeprecated, "Deprecated ", "Valid ")), "Invalid ") & pvTlsSignatureTypeName(lSignatureType) & " signature" & IIf(bDeprecated, " (lCurveSize=" & lCurveSize & " from server's public key)", vbNullString), Timer
+    #If ImplUseDebugLog Then
+        DebugLog MODULE_NAME, FUNC_NAME, IIf(pvTlsSignatureVerify, IIf(bSkip, "Skipping ", IIf(bDeprecated, "Deprecated ", "Valid ")), "Invalid ") & pvTlsSignatureTypeName(lSignatureType) & " signature" & IIf(bDeprecated, " (lCurveSize=" & lCurveSize & " from server's public key)", vbNullString)
+    #End If
     Exit Function
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
@@ -5497,7 +5513,9 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, baPrivKey() A
                 GoTo QH
             End If
         Case Else
-            Debug.Print "Unknown CNG private key magic (0x" & Hex$(lMagic) & ")"
+            #If ImplUseDebugLog Then
+                DebugLog MODULE_NAME, FUNC_NAME, "Unknown CNG private key magic (0x" & Hex$(lMagic) & ")", vbLogEventTypeWarning
+            #End If
         End Select
     Else
         If CertGetCertificateContextProperty(pCertContext, CERT_KEY_PROV_INFO_PROP_ID, ByVal 0, lSize) = 0 Then
@@ -5544,7 +5562,9 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, baPrivKey() A
                 GoTo QH
             End If
         Case Else
-            Debug.Print "Unknown CAPI private key magic (0x" & Hex$(lMagic) & ")"
+            #If ImplUseDebugLog Then
+                DebugLog MODULE_NAME, FUNC_NAME, "Unknown CAPI private key magic (0x" & Hex$(lMagic) & ")", vbLogEventTypeWarning
+            #End If
         End Select
     End If
     '--- success

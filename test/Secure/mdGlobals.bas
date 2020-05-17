@@ -8,6 +8,8 @@ Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
 Private Declare Function WideCharToMultiByte Lib "kernel32" (ByVal CodePage As Long, ByVal dwFlags As Long, ByVal lpWideCharStr As Long, ByVal cchWideChar As Long, lpMultiByteStr As Any, ByVal cchMultiByte As Long, ByVal lpDefaultChar As Long, ByVal lpUsedDefaultChar As Long) As Long
 Private Declare Function MultiByteToWideChar Lib "kernel32" (ByVal CodePage As Long, ByVal dwFlags As Long, lpMultiByteStr As Any, ByVal cchMultiByte As Long, ByVal lpWideCharStr As Long, ByVal cchWideChar As Long) As Long
+Private Declare Function QueryPerformanceCounter Lib "kernel32" (lpPerformanceCount As Currency) As Long
+Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
 
 Private m_oRedimStats               As Object
 
@@ -167,3 +169,19 @@ Public Function DesignDumpRedimStats(Optional ByVal Clear As Boolean) As String
         Set m_oRedimStats = Nothing
     End If
 End Function
+
+Public Property Get TimerEx() As Double
+    Dim cFreq           As Currency
+    Dim cValue          As Currency
+    
+    Call QueryPerformanceFrequency(cFreq)
+    Call QueryPerformanceCounter(cValue)
+    TimerEx = cValue / cFreq
+End Property
+
+Public Sub DebugLog(sModule As String, sFunction As String, sText As String, Optional ByVal eType As LogEventTypeConstants = vbLogEventTypeInformation)
+    Debug.Print Format$(TimerEx, "0.000"), Switch( _
+        eType = vbLogEventTypeError, "[ERROR]", _
+        eType = vbLogEventTypeWarning, "[WARN]", _
+        True, "[INFO]") & " " & sText & " [" & sModule & "." & sFunction & "]"
+End Sub
