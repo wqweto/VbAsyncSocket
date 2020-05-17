@@ -222,7 +222,7 @@ Private Sub m_oSocket_OnReceive()
     lBytes = m_oSocket.Receive(VarPtr(baBuffer(0)), UBound(baBuffer) + 1)
     If lBytes > 0 Then
         ReDim Preserve baBuffer(0 To lBytes - 1) As Byte
-        DebugLog MODULE_NAME, FUNC_NAME, Replace(FromUtf8Array(baBuffer), vbCrLf, "\n")
+        DebugLog MODULE_NAME, FUNC_NAME, Replace(Replace(FromUtf8Array(baBuffer), vbCrLf, vbLf), vbLf, "\n")
     End If
 End Sub
 
@@ -252,24 +252,24 @@ Private Sub Command10_Click()
         If Not .SyncSendText(sRequest, Timeout:=LNG_TIMEOUT) Then
             GoTo QH
         End If
-        DebugLog MODULE_NAME, FUNC_NAME, "->" & sRequest
+        DebugLog MODULE_NAME, FUNC_NAME, "->" & vbTab & sRequest
         If Rnd < 0.5 Then
             sResponse = .SyncReceiveText(10000, Timeout:=LNG_TIMEOUT)
             If LenB(sResponse) <> 0 Then
-                DebugLog MODULE_NAME, FUNC_NAME, "<-" & sResponse
-                DebugLog MODULE_NAME, FUNC_NAME, "Size", Len(sResponse) & " chars"
+                DebugLog MODULE_NAME, FUNC_NAME, "<-" & vbTab & Replace(Replace(sResponse, vbCrLf, vbLf), vbLf, "\n")
+                DebugLog MODULE_NAME, FUNC_NAME, "Size " & Len(sResponse) & " chars"
             Else
                 GoTo QH
             End If
         Else
             If Not .SyncReceiveArray(baBuffer, 10000, Timeout:=LNG_TIMEOUT) Then
                 If UBound(baBuffer) >= 0 Then
-                    DebugLog MODULE_NAME, FUNC_NAME, "<-" & FromUtf8Array(baBuffer)
+                    DebugLog MODULE_NAME, FUNC_NAME, "<-" & vbTab & Replace(Replace(FromUtf8Array(baBuffer), vbCrLf, vbLf), vbLf, "\n")
                     DebugLog MODULE_NAME, FUNC_NAME, "Trimmed " & UBound(baBuffer) + 1 & " bytes"
                 End If
                 GoTo QH
             End If
-            DebugLog MODULE_NAME, FUNC_NAME, "<-" & FromUtf8Array(baBuffer)
+            DebugLog MODULE_NAME, FUNC_NAME, "<-" & vbTab & Replace(Replace(FromUtf8Array(baBuffer), vbCrLf, vbLf), vbLf, "\n")
         End If
         Exit Sub
 QH:
@@ -292,16 +292,16 @@ Private Sub Command4_Click()
     If Not oTlsSocket.SyncReceiveArray(baBuffer) Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "->" & FromUtf8Array(baBuffer)
+    DebugLog MODULE_NAME, FUNC_NAME, "->" & vbTab & pvTrimNewLine(FromUtf8Array(baBuffer))
     Debug.Assert Left$(FromUtf8Array(baBuffer), 3) = "220"
-    DebugLog MODULE_NAME, FUNC_NAME, "<-" & "QUIT"
+    DebugLog MODULE_NAME, FUNC_NAME, "<-" & vbTab & "QUIT"
     If Not oTlsSocket.SyncSendArray(ToUtf8Array("QUIT" & vbCrLf)) Then
         GoTo QH
     End If
     If Not oTlsSocket.SyncReceiveArray(baBuffer) Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "->" & FromUtf8Array(baBuffer)
+    DebugLog MODULE_NAME, FUNC_NAME, "->" & vbTab & pvTrimNewLine(FromUtf8Array(baBuffer))
     Screen.MousePointer = vbDefault
     Exit Sub
 QH:
@@ -347,7 +347,7 @@ Repeat:
         End If
     Loop
     If IsArray(vSplit) Then
-        DebugLog MODULE_NAME, FUNC_NAME, Join(vSplit, vbCrLf & Space$(21))
+        DebugLog MODULE_NAME, FUNC_NAME, "->" & vbTab & Join(vSplit, vbCrLf & Space$(30))
         If Mid$(sHeaders, 10, 3) = "302" Then
             For lIdx = 0 To UBound(vSplit)
                 If Left$(vSplit(lIdx), 9) = "Location:" Then
@@ -557,8 +557,7 @@ Private Sub Command6_Click()
     If oTlsSocket Is Nothing Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, oTlsSocket.SyncReceiveText()
-    DebugLog MODULE_NAME, FUNC_NAME, "Done"
+    DebugLog MODULE_NAME, FUNC_NAME, "->" & vbTab & Replace(Replace(oTlsSocket.SyncReceiveText(), vbCrLf, vbLf), vbLf, "\n")
     Exit Sub
 QH:
     If Not oTlsSocket Is Nothing Then
@@ -584,27 +583,27 @@ Private Sub Command7_Click()
     If LenB(sResponse) = 0 Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "->" & pvTrimNewLine(sResponse)
+    DebugLog MODULE_NAME, FUNC_NAME, "->" & vbTab & pvTrimNewLine(sResponse)
     sRequest = "HELO " & pvGetExternalIP & vbCrLf
     If Not oTlsSocket.SyncSendText(sRequest) Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "<-" & pvTrimNewLine(sRequest)
+    DebugLog MODULE_NAME, FUNC_NAME, "<-" & vbTab & pvTrimNewLine(sRequest)
     sResponse = oTlsSocket.SyncReceiveText()
     If LenB(sResponse) = 0 Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "->" & pvTrimNewLine(sResponse)
+    DebugLog MODULE_NAME, FUNC_NAME, "->" & vbTab & pvTrimNewLine(sResponse)
     sRequest = "STARTTLS" & vbCrLf
     If Not oTlsSocket.SyncSendText(sRequest) Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "<-" & pvTrimNewLine(sRequest)
+    DebugLog MODULE_NAME, FUNC_NAME, "<-" & vbTab & pvTrimNewLine(sRequest)
     sResponse = oTlsSocket.SyncReceiveText()
     If LenB(sResponse) = 0 Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "->" & pvTrimNewLine(sResponse)
+    DebugLog MODULE_NAME, FUNC_NAME, "->" & vbTab & pvTrimNewLine(sResponse)
     If Not oTlsSocket.SyncStartTls("smtp.gmail.com") Then
         GoTo QH
     End If
@@ -613,22 +612,22 @@ Private Sub Command7_Click()
     If Not oTlsSocket.SyncSendText(sRequest) Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "<-" & pvTrimNewLine(sRequest)
+    DebugLog MODULE_NAME, FUNC_NAME, "<-" & vbTab & pvTrimNewLine(sRequest)
     sResponse = oTlsSocket.SyncReceiveText()
     If LenB(sResponse) = 0 Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "->" & pvTrimNewLine(sResponse)
+    DebugLog MODULE_NAME, FUNC_NAME, "->" & vbTab & pvTrimNewLine(sResponse)
     sRequest = "QUIT" & vbCrLf
     If Not oTlsSocket.SyncSendText(sRequest) Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "<-" & pvTrimNewLine(sRequest)
+    DebugLog MODULE_NAME, FUNC_NAME, "<-" & vbTab & pvTrimNewLine(sRequest)
     sResponse = oTlsSocket.SyncReceiveText()
     If LenB(sResponse) = 0 Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "->" & pvTrimNewLine(sResponse)
+    DebugLog MODULE_NAME, FUNC_NAME, "->" & vbTab & pvTrimNewLine(sResponse)
     Screen.MousePointer = vbDefault
     Exit Sub
 QH:
@@ -650,18 +649,15 @@ Private Function pvGetExternalIP() As String
     Dim sResponse     As String
     
     With New cAsyncSocket
-        .SyncConnect "ifconfig.co", 80
-        .SyncSendText "GET /ip HTTP/1.1" & vbCrLf & "Host: ifconfig.co" & vbCrLf & vbCrLf
+        .SyncConnect "checkip.dyndns.org", 80
+        .SyncSendText "GET / HTTP/1.1" & vbCrLf & "Host: checkip.dyndns.org" & vbCrLf & vbCrLf
         Do
             sResponse = sResponse & .SyncReceiveText()
             If InStr(sResponse, vbCrLf & vbCrLf) > 0 Then
-                sResponse = At(Split(At(Split(sResponse, vbCrLf & vbCrLf), 1), vbLf), 0)
-                If sResponse Like "*.*.*.*" Then
-                    Exit Do
-                End If
-            End If
-            If .LastError <> 0 Then
-                .GetSockName sResponse, 0
+                With CreateObject("VBScript.RegExp")
+                    .Pattern = "\d+\.\d+\.\d+\.\d+"
+                    sResponse = .Execute(sResponse).Item(0)
+                End With
                 Exit Do
             End If
         Loop
@@ -687,7 +683,7 @@ Private Sub Command8_Click()
     With pvInitHttpRequest(sUrl, sProxy, ucsTlsIgnoreServerCertificateErrors)
         sResponse = sResponse & .SyncReceiveText(1)
     End With
-    DebugLog MODULE_NAME, FUNC_NAME, sResponse
+    DebugLog MODULE_NAME, FUNC_NAME, "->" & vbTab & Replace(Replace(sResponse, vbCrLf, vbLf), vbLf, "\n")
 End Sub
 
 Private Sub Command9_Click()
@@ -712,19 +708,19 @@ Private Sub Command9_Click()
                 "Origin: http://connect-bot.classic.blizzard.com/v1/rpc/chat" & vbCrLf & vbCrLf) Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "<-" & "(HTTP request)"
+    DebugLog MODULE_NAME, FUNC_NAME, "<-" & vbTab & "(HTTP request)"
     If Not oTlsSocket.SyncReceiveArray(baBuffer) Then
         GoTo QH
     End If
-    DebugLog MODULE_NAME, FUNC_NAME, "->" & FromUtf8Array(baBuffer)
+    DebugLog MODULE_NAME, FUNC_NAME, "->" & vbTab & Replace(Replace(FromUtf8Array(baBuffer), vbCrLf, vbLf), vbLf, "\n")
 QH:
     Screen.MousePointer = vbDefault
 End Sub
 
 Private Sub Command11_Click()
     Set m_oHttpDownload = New cHttpDownload
-'    m_oHttpDownload.DownloadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://dl.unicontsoft.com/upload/pix/ss_vbyoga_flex_container.gif", Environ$("TMP") & "\aaa.gif"
-    m_oHttpDownload.DownloadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://dl.unicontsoft.com/upload/aaa.zip", Environ$("TMP") & "\aaa.zip"
+    m_oHttpDownload.DownloadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://dl.unicontsoft.com/upload/pix/ss_vbyoga_flex_container.gif", Environ$("TMP") & "\aaa.gif"
+'    m_oHttpDownload.DownloadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://dl.unicontsoft.com/upload/aaa.zip", Environ$("TMP") & "\aaa.zip"
 End Sub
 
 Private Sub m_oHttpDownload_OperationStart()
