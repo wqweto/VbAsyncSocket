@@ -129,9 +129,6 @@ Private Const CERT_TRUST_IS_PARTIAL_CHAIN               As Long = &H10000
 Private Const CERT_FIND_EXISTING                        As Long = &HD0000
 '--- for CERT_ALT_NAME_ENTRY
 Private Const CERT_ALT_NAME_DNS_NAME                    As Long = 3
-'--- for WSAGetLastError
-Private Const WSABASEERR                                As Long = 10000
-Private Const WSAEWOULDBLOCK                            As Long = (WSABASEERR + 35)
 '--- OIDs
 Private Const szOID_RSA_RSA                             As String = "1.2.840.113549.1.1.1"
 Private Const szOID_RSA_SSA_PSS                         As String = "1.2.840.113549.1.1.10"
@@ -726,7 +723,7 @@ Property Get LastError() As VBA.ErrObject
         If LenB(.Description) <> 0 And .Description <> "Close notify." Then
             .Number = vbObjectError
             .Source = MODULE_NAME
-        ElseIf m_oSocket.LastError <> 0 Then
+        ElseIf m_oSocket.LastError <> 0 And Not m_oSocket.HasPendingEvent Then
             .Description = m_oSocket.GetErrorDescription(m_oSocket.LastError)
             .Number = m_oSocket.LastError
             .Source = "cAsyncSocket"
@@ -1452,12 +1449,9 @@ Public Function SyncWaitForEvent( _
                 GoTo QH
             End If
             m_oSocket.SyncProcessMsgQueue
-            Select Case LastError
-            Case 0, WSAEWOULDBLOCK
-                '--- do nothing
-            Case Else
+            If LastError.Number <> 0 Then
                 GoTo QH
-            End Select
+            End If
         Loop
         '--- success
         SyncWaitForEvent = True
@@ -1574,7 +1568,7 @@ Private Function pvOnSend() As Boolean
     Do While m_lSendActual < m_uCtx.SendPos
         lBytes = IIf(m_uCtx.SendPos - m_lSendActual > lBufferSize, lBufferSize, m_uCtx.SendPos - m_lSendActual)
         lBytes = m_oSocket.Send(VarPtr(m_uCtx.SendBuffer(m_lSendActual)), lBytes)
-        If m_oSocket.LastError = WSAEWOULDBLOCK Then
+        If m_oSocket.HasPendingEvent Then
             Exit Do
         ElseIf lBytes < 0 Then
             GoTo QH
