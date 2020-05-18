@@ -2634,6 +2634,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
     Dim lPos            As Long
     Dim lEnd            As Long
     Dim baAad()         As Byte
+    Dim lAadPos         As Long
     Dim bResult         As Boolean
     
     On Error GoTo EH
@@ -2654,56 +2655,76 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
                 lPos = lRecordPos
                 Exit Do
             End If
+            '--- try to decrypt record
+            If pvArraySize(.RemoteTrafficKey) > 0 And lRecordSize > .TagSize Then
+                lEnd = lPos + lRecordSize - .TagSize
+                bResult = False
+                pvArrayXor baRemoteIV, .RemoteTrafficIV, .RemoteTrafficSeqNo
+                If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
+                    bResult = pvTlsAeadDecrypt(.AeadAlgo, baRemoteIV, .RemoteTrafficKey, baInput, lRecordPos, LNG_AAD_SIZE, baInput, lPos, lRecordSize)
+                    '--- trim zero padding at the end of decrypted record
+                    Do While lEnd > lPos
+                        lEnd = lEnd - 1
+                        If baInput(lEnd) <> 0 Then
+                            Exit Do
+                        End If
+                    Loop
+                    lRecordType = baInput(lEnd)
+                ElseIf .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
+                    If .IvDynamicSize > 0 Then '--- AES in TLS 1.2
+                        pvWriteBuffer baRemoteIV, .IvSize - .IvDynamicSize, VarPtr(baInput(lPos)), .IvDynamicSize
+                        lPos = lPos + .IvDynamicSize
+                    End If
+                    pvArrayAllocate baAad, LNG_LEGACY_AAD_SIZE, FUNC_NAME & ".baAad"
+                    lAadPos = pvWriteLong(baAad, 0, 0, Size:=4)
+                    lAadPos = pvWriteLong(baAad, lAadPos, .RemoteTrafficSeqNo, Size:=4)
+                    lAadPos = pvWriteBuffer(baAad, lAadPos, VarPtr(baInput(lRecordPos)), 3)
+                    lAadPos = pvWriteLong(baAad, lAadPos, lEnd - lPos, Size:=2)
+                    Debug.Assert lAadPos = LNG_LEGACY_AAD_SIZE
+                    bResult = pvTlsAeadDecrypt(.AeadAlgo, baRemoteIV, .RemoteTrafficKey, baAad, 0, UBound(baAad) + 1, baInput, lPos, lEnd - lPos + .TagSize)
+                End If
+                If Not bResult Then
+                    sError = ERR_DECRYPTION_FAILED
+                    eAlertCode = uscTlsAlertBadRecordMac
+                    GoTo QH
+                End If
+                .RemoteTrafficSeqNo = UnsignedAdd(.RemoteTrafficSeqNo, 1)
+            Else
+                lEnd = lPos + lRecordSize
+            End If
             Select Case lRecordType
             Case TLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC
+                If lPos + 1 <> lEnd Then
+                    sError = ERR_RECORD_TOO_BIG
+                    eAlertCode = uscTlsAlertDecodeError
+                    GoTo QH
+                End If
                 If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
                     .RemoteTrafficKey = .RemoteLegacyNextTrafficKey
                     .RemoteTrafficIV = .RemoteLegacyNextTrafficIV
                     .RemoteTrafficSeqNo = 0
                 End If
-                lPos = lPos + lRecordSize
             Case TLS_CONTENT_TYPE_ALERT
-                lEnd = lPos + lRecordSize
-                If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 And pvArraySize(.RemoteTrafficKey) > 0 Then
-                    pvTlsPrepareLegacyDecryptParams uCtx, baInput, lRecordPos, lRecordSize, lPos, lEnd, baRemoteIV, baAad
-                    If Not pvTlsAeadDecrypt(.AeadAlgo, baRemoteIV, .RemoteTrafficKey, baAad, 0, UBound(baAad) + 1, baInput, lPos, lEnd - lPos + .TagSize) Then
-                        sError = ERR_DECRYPTION_FAILED
-                        eAlertCode = uscTlsAlertBadRecordMac
-                        GoTo QH
+                If lPos + 2 <> lEnd Then
+                    sError = ERR_RECORD_TOO_BIG
+                    eAlertCode = uscTlsAlertDecodeError
+                    GoTo QH
+                End If
+                Select Case baInput(lPos)
+                Case TLS_ALERT_LEVEL_FATAL
+                    sError = ERR_FATAL_ALERT
+                    eAlertCode = baInput(lPos + 1)
+                    GoTo QH
+                Case TLS_ALERT_LEVEL_WARNING
+                    .LastAlertCode = baInput(lPos + 1)
+                    #If ImplUseDebugLog Then
+                        DebugLog MODULE_NAME, FUNC_NAME, pvTlsGetLastAlert(uCtx) & " (TLS_ALERT_LEVEL_WARNING)"
+                    #End If
+                    If .LastAlertCode = uscTlsAlertCloseNotify Then
+                        .State = ucsTlsStateClosed
                     End If
-                    .RemoteTrafficSeqNo = UnsignedAdd(.RemoteTrafficSeqNo, 1)
-                End If
-HandleAlertContent:
-                If lPos + 1 < lEnd Then
-                    Select Case baInput(lPos)
-                    Case TLS_ALERT_LEVEL_FATAL
-                        sError = ERR_FATAL_ALERT
-                        eAlertCode = baInput(lPos + 1)
-                        GoTo QH
-                    Case TLS_ALERT_LEVEL_WARNING
-                        .LastAlertCode = baInput(lPos + 1)
-                        #If ImplUseDebugLog Then
-                            DebugLog MODULE_NAME, FUNC_NAME, pvTlsGetLastAlert(uCtx) & " (TLS_ALERT_LEVEL_WARNING)"
-                        #End If
-                        If .LastAlertCode = uscTlsAlertCloseNotify Then
-                            .State = ucsTlsStateClosed
-                        End If
-                    End Select
-                End If
-                '--- note: skip AEAD's authentication tag
-                lPos = lRecordPos + lRecordSize + 5
+                End Select
             Case TLS_CONTENT_TYPE_HANDSHAKE
-                lEnd = lPos + lRecordSize
-                If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 And pvArraySize(.RemoteTrafficKey) > 0 Then
-                    pvTlsPrepareLegacyDecryptParams uCtx, baInput, lRecordPos, lRecordSize, lPos, lEnd, baRemoteIV, baAad
-                    If Not pvTlsAeadDecrypt(.AeadAlgo, baRemoteIV, .RemoteTrafficKey, baAad, 0, UBound(baAad) + 1, baInput, lPos, lEnd - lPos + .TagSize) Then
-                        sError = ERR_DECRYPTION_FAILED
-                        eAlertCode = uscTlsAlertBadRecordMac
-                        GoTo QH
-                    End If
-                    .RemoteTrafficSeqNo = UnsignedAdd(.RemoteTrafficSeqNo, 1)
-                End If
-HandleHandshakeContent:
                 If .MessSize > 0 Then
                     .MessSize = pvWriteBuffer(.MessBuffer, .MessSize, VarPtr(baInput(lPos)), lEnd - lPos)
                     If Not pvTlsParseHandshake(uCtx, .MessBuffer, .MessPos, .MessSize, lRecordProtocol, sError, eAlertCode) Then
@@ -2723,54 +2744,15 @@ HandleHandshakeContent:
                         .MessPos = 0
                     End If
                 End If
-                '--- note: skip AEAD's authentication tag
-                lPos = lRecordPos + lRecordSize + 5
             Case TLS_CONTENT_TYPE_APPDATA
-                If pvArraySize(.RemoteTrafficKey) = 0 Then
-                    bResult = True
-                ElseIf .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
-                    pvArrayXor baRemoteIV, .RemoteTrafficIV, .RemoteTrafficSeqNo
-                    bResult = pvTlsAeadDecrypt(.AeadAlgo, baRemoteIV, .RemoteTrafficKey, baInput, lRecordPos, LNG_AAD_SIZE, baInput, lPos, lRecordSize)
-                ElseIf .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
-                    pvTlsPrepareLegacyDecryptParams uCtx, baInput, lRecordPos, lRecordSize, lPos, lEnd, baRemoteIV, baAad
-                    bResult = pvTlsAeadDecrypt(.AeadAlgo, baRemoteIV, .RemoteTrafficKey, baAad, 0, UBound(baAad) + 1, baInput, lPos, lEnd - lPos + .TagSize)
-                Else
-                    bResult = False
-                End If
-                If Not bResult Then
-                    sError = ERR_DECRYPTION_FAILED
-                    eAlertCode = uscTlsAlertBadRecordMac
-                    GoTo QH
-                End If
-                .RemoteTrafficSeqNo = UnsignedAdd(.RemoteTrafficSeqNo, 1)
-                If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
-                    lEnd = lPos + lRecordSize - .TagSize - 1
-                    '--- trim zero padding at the end of decrypted record
-                    Do While baInput(lEnd) = 0
-                        lEnd = lEnd - 1
-                    Loop
-                    lRecordType = baInput(lEnd)
-                    Select Case lRecordType
-                    Case TLS_CONTENT_TYPE_ALERT
-                        GoTo HandleAlertContent
-                    Case TLS_CONTENT_TYPE_HANDSHAKE
-                        GoTo HandleHandshakeContent
-                    Case TLS_CONTENT_TYPE_APPDATA
-                        '--- do nothing
-                    Case Else
-                        sError = Replace(ERR_UNEXPECTED_RECORD_TYPE, "%1", lRecordType)
-                        eAlertCode = uscTlsAlertHandshakeFailure
-                        GoTo QH
-                    End Select
-                End If
                 .DecrPos = pvWriteBuffer(.DecrBuffer, .DecrPos, VarPtr(baInput(lPos)), lEnd - lPos)
-                '--- note: skip AEAD's authentication tag or zero padding
-                lPos = lRecordPos + lRecordSize + 5
             Case Else
                 sError = Replace(ERR_UNEXPECTED_RECORD_TYPE, "%1", lRecordType)
                 eAlertCode = uscTlsAlertHandshakeFailure
                 GoTo QH
             End Select
+            '--- note: skip AEAD's authentication tag or zero padding
+            lPos = lRecordPos + lRecordSize + 5
         lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
     Loop
     End With
@@ -2817,7 +2799,9 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                     lPos = lMessagePos
                     Exit Do
                 End If
-'                DebugLog MODULE_NAME, FUNC_NAME, ".State=" & pvTlsGetStateAsText(.State) & ", lMessageType=" & pvTlsGetHandshakeType(lMessageType)
+                #If ImplUseDebugLog Then
+'                    DebugLog MODULE_NAME, FUNC_NAME, ".State=" & pvTlsGetStateAsText(.State) & ", lMessageType=" & pvTlsGetHandshakeType(lMessageType)
+                #End If
                 Select Case .State
                 Case ucsTlsStateExpectServerHello
                     Select Case lMessageType
@@ -3131,7 +3115,9 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
                 lBlockEnd = lPos + lBlockSize
                 Do While lPos < lBlockEnd
                     lPos = pvReadLong(baInput, lPos, lExtType, Size:=2)
-'                    DebugLog MODULE_NAME, FUNC_NAME, "lExtType=" & pvTlsGetExtensionType(lExtType)
+                    #If ImplUseDebugLog Then
+'                        DebugLog MODULE_NAME, FUNC_NAME, "lExtType=" & pvTlsGetExtensionType(lExtType)
+                    #End If
                     lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lExtSize)
                         Select Case lExtType
                         Case TLS_EXTENSION_TYPE_KEY_SHARE
@@ -3568,26 +3554,6 @@ Private Sub pvTlsSetupCipherSuite(uCtx As UcsTlsContext, ByVal lCipherSuite As L
                 Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_CIPHER_SUITE, "%1", "0x" & Hex$(.CipherSuite))
             End Select
         End If
-    End With
-End Sub
-
-Private Sub pvTlsPrepareLegacyDecryptParams(uCtx As UcsTlsContext, baInput() As Byte, ByVal lRecordPos As Long, ByVal lRecordSize As Long, lPos As Long, lEnd As Long, baRemoteIV() As Byte, baAad() As Byte)
-    Const FUNC_NAME     As String = "pvTlsPrepareLegacyDecryptParams"
-    Dim lAadPos         As Long
-    
-    With uCtx
-        lEnd = lPos + lRecordSize - .TagSize
-        pvArrayXor baRemoteIV, .RemoteTrafficIV, .RemoteTrafficSeqNo
-        If .IvDynamicSize > 0 Then '--- AES in TLS 1.2
-            pvWriteBuffer baRemoteIV, .IvSize - .IvDynamicSize, VarPtr(baInput(lPos)), .IvDynamicSize
-            lPos = lPos + .IvDynamicSize
-        End If
-        pvArrayAllocate baAad, LNG_LEGACY_AAD_SIZE, FUNC_NAME & ".baAad"
-        lAadPos = pvWriteLong(baAad, 0, 0, Size:=4)
-        lAadPos = pvWriteLong(baAad, lAadPos, .RemoteTrafficSeqNo, Size:=4)
-        lAadPos = pvWriteBuffer(baAad, lAadPos, VarPtr(baInput(lRecordPos)), 3)
-        lAadPos = pvWriteLong(baAad, lAadPos, lEnd - lPos, Size:=2)
-        Debug.Assert lAadPos = LNG_LEGACY_AAD_SIZE
     End With
 End Sub
 
