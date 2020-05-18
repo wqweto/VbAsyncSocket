@@ -537,9 +537,6 @@ Private m_eLocalFeatures        As UcsTlsLocalFeaturesEnum
 Private m_uCtx                  As UcsTlsContext
 Private m_hRootStore            As Long
 Private m_oRootCa               As cTlsSocket
-'--- socket buffers
-Private m_baRecv()              As Byte
-Private m_lRecvSize             As Long
 Private m_lSendActual           As Long
 Private m_lSendBytes            As Long
 Private m_lLastSendBytes        As Long
@@ -750,7 +747,7 @@ End Property
 
 Property Get AvailableBytes() As Long
     If m_bUseTls Then
-        AvailableBytes = m_lRecvSize
+        AvailableBytes = m_uCtx.DecrPos
     Else
         AvailableBytes = m_oSocket.AvailableBytes
     End If
@@ -965,11 +962,12 @@ Public Function ReceiveArray( _
             Optional HostAddress As String = STR_CHR1, _
             Optional HostPort As Long) As Boolean
     Const FUNC_NAME     As String = "ReceiveArray"
+    Dim baEmpty()       As Byte
+    Dim lBufPtr         As Long
     
     On Error GoTo EH
     If m_bUseTls Then
-        Buffer = vbNullString
-        If m_lRecvSize = 0 Then
+        If m_uCtx.DecrPos = 0 Then
             If pvTlsIsClosed(m_uCtx) Then
                 GoTo QH
             End If
@@ -977,10 +975,10 @@ Public Function ReceiveArray( _
                 GoTo QH
             End If
         End If
-        If m_lRecvSize > 0 Then
-            pvArrayAllocate Buffer, m_lRecvSize, FUNC_NAME & ".Buffer"
-            Call CopyMemory(Buffer(0), m_baRecv(0), m_lRecvSize)
-            m_lRecvSize = 0
+        pvTlsReceive m_uCtx, baEmpty, 0, Buffer, 0
+        Call CopyMemory(lBufPtr, ByVal ArrPtr(Buffer), 4)
+        If lBufPtr = 0 Then
+            Buffer = vbNullString
         End If
         '--- success
         ReceiveArray = True
@@ -1432,7 +1430,7 @@ Public Function SyncWaitForEvent( _
                 End If
             End If
             If (EventMask And ucsSfdRead) <> 0 Then
-                If m_lRecvSize > 0 Then
+                If m_uCtx.DecrPos > 0 Then
                     Exit Do
                 End If
             End If
@@ -1495,19 +1493,19 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
     Dim baRecv()        As Byte
     Dim bResult         As Boolean
     Dim lPrevSize       As Long
+    Dim baEmpty()       As Byte
     
     On Error GoTo EH
-    lPrevSize = m_lRecvSize
+    bResult = True
+    lPrevSize = m_uCtx.DecrPos
     Do
         If pvTlsIsClosed(m_uCtx) Then
-            bResult = True
             Exit Do
         End If
         If Not m_oSocket.ReceiveArray(baRecv) Then
-            GoTo QH
+            Exit Do
         End If
         If Not pvTlsIsReady(m_uCtx) Then
-Renegotiate:
             bResult = pvTlsHandshake(m_uCtx, baRecv, -1, m_uCtx.SendBuffer, m_uCtx.SendPos)
             If Not pvOnSend() Then
                 GoTo QH
@@ -1548,13 +1546,20 @@ Renegotiate:
             End If
             baRecv = vbNullString
         End If
-        bResult = pvTlsReceive(m_uCtx, baRecv, -1, m_baRecv, m_lRecvSize)
-        If m_uCtx.State = ucsTlsStateHandshakeStart Then
-            baRecv = vbNullString
-            GoTo Renegotiate
+        bResult = pvTlsReceive(m_uCtx, baRecv, -1, m_uCtx.DecrBuffer, m_uCtx.DecrPos)
+        If Not bResult Then
+            Exit Do
+        End If
+        bResult = pvTlsSend(m_uCtx, baEmpty, 0, m_uCtx.SendBuffer, m_uCtx.SendPos)
+        If Not bResult Then
+            Exit Do
+        End If
+        bResult = pvOnSend()
+        If Not bResult Then
+            Exit Do
         End If
     Loop While Flush And pvArraySize(baRecv) > 0
-    If m_lRecvSize > lPrevSize Then
+    If m_uCtx.DecrPos > lPrevSize Then
         If pvOnBeforeNotify(ucsSfdRead) Then
             RaiseEvent OnReceive
             RaiseEvent AfterNotify(ucsSfdRead)
@@ -1591,9 +1596,11 @@ Private Function pvOnSend() As Boolean
             m_lSendActual = m_lSendActual + lBytes
         End If
     Loop
-    If m_lSendActual >= m_uCtx.SendPos Then
-        m_lSendActual = 0
-        m_uCtx.SendPos = 0
+    If m_lSendActual > 0 Then
+        If m_lSendActual >= m_uCtx.SendPos Then
+            m_lSendActual = 0
+            m_uCtx.SendPos = 0
+        End If
     End If
     '--- success
     pvOnSend = True
@@ -1657,7 +1664,7 @@ Private Sub m_oSocket_OnReceive()
     
     On Error GoTo EH
     If m_bUseTls Then
-        If m_lRecvSize = 0 Or m_uCtx.State = ucsTlsStateShutdown Then
+        If m_uCtx.DecrPos = 0 Or m_uCtx.State = ucsTlsStateShutdown Then
             If Not pvOnReceive() Then
                 GoTo QH
             End If
@@ -1900,8 +1907,10 @@ Private Function pvTlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal l
         If lSize = 0 Then
             '--- flush
             pvArraySwap .SendBuffer, .SendPos, baOutput, lPos
-            Erase .SendBuffer
-            .SendPos = 0
+            If VarPtr(lPos) <> VarPtr(.SendPos) Then
+                Erase .SendBuffer
+                .SendPos = 0
+            End If
             '--- success
             pvTlsSend = True
             Exit Function
@@ -1935,8 +1944,10 @@ Private Function pvTlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lS
         If lSize = 0 And lPos = 0 Then
             '--- flush
             pvArraySwap .DecrBuffer, .DecrPos, baPlainText, lPos
-            Erase .DecrBuffer
-            .DecrPos = 0
+            If VarPtr(lPos) <> VarPtr(.DecrPos) Then
+                Erase .DecrBuffer
+                .DecrPos = 0
+            End If
             '--- success
             pvTlsReceive = True
             Exit Function
@@ -1951,6 +1962,10 @@ Private Function pvTlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lS
         If Not pvTlsParsePayload(uCtx, baInput, lSize, .LastError, .LastAlertCode) Then
             pvTlsSetLastError uCtx, .LastError, .LastAlertCode
             GoTo QH
+        End If
+        If .State = ucsTlsStateHandshakeStart Then
+            .SendPos = pvTlsBuildClientHello(uCtx, .SendBuffer, .SendPos)
+            .State = ucsTlsStateExpectServerHello
         End If
         '--- success
         pvTlsReceive = True
