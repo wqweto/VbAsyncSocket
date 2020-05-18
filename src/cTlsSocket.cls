@@ -432,6 +432,7 @@ Private Const TLS_EXTENSION_TYPE_SUPPORTED_VERSIONS     As Long = 43
 Private Const TLS_EXTENSION_TYPE_COOKIE                 As Long = 44
 'Private Const TLS_EXTENSION_TYPE_PSK_KEY_EXCHANGE_MODES As Long = 45
 Private Const TLS_EXTENSION_TYPE_CERTIFICATE_AUTHORITIES As Long = 47
+Private Const TLS_EXTENSION_TYPE_POST_HANDSHAKE_AUTH    As Long = 49
 Private Const TLS_EXTENSION_TYPE_KEY_SHARE              As Long = 51
 Private Const TLS_EXTENSION_TYPE_RENEGOTIATION_INFO     As Long = &HFF01
 Private Const TLS_CS_AES_128_GCM_SHA256                 As Long = &H1301
@@ -2197,6 +2198,9 @@ Private Function pvTlsBuildClientHello(uCtx As UcsTlsContext, baOutput() As Byte
                         lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
                     lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
                     If (.LocalFeatures And ucsTlsSupportTls13) <> 0 Then
+                        '--- Extension - Post Handshake Auth
+                        pvArrayByte baTemp, 0, TLS_EXTENSION_TYPE_POST_HANDSHAKE_AUTH, 0, 0
+                        lPos = pvWriteArray(baOutput, lPos, baTemp)     '--- supported
                         '--- Extension - Key Share
                         lPos = pvWriteLong(baOutput, lPos, TLS_EXTENSION_TYPE_KEY_SHARE, Size:=2)
                         lPos = pvWriteBeginOfBlock(baOutput, lPos, .BlocksStack, Size:=2)
@@ -3071,6 +3075,13 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                         .SendPos = pvWriteArray(.SendBuffer, .SendPos, baMessage)
                     End If
                     lPos = lPos + lMessageSize
+                Case TLS_HANDSHAKE_TYPE_CERTIFICATE_REQUEST
+                    If Not pvTlsParseHandshakeCertificateRequest(uCtx, baInput, lPos, sError, eAlertCode) Then
+                        GoTo QH
+                    End If
+                    .SendPos = pvTlsBuildClientHandshakeFinished(uCtx, .SendBuffer, .SendPos)
+                    '--- not used past handshake
+                    Erase .HandshakeMessages
                 Case Else
 UnexpectedMessageType:
                     sError = Replace(Replace(ERR_UNEXPECTED_MSG_TYPE, "%1", pvTlsGetStateAsText(.State)), "%2", pvTlsGetHandshakeType(lMessageType))
