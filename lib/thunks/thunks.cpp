@@ -121,7 +121,9 @@ typedef struct {
 #pragma code_seg(push, r1, ".mythunk")
 
 static int beginOfThunk(int i) { 
-    int a[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }; return a[i]; 
+    int a[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }; 
+    int b[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }; 
+    return a[b[i]];
 }
 
 __declspec(naked) static thunk_context_t *getContext() {
