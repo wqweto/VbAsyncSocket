@@ -1821,10 +1821,6 @@ Private Function pvTlsInitClient( _
         .RemoteHostName = RemoteHostName
         .LocalFeatures = LocalFeatures
         pvTlsArrayRandom .LocalExchRandom, TLS_HELLO_RANDOM_SIZE
-        If (LocalFeatures And ucsTlsSupportTls13) <> 0 Then
-            '--- note: uCtx.ClientPublic has to be ready for pvTlsBuildClientHello
-            pvTlsSetupExchEccGroup uEmpty, TLS_GROUP_X25519
-        End If
     End With
     uCtx = uEmpty
     '--- success
@@ -1966,10 +1962,6 @@ Private Function pvTlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lS
             pvTlsSetLastError uCtx, .LastError, .LastAlertCode
             GoTo QH
         End If
-        If .State = ucsTlsStateHandshakeStart Then
-            .SendPos = pvTlsBuildClientHello(uCtx, .SendBuffer, .SendPos)
-            .State = ucsTlsStateExpectServerHello
-        End If
         '--- success
         pvTlsReceive = True
 QH:
@@ -2093,6 +2085,10 @@ Private Function pvTlsBuildClientHello(uCtx As UcsTlsContext, baOutput() As Byte
     Dim baTemp()        As Byte
     
     With uCtx
+        If (.LocalFeatures And ucsTlsSupportTls13) <> 0 And .ExchGroup = 0 Then
+            '--- populate preferred .ExchGroup and .LocalExchPublic
+            pvTlsSetupExchEccGroup uCtx, TLS_GROUP_X25519
+        End If
         '--- Record Header
         lPos = pvWriteBeginOfRecord(baOutput, lPos, TLS_CONTENT_TYPE_HANDSHAKE, uCtx)
             '--- Handshake Header
@@ -2542,7 +2538,6 @@ Private Function pvTlsBuildApplicationData(uCtx As UcsTlsContext, baOutput() As 
 End Function
 
 Private Function pvTlsBuildAlert(uCtx As UcsTlsContext, baOutput() As Byte, ByVal lPos As Long, ByVal eAlertDesc As UcsTlsAlertDescriptionsEnum, ByVal lAlertLevel As Long) As Long
-    Const FUNC_NAME     As String = "pvTlsBuildAlert"
     Dim baBuffer()     As Byte
     
     With uCtx
@@ -3047,7 +3042,9 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                         #If ImplUseDebugLog Then
                             DebugLog MODULE_NAME, FUNC_NAME, "Received empty message (Hello Request). Will renegotiate"
                         #End If
-                        .State = ucsTlsStateHandshakeStart
+                        .SendPos = pvTlsBuildClientHello(uCtx, .SendBuffer, .SendPos)
+                        .State = ucsTlsStateExpectServerHello
+                        '--- renegotiate ephemeral keys too
                         .ExchGroup = 0
                         .CipherSuite = 0
                     Else
