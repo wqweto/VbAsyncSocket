@@ -180,7 +180,7 @@ Public Property Get TimerEx() As Double
 End Property
 
 Public Sub DebugLog(sModule As String, sFunction As String, sText As String, Optional ByVal eType As LogEventTypeConstants = vbLogEventTypeInformation)
-    Debug.Print Format$(TimerEx, "0.000"), Switch( _
+    Debug.Print Format$(TimerEx, "0.000") & " " & Switch( _
         eType = vbLogEventTypeError, "[ERROR]", _
         eType = vbLogEventTypeWarning, "[WARN]", _
         True, "[INFO]") & " " & sText & " [" & sModule & "." & sFunction & "]"
