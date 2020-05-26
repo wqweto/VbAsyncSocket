@@ -354,6 +354,7 @@ Private Const DEF_TIMEOUT                               As Long = 5000
 Private Const LNG_FACILITY_WIN32                        As Long = &H80070000
 '--- errors
 Private Const ERR_NO_MATCHING_ALT_NAME                  As String = "No certificate subject name matches target host name"
+Private Const ERR_NO_CERTIFICATE                        As String = "No server certificate found"
 Private Const ERR_TRUST_IS_REVOKED                      As String = "Trust for this certificate or one of the certificates in the certificate chain has been revoked"
 Private Const ERR_TRUST_IS_PARTIAL_CHAIN                As String = "The certificate chain is not complete"
 Private Const ERR_TRUST_IS_UNTRUSTED_ROOT               As String = "The certificate or certificate chain is based on an untrusted root"
@@ -363,6 +364,7 @@ Private Const ERR_TRUST_REVOCATION_STATUS_UNKNOWN       As String = "The revocat
 Private WithEvents m_oSocket    As cAsyncSocket
 Attribute m_oSocket.VB_VarHelpID = -1
 Private m_bUseTls               As Boolean
+Private m_bIsServer             As Boolean
 Private m_sRemoteHostName       As String
 Private m_eLocalFeatures        As UcsTlsLocalFeaturesEnum
 Private m_uCtx                  As UcsTlsContext
@@ -432,6 +434,10 @@ Property Get LastError() As VBA.ErrObject
     End With
 End Property
 
+Private Function pvSetLastError(sError As String)
+    m_uCtx.LastError = sError
+End Function
+
 Property Get IsClosed() As Boolean
     If m_bUseTls Then
         IsClosed = TlsIsClosed(m_uCtx)
@@ -460,8 +466,16 @@ Property Get HasPendingEvent() As Boolean
     HasPendingEvent = m_oSocket.HasPendingEvent
 End Property
 
+Property Get IsServer() As Boolean
+    IsServer = m_bIsServer
+End Property
+
 Property Get RemoteHostName() As String
-    RemoteHostName = m_uCtx.RemoteHostName
+    RemoteHostName = m_sRemoteHostName
+End Property
+
+Property Get LocalFeatures() As UcsTlsLocalFeaturesEnum
+    LocalFeatures = m_eLocalFeatures
 End Property
 
 Property Get LocalCertificates() As Collection
@@ -478,6 +492,10 @@ End Property
 
 Property Set LocalPrivateKey(oValue As Collection)
     Set m_uCtx.LocalPrivateKey = oValue
+End Property
+
+Property Get RemoteCertificates() As Collection
+    Set RemoteCertificates = m_uCtx.RemoteCertificates
 End Property
 
 Friend Property Get frRootStore() As Long
@@ -524,6 +542,7 @@ Public Function InitServerTls( _
     End If
 StartTls:
     m_bUseTls = True
+    m_bIsServer = True
     m_oSocket.GetPeerName m_sRemoteHostName, 0
     m_eLocalFeatures = ucsTlsSupportTls13
     If Not TlsInitServer(m_uCtx, m_sRemoteHostName, cCerts, cPrivKey) Then
@@ -602,6 +621,7 @@ Public Function StartTls( _
         GoTo QH
     End If
     m_bUseTls = True
+    m_bIsServer = False
     If LenB(RemoteHostName) <> 0 Then
         m_sRemoteHostName = RemoteHostName
     End If
@@ -1181,6 +1201,7 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
     Dim bResult         As Boolean
     Dim lPrevSize       As Long
     Dim baEmpty()       As Byte
+    Dim sError          As String
     
     On Error GoTo EH
     bResult = True
@@ -1210,15 +1231,17 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
             If Not TlsIsReady(m_uCtx) Or Not bResult Then
                 GoTo QH
             End If
-            If Not m_uCtx.IsServer Then
-                If (m_uCtx.LocalFeatures And ucsTlsIgnoreServerCertificateErrors) <> 0 Then
+            If Not m_bIsServer Then
+                If (LocalFeatures And ucsTlsIgnoreServerCertificateErrors) <> 0 Then
                     #If ImplUseDebugLog Then
                         DebugLog MODULE_NAME, FUNC_NAME, "Will skip server certificate checks for " & RemoteHostName
                     #End If
-                ElseIf m_uCtx.RemoteCertificates Is Nothing Then
+                ElseIf RemoteCertificates Is Nothing Then
+                    pvSetLastError ERR_NO_CERTIFICATE
                     RaiseEvent OnError(vbObjectError, ucsSfdRead)
                     GoTo QH
-                ElseIf Not pvPkiCertChainValidate(RemoteHostName, m_uCtx.RemoteCertificates, frRootStore, m_uCtx.LastError) Then
+                ElseIf Not pvPkiCertChainValidate(RemoteHostName, RemoteCertificates, frRootStore, sError) Then
+                    pvSetLastError sError
                     RaiseEvent OnError(vbObjectError, ucsSfdRead)
                     GoTo QH
                 End If
