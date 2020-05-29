@@ -251,6 +251,7 @@ Private Const STR_VL_ALERTS                 As String = "0|Close notify|10|Unexp
 Private Const STR_ERR_UNEXPECTED_RESULT     As String = "Unexpected result from %1 (%2)"
 Private Const STR_UNKNOWN                   As String = "Unknown (%1)"
 Private Const STR_FORMAT_ALERT              As String = "%1."
+Private Const ERR_CONNECTION_CLOSED         As String = "Connection closed"
 
 Public Enum UcsTlsLocalFeaturesEnum '--- bitmask
     ucsTlsSupportTls12 = 2 ^ 0
@@ -334,18 +335,6 @@ Public Enum UcsTlsAlertDescriptionsEnum
 End Enum
 
 '=========================================================================
-' Error handling
-'=========================================================================
-
-Private Sub PrintError(sFunction As String)
-    #If ImplUseDebugLog Then
-        DebugLog MODULE_NAME, sFunction & "(" & Erl & ")", Err.Description & " &H" & Hex$(Err.Number), vbLogEventTypeError
-    #Else
-        Debug.Print "Critical error: " & Err.Description & " [" & MODULE_NAME & "." & sFunction & "]"
-    #End If
-End Sub
-
-'=========================================================================
 ' Properties
 '=========================================================================
 
@@ -421,7 +410,7 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
     Dim uCred           As SCHANNEL_CRED
     Dim lContextReq     As Long
     Dim lContextAttr    As Long
-    Dim lResult         As Long
+    Dim hResult         As Long
     Dim lIdx            As Long
     Dim lPtr            As Long
     Dim oCallback       As Object
@@ -433,14 +422,18 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
     Dim cIssuers        As Collection
     Dim baCaDn()        As Byte
     
+    On Error GoTo EH
     With uCtx
+        If .State = ucsTlsStateClosed Then
+            pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_CONNECTION_CLOSED
+            GoTo QH
+        End If
+        pvTlsSetLastError uCtx
         If .State = ucsTlsStateHandshakeStart Then
             lContextReq = lContextReq Or ISC_REQ_REPLAY_DETECT              ' Detect replayed messages that have been encoded by using the EncryptMessage or MakeSignature functions.
             lContextReq = lContextReq Or ISC_REQ_SEQUENCE_DETECT            ' Detect messages received out of sequence.
             lContextReq = lContextReq Or ISC_REQ_CONFIDENTIALITY            ' Encrypt messages by using the EncryptMessage function.
-            If .OnClientCertificate = 0 Then
-                lContextReq = lContextReq Or ISC_REQ_USE_SUPPLIED_CREDS     ' Schannel must not attempt to supply credentials for the client automatically.
-            End If
+'            lContextReq = lContextReq Or ISC_REQ_USE_SUPPLIED_CREDS         ' Schannel must not attempt to supply credentials for the client automatically.
             lContextReq = lContextReq Or ISC_REQ_ALLOCATE_MEMORY            ' The security package allocates output buffers for you. When you have finished using the output buffers, free them by calling the FreeContextBuffer function.
 '            lContextReq = lContextReq Or ISC_REQ_CONNECTION                 ' The security context will not handle formatting messages.
             lContextReq = lContextReq Or ISC_REQ_EXTENDED_ERROR             ' When errors occur, the remote party will be notified.
@@ -490,7 +483,7 @@ RetryCredentials:
             pvInitSecDesc .InDesc, 3, .InBuffers
             pvInitSecDesc .OutDesc, 3, .OutBuffers
             '--- note: on initial loop don't pass [in] phContext and [in] pInput
-            lResult = InitializeSecurityContext(.hTlsCredentials, ByVal 0, ByVal .RemoteHostName, .ContextReq, 0, _
+            hResult = InitializeSecurityContext(.hTlsCredentials, ByVal 0, ByVal .RemoteHostName, .ContextReq, 0, _
                 SECURITY_NATIVE_DREP, ByVal 0, 0, .hTlsContext, .OutDesc, lContextAttr, 0)
         Else
             If .RecvPos > 0 Then
@@ -500,11 +493,14 @@ RetryCredentials:
             End If
             pvInitSecBuffer .InBuffers(0), SECBUFFER_TOKEN, .RecvPos, lPtr
             '--- note: pass .hTlsContext for [in] phContext and .InDesc for [in] pInput
-            lResult = InitializeSecurityContext(.hTlsCredentials, .hTlsContext, ByVal .RemoteHostName, .ContextReq, 0, _
+            hResult = InitializeSecurityContext(.hTlsCredentials, .hTlsContext, ByVal .RemoteHostName, .ContextReq, 0, _
                 SECURITY_NATIVE_DREP, .InDesc, 0, .hTlsContext, .OutDesc, lContextAttr, 0)
         End If
-        If lResult = SEC_E_INCOMPLETE_MESSAGE Then
+        If hResult = SEC_E_INCOMPLETE_MESSAGE Then
             pvInitSecBuffer .InBuffers(1), SECBUFFER_EMPTY
+        ElseIf hResult < 0 Then
+            pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "InitializeSecurityContext", , .LastAlertCode
+            GoTo QH
         Else
             .RecvPos = 0
             For lIdx = 1 To UBound(.InBuffers)
@@ -535,7 +531,7 @@ RetryCredentials:
                     .LastAlertCode = baInput(6)
                 End If
             End If
-            Select Case lResult
+            Select Case hResult
             Case SEC_E_OK
                 If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_STREAM_SIZES, .TlsSizes) <> 0 Then
                     GoTo QH
@@ -573,15 +569,14 @@ RetryCredentials:
                         .hTlsCredentials = 0
                         GoTo RetryCredentials
                     End If
+                ElseIf (.ContextReq And ISC_REQ_USE_SUPPLIED_CREDS) = 0 Then
+                    .ContextReq = .ContextReq Or ISC_REQ_USE_SUPPLIED_CREDS
+                    GoTo RetryCredentials
                 End If
-                pvTlsSetLastError uCtx, lResult, FUNC_NAME & vbCrLf & "InitializeSecurityContext", , .LastAlertCode
-                GoTo QH
-            Case Is < 0
-                '--- failed
-                pvTlsSetLastError uCtx, lResult, FUNC_NAME & vbCrLf & "InitializeSecurityContext", , .LastAlertCode
+                pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "InitializeSecurityContext", , .LastAlertCode
                 GoTo QH
             Case Else
-                pvTlsSetLastError uCtx, vbObjectError, FUNC_NAME, Replace(Replace(STR_ERR_UNEXPECTED_RESULT, "%1", "InitializeSecurityContext"), "%2", "&H" & Hex$(lResult)), .LastAlertCode
+                pvTlsSetLastError uCtx, vbObjectError, FUNC_NAME, Replace(Replace(STR_ERR_UNEXPECTED_RESULT, "%1", "InitializeSecurityContext"), "%2", "&H" & Hex$(hResult)), .LastAlertCode
                 GoTo QH
             End Select
         End If
@@ -608,37 +603,50 @@ RetryCredentials:
     '--- success
     TlsHandshake = True
 QH:
+    Exit Function
+EH:
+    pvTlsSetLastError uCtx, Err.Number, Err.Source, Err.Description
+    Resume QH
 End Function
 
 Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize As Long, baPlainText() As Byte, lPos As Long) As Boolean
     Const FUNC_NAME     As String = "TlsReceive"
-    Dim lResult         As Long
+    Dim hResult         As Long
     Dim lIdx            As Long
     Dim lPtr            As Long
     
     On Error GoTo EH
     With uCtx
+        If .State = ucsTlsStateClosed Then
+            pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_CONNECTION_CLOSED
+            GoTo QH
+        End If
+        pvTlsSetLastError uCtx
         If lSize < 0 Then
             lSize = pvArraySize(baInput)
         End If
         If lSize > 0 Then
             .RecvPos = pvWriteBuffer(.RecvBuffer, .RecvPos, VarPtr(baInput(0)), lSize)
         End If
-RepeatReceive:
-        If .RecvPos > 0 Then
-            lPtr = VarPtr(.RecvBuffer(0))
-        Else
-            lPtr = VarPtr(.RecvPos)
-        End If
-        pvInitSecBuffer .InBuffers(0), SECBUFFER_DATA, .RecvPos, lPtr
-        lResult = DecryptMessage(.hTlsContext, .InDesc, 0, 0)
-        If lResult = SEC_E_INCOMPLETE_MESSAGE Then
-            pvInitSecBuffer .InBuffers(1), SECBUFFER_EMPTY
-        Else
+        Do
+            If .RecvPos > 0 Then
+                lPtr = VarPtr(.RecvBuffer(0))
+            Else
+                lPtr = VarPtr(.RecvPos)
+            End If
+            pvInitSecBuffer .InBuffers(0), SECBUFFER_DATA, .RecvPos, lPtr
+            hResult = DecryptMessage(.hTlsContext, .InDesc, 0, 0)
+            If hResult = SEC_E_INCOMPLETE_MESSAGE Then
+                pvInitSecBuffer .InBuffers(1), SECBUFFER_EMPTY
+                Exit Do
+            ElseIf hResult < 0 Then
+                pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "DecryptMessage"
+                GoTo QH
+            End If
             .RecvPos = 0
             For lIdx = 1 To UBound(.InBuffers)
                 With .InBuffers(lIdx)
-                    If .cbBuffer > 0 And lResult >= 0 Then
+                    If .cbBuffer > 0 And hResult >= 0 Then
                         Select Case .BufferType
                         Case SECBUFFER_DATA
                             lPos = pvWriteBuffer(baPlainText, lPos, .pvBuffer, .cbBuffer)
@@ -648,6 +656,10 @@ RepeatReceive:
                                 lPtr = VarPtr(uCtx.RecvBuffer(uCtx.InBuffers(0).cbBuffer - .cbBuffer))
                             End If
                             uCtx.RecvPos = pvWriteBuffer(uCtx.RecvBuffer, uCtx.RecvPos, lPtr, .cbBuffer)
+                        Case SECBUFFER_ALERT
+                            #If ImplUseDebugLog Then
+                                DebugLog MODULE_NAME, FUNC_NAME, "InBuffers, SECBUFFER_ALERT:" & vbCrLf & DesignDumpMemory(.pvBuffer, .cbBuffer), vbLogEventTypeWarning
+                            #End If
                         Case SECBUFFER_STREAM_HEADER, SECBUFFER_STREAM_TRAILER
                             '--- do nothing
                         Case Else
@@ -659,34 +671,34 @@ RepeatReceive:
                 End With
                 pvInitSecBuffer .InBuffers(lIdx), SECBUFFER_EMPTY
             Next
-            Select Case lResult
+            Select Case hResult
             Case SEC_E_OK
-                GoTo RepeatReceive
+                '--- do nothing
             Case SEC_I_RENEGOTIATE
                 .State = ucsTlsStateExpectServerHello
                 TlsHandshake uCtx, .RecvBuffer, .RecvPos, .SendBuffer, .SendPos
+                Exit Do
             Case SEC_I_CONTEXT_EXPIRED
                 .State = ucsTlsStateShutdown
-            Case Is < 0
-                pvTlsSetLastError uCtx, lResult, FUNC_NAME & vbCrLf & "DecryptMessage"
-                GoTo QH
+                Exit Do
             Case Else
-                pvTlsSetLastError uCtx, vbObjectError, FUNC_NAME, Replace(Replace(STR_ERR_UNEXPECTED_RESULT, "%1", "DecryptMessage"), "%2", "&H" & Hex$(lResult))
+                pvTlsSetLastError uCtx, vbObjectError, FUNC_NAME, Replace(Replace(STR_ERR_UNEXPECTED_RESULT, "%1", "DecryptMessage"), "%2", "&H" & Hex$(hResult))
                 GoTo QH
             End Select
-        End If
+        Loop
     End With
     '--- success
     TlsReceive = True
 QH:
     Exit Function
 EH:
-    PrintError FUNC_NAME
+    pvTlsSetLastError uCtx, Err.Number, Err.Source, Err.Description
+    Resume QH
 End Function
 
 Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSize As Long, baOutput() As Byte, lOutputPos As Long) As Boolean
     Const FUNC_NAME     As String = "TlsSend"
-    Dim lResult         As Long
+    Dim hResult         As Long
     Dim lBufPos         As Long
     Dim lBufSize        As Long
     Dim uOutDesc        As ApiSecBufferDesc
@@ -695,6 +707,11 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
     
     On Error GoTo EH
     With uCtx
+        If .State = ucsTlsStateClosed Then
+            pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_CONNECTION_CLOSED
+            GoTo QH
+        End If
+        pvTlsSetLastError uCtx
         If lSize = 0 Then
             '--- flush
             If .SendPos > 0 Then
@@ -716,15 +733,16 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
             pvInitSecBuffer uOutBuffers(0), SECBUFFER_STREAM_HEADER, .TlsSizes.cbHeader, VarPtr(baOutput(lBufPos))
             pvInitSecBuffer uOutBuffers(1), SECBUFFER_DATA, lBufSize, VarPtr(baOutput(lBufPos + .TlsSizes.cbHeader))
             pvInitSecBuffer uOutBuffers(2), SECBUFFER_STREAM_TRAILER, .TlsSizes.cbTrailer, VarPtr(baOutput(lBufPos + .TlsSizes.cbHeader + lBufSize))
-            lResult = EncryptMessage(.hTlsContext, 0, uOutDesc, 0)
-            Select Case lResult
+            hResult = EncryptMessage(.hTlsContext, 0, uOutDesc, 0)
+            If hResult < 0 Then
+                pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "EncryptMessage"
+                GoTo QH
+            End If
+            Select Case hResult
             Case SEC_E_OK
                 '--- do nothing
-            Case Is < 0
-                pvTlsSetLastError uCtx, lResult, FUNC_NAME & vbCrLf & "EncryptMessage"
-                GoTo QH
             Case Else
-                pvTlsSetLastError uCtx, vbObjectError, FUNC_NAME, Replace(Replace(STR_ERR_UNEXPECTED_RESULT, "%1", "EncryptMessage"), "%2", "&H" & Hex$(lResult))
+                pvTlsSetLastError uCtx, vbObjectError, FUNC_NAME, Replace(Replace(STR_ERR_UNEXPECTED_RESULT, "%1", "EncryptMessage"), "%2", "&H" & Hex$(hResult))
                 GoTo QH
             End Select
         Next
@@ -734,13 +752,14 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
 QH:
     Exit Function
 EH:
-    PrintError FUNC_NAME
+    pvTlsSetLastError uCtx, Err.Number, Err.Source, Err.Description
+    Resume QH
 End Function
 
 Public Function TlsShutdown(uCtx As UcsTlsContext, baOutput() As Byte, lPos As Long) As Boolean
     Const FUNC_NAME     As String = "pvTlsShutdown"
     Dim lType           As Long
-    Dim lResult         As Long
+    Dim hResult         As Long
     Dim lIdx            As Long
     Dim uInDesc         As ApiSecBufferDesc
     Dim uInBuffers()    As ApiSecBuffer
@@ -752,17 +771,17 @@ Public Function TlsShutdown(uCtx As UcsTlsContext, baOutput() As Byte, lPos As L
         lType = SCHANNEL_SHUTDOWN
         pvInitSecDesc uInDesc, .TlsSizes.cBuffers, uInBuffers
         pvInitSecBuffer uInBuffers(0), SECBUFFER_TOKEN, 4, VarPtr(lType)
-        lResult = ApplyControlToken(.hTlsContext, uInDesc)
-        If lResult < 0 Then
-            pvTlsSetLastError uCtx, lResult, FUNC_NAME & vbCrLf & "ApplyControlToken"
+        hResult = ApplyControlToken(.hTlsContext, uInDesc)
+        If hResult < 0 Then
+            pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "ApplyControlToken"
             GoTo QH
         End If
         pvInitSecDesc uOutDesc, .TlsSizes.cBuffers, uOutBuffers
         pvInitSecBuffer uOutBuffers(0), SECBUFFER_TOKEN
-        lResult = InitializeSecurityContext(.hTlsCredentials, .hTlsContext, ByVal .RemoteHostName, .ContextReq, 0, _
+        hResult = InitializeSecurityContext(.hTlsCredentials, .hTlsContext, ByVal .RemoteHostName, .ContextReq, 0, _
             SECURITY_NATIVE_DREP, ByVal 0, 0, .hTlsContext, uOutDesc, .ContextReq, 0)
-        If lResult < 0 Then
-            pvTlsSetLastError uCtx, lResult, FUNC_NAME & vbCrLf & "InitializeSecurityContext"
+        If hResult < 0 Then
+            pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "InitializeSecurityContext"
             GoTo QH
         End If
         For lIdx = 0 To UBound(uOutBuffers)
@@ -777,14 +796,14 @@ Public Function TlsShutdown(uCtx As UcsTlsContext, baOutput() As Byte, lPos As L
                 End If
             End With
         Next
-        '--- success
-        TlsShutdown = True
-QH:
     End With
+    '--- success
+    TlsShutdown = True
+QH:
     Exit Function
 EH:
-    PrintError FUNC_NAME
-    GoTo QH
+    pvTlsSetLastError uCtx, Err.Number, Err.Source, Err.Description
+    Resume QH
 End Function
 
 Public Function TlsGetLastError(uCtx As UcsTlsContext) As String
@@ -806,8 +825,14 @@ Private Sub pvTlsSetLastError(uCtx As UcsTlsContext, Optional ByVal lNumber As L
         Else
             .LastError = sDescription
         End If
+        If Right$(.LastError, 2) = vbCrLf Then
+            .LastError = Left$(.LastError, Len(.LastError) - 2)
+        End If
         If Right$(.LastError, 1) = "." Then
             .LastError = Left$(.LastError, Len(.LastError) - 1)
+        End If
+        If .LastErrNumber <> 0 Then
+            .State = ucsTlsStateClosed
         End If
     End With
 End Sub
