@@ -417,11 +417,13 @@ Property Get SocketHandle() As Long
 End Property
 
 Property Get LastError() As VBA.ErrObject
+    Dim lErrNumber      As Long
+    
     Set LastError = Err
     With LastError
-        .Description = TlsGetLastError(m_uCtx)
-        If LenB(.Description) <> 0 And .Description <> "Close notify." Then
-            .Number = vbObjectError
+        .Description = TlsGetLastError(m_uCtx, lErrNumber)
+        If LenB(.Description) <> 0 And lErrNumber <> 0 Then
+            .Number = lErrNumber
             .Source = MODULE_NAME
         ElseIf m_oSocket.LastError <> 0 And Not m_oSocket.HasPendingEvent Then
             .Description = m_oSocket.GetErrorDescription(m_oSocket.LastError)
@@ -1682,11 +1684,12 @@ Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey 
     Dim hResult         As Long
     Dim sApiSource      As String
     
-    Call CryptAcquireContext(0, 0, 0, PROV_RSA_FULL, CRYPT_DELETEKEYSET)
-    If CryptAcquireContext(hProv, 0, 0, PROV_RSA_FULL, CRYPT_NEWKEYSET) = 0 Then
-        hResult = Err.LastDllError
-        sApiSource = "CryptAcquireContext"
-        GoTo QH
+    If CryptAcquireContext(hProv, 0, 0, PROV_RSA_FULL, 0) = 0 Then
+        If CryptAcquireContext(hProv, 0, 0, PROV_RSA_FULL, CRYPT_NEWKEYSET) = 0 Then
+            hResult = Err.LastDllError
+            sApiSource = "CryptAcquireContext"
+            GoTo QH
+        End If
     End If
     If CryptGenKey(hProv, AT_SIGNATURE, RSA1024BIT_KEY Or CRYPT_EXPORTABLE, hKey) = 0 Then
         GoTo QH

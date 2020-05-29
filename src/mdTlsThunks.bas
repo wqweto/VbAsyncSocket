@@ -752,10 +752,13 @@ EH:
     Resume QH
 End Function
 
-Public Function TlsGetLastError(uCtx As UcsTlsContext) As String
+Public Function TlsGetLastError(uCtx As UcsTlsContext, Optional LastErrNumber As Long) As String
     TlsGetLastError = uCtx.LastError
     If uCtx.LastAlertCode <> -1 Then
         TlsGetLastError = IIf(LenB(TlsGetLastError) <> 0, TlsGetLastError & ". ", vbNullString) & Replace(STR_FORMAT_ALERT, "%1", TlsGetLastAlert(uCtx))
+    End If
+    If uCtx.LastAlertCode <> uscTlsAlertCloseNotify Or LenB(uCtx.LastError) <> 0 Then
+        LastErrNumber = vbObjectError
     End If
 End Function
 
