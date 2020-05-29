@@ -14,6 +14,8 @@ Attribute VB_Exposed = False
 Option Explicit
 Private Const MODULE_NAME As String = "cRequestHandler"
 
+#Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
+
 '=========================================================================
 ' API
 '=========================================================================
