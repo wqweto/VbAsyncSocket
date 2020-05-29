@@ -6,19 +6,25 @@ Simple and thin WinSock API wrappers for VB6 loosly based on the original [`CAsy
 
 Base class `cAsyncSocket` wraps OS non-blocking sockets that can be used to implement various network components in VB6 -- clients and servers -- and supports both async and blocking network communications.
 
-Additionally there is a source-compatible `cTlsSocket` class for TLS 1.3 and (legacy) TLS 1.2 client-side support and server-side (TLS 1.3 only) support of transparent transport layer encryption. The crypto implementation has no dependency on external libraries like OS provided SSPI and/or openssl but optionally can leverage libsodium primitives for performance reasons (for server-side implementations).
+Additionally there is a source-compatible `cTlsSocket` class for transparent TLS transport layer encryption with a couple of crypto backend implementations:
+
+1. Pure VB6 backend with ASM crypto thunks implementation for TLS 1.3 and (legacy) TLS 1.2 client-side and server-side (TLS 1.3 only) support with no dependency on external libraries (like openssl)
+
+2. Native client-side and server-side TLS support using OS provided SSPI library for all available protocol versions.
+
+The VB6 with thunks backend optionally can leverage libsodium primitives for performance reasons (e.g. server-side implementations).
 
 ### Usage
 
-Start by including `src\cAsyncSocket.cls` in your project to have a convenient wrapper to most WinSock API functions.
+Start by including `src\cAsyncSocket.cls` in your project to have a convenient wrapper of most WinSock API functions.
 
-Optionally you can add `src\cTlsSocket.cls` and `src\mdTlsCrypto.bas` to your project for TLS 1.3 secured connections.
+Optionally you can add `src\cTlsSocket.cls` and `src\mdTlsThunks.bas` pair of source files to your project for TLS 1.3 secured connections using VB6 with thunks backend or add `src\cTlsSocket.cls` and `src\mdTlsNative.bas` pair of source files for an alternative backend using native OS provided SSPI library.
 
 ### Sample SMTP with STARTTLS
 
-A working sample with error checking omitted for brevity for accessing smtp.gmail.com over port 587.
+Here is a working sample with error checking omitted for brevity for accessing smtp.gmail.com over port 587.
 
-At first the communication goes over unencrypted plain-text socket, then later its switched to TLS secured one before issuing the final `QUIT` command.
+At first the communication goes over unencrypted plain-text socket, then later it is switched to TLS secured one before issuing the final `QUIT` command.
 
     With New cTlsSocket
         .SyncConnect "smtp.gmail.com", 587, UseTls:=False
@@ -33,7 +39,7 @@ At first the communication goes over unencrypted plain-text socket, then later i
         Debug.Print .SyncReceiveText();
     End With
 
-Produces debug output in `Immediate Window` similar to this:
+Which produces debug output in `Immediate Window` similar to this:
     
     220 smtp.gmail.com ESMTP r3sm6722824lfm.52 - gsmtp
     250 smtp.gmail.com at your service
