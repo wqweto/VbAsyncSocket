@@ -1250,9 +1250,11 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
                 RaiseEvent OnConnect
                 RaiseEvent AfterNotify(ucsSfdConnect)
             End If
-            If pvOnBeforeNotify(ucsSfdWrite) Then
-                RaiseEvent OnSend
-                RaiseEvent AfterNotify(ucsSfdWrite)
+            If Not m_bIsServer Then
+                If pvOnBeforeNotify(ucsSfdWrite) Then
+                    RaiseEvent OnSend
+                    RaiseEvent AfterNotify(ucsSfdWrite)
+                End If
             End If
             baRecv = vbNullString
         End If
