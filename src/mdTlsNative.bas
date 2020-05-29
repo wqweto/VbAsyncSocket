@@ -697,10 +697,9 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
     With uCtx
         If lSize = 0 Then
             '--- flush
-            baOutput = .SendBuffer
-            lOutputPos = .SendPos
-            Erase .SendBuffer
-            .SendPos = 0
+            If .SendPos > 0 Then
+                lOutputPos = pvWriteBuffer(baOutput, lOutputPos, VarPtr(.SendBuffer(0)), .SendPos)
+            End If
             '--- success
             TlsSend = True
             Exit Function

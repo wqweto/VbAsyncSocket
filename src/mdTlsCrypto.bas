@@ -653,10 +653,12 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
         End If
         If lSize = 0 Then
             '--- flush
-            pvArraySwap .SendBuffer, .SendPos, baOutput, lOutputPos
-            If VarPtr(lOutputPos) <> VarPtr(.SendPos) Then
-                Erase .SendBuffer
-                .SendPos = 0
+            If .SendPos > 0 Then
+                If lOutputPos = 0 Then
+                    pvArraySwap .SendBuffer, .SendPos, baOutput, lOutputPos
+                Else
+                    lOutputPos = pvWriteBuffer(baOutput, lOutputPos, VarPtr(.SendBuffer(0)), .SendPos)
+                End If
             End If
             '--- success
             TlsSend = True
@@ -691,12 +693,14 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
         If lSize < 0 Then
             lSize = pvArraySize(baInput)
         End If
-        If lSize = 0 And lPos = 0 Then
+        If lSize = 0 Then
             '--- flush
-            pvArraySwap .DecrBuffer, .DecrPos, baPlainText, lPos
-            If VarPtr(lPos) <> VarPtr(.DecrPos) Then
-                Erase .DecrBuffer
-                .DecrPos = 0
+            If .DecrPos > 0 Then
+                If lPos = 0 Then
+                    pvArraySwap .DecrBuffer, .DecrPos, baPlainText, lPos
+                Else
+                    lPos = pvWriteBuffer(baPlainText, lPos, VarPtr(.DecrBuffer(0)), .DecrPos)
+                End If
             End If
             '--- success
             TlsReceive = True
