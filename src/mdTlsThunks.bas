@@ -1,4 +1,4 @@
-Attribute VB_Name = "mdTlsCrypto"
+Attribute VB_Name = "mdTlsThunks"
 '=========================================================================
 '
 ' VbAsyncSocket Project (c) 2018-2020 by wqweto@gmail.com
@@ -333,7 +333,7 @@ Public Enum UcsTlsLocalFeaturesEnum '--- bitmask
     ucsTlsSupportAll = ucsTlsSupportTls12 Or ucsTlsSupportTls13
 End Enum
 
-Public Enum UcsTlsStatesEnum '--- sync w/ UcsTlsStatesEnum
+Public Enum UcsTlsStatesEnum '--- sync w/ STR_VL_STATE
     ucsTlsStateNew = 0
     ucsTlsStateClosed = 1
     ucsTlsStateHandshakeStart = 2
@@ -4529,14 +4529,14 @@ End Function
 Private Function pvCallCollectionItem(ByVal oCol As Collection, Index As Variant, Optional RetVal As Variant) As Long
     Const IDX_COLLECTION_ITEM As Long = 7
     
-    pvPatchMethodTrampoline AddressOf mdTlsCrypto.pvCallCollectionItem, IDX_COLLECTION_ITEM
+    pvPatchMethodTrampoline AddressOf mdTlsThunks.pvCallCollectionItem, IDX_COLLECTION_ITEM
     pvCallCollectionItem = pvCallCollectionItem(oCol, Index, RetVal)
 End Function
 
 Private Function pvCallCollectionRemove(ByVal oCol As Collection, Index As Variant) As Long
     Const IDX_COLLECTION_REMOVE As Long = 10
     
-    pvPatchMethodTrampoline AddressOf mdTlsCrypto.pvCallCollectionRemove, IDX_COLLECTION_REMOVE
+    pvPatchMethodTrampoline AddressOf mdTlsThunks.pvCallCollectionRemove, IDX_COLLECTION_REMOVE
     pvCallCollectionRemove = pvCallCollectionRemove(oCol, Index)
 End Function
 
