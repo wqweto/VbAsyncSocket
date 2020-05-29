@@ -113,7 +113,8 @@ Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
 '--- security
 Private Declare Function AcquireCredentialsHandle Lib "security" Alias "AcquireCredentialsHandleA" (ByVal pszPrincipal As Long, ByVal pszPackage As String, ByVal fCredentialUse As Long, ByVal pvLogonId As Long, pAuthData As Any, ByVal pGetKeyFn As Long, ByVal pvGetKeyArgument As Long, phCredential As Currency, ByVal ptsExpiry As Long) As Long
 Private Declare Function FreeCredentialsHandle Lib "security" (phContext As Currency) As Long
-Private Declare Function InitializeSecurityContext Lib "security" Alias "InitializeSecurityContextA" (phCredential As Currency, phContext As Any, pszTargetName As Any, ByVal fContextReq As Long, ByVal Reserved1 As Long, ByVal TargetDataRep As Long, pInput As Any, ByVal Reserved2 As Long, phNewContext As Currency, pOutput As Any, pfContextAttr As Long, ByVal ptsExpiry As Long) As Long
+Private Declare Function AcceptSecurityContext Lib "security" (phCredential As Currency, ByVal phContext As Long, pInput As Any, ByVal fContextReq As Long, ByVal TargetDataRep As Long, phNewContext As Currency, pOutput As Any, pfContextAttr As Long, ByVal ptsExpiry As Long) As Long
+Private Declare Function InitializeSecurityContext Lib "security" Alias "InitializeSecurityContextA" (phCredential As Currency, ByVal phContext As Long, pszTargetName As Any, ByVal fContextReq As Long, ByVal Reserved1 As Long, ByVal TargetDataRep As Long, pInput As Any, ByVal Reserved2 As Long, phNewContext As Currency, pOutput As Any, pfContextAttr As Long, ByVal ptsExpiry As Long) As Long
 Private Declare Function DeleteSecurityContext Lib "security" (phContext As Currency) As Long
 Private Declare Function FreeContextBuffer Lib "security" (ByVal pvContextBuffer As Long) As Long
 Private Declare Function QueryContextAttributes Lib "security" Alias "QueryContextAttributesA" (phContext As Currency, ByVal ulAttribute As Long, pBuffer As Any) As Long
@@ -375,11 +376,9 @@ Public Function TlsInitClient( _
     uCtx = uEmpty
     '--- success
     TlsInitClient = True
-QH:
     Exit Function
 EH:
     pvTlsSetLastError uCtx, Err.Number, Err.Source, Err.Description
-    Resume QH
 End Function
 
 Public Function TlsInitServer( _
@@ -387,7 +386,24 @@ Public Function TlsInitServer( _
             Optional RemoteHostName As String, _
             Optional Certificates As Collection, _
             Optional PrivateKey As Collection) As Boolean
+    Dim uEmpty          As UcsTlsContext
     
+    On Error GoTo EH
+    With uEmpty
+        pvTlsSetLastError uEmpty
+        .IsServer = True
+        .State = ucsTlsStateExpectClientHello
+        .RemoteHostName = RemoteHostName
+        .LocalFeatures = ucsTlsSupportAll
+        Set .LocalCertificates = Certificates
+        Set .LocalPrivateKey = PrivateKey
+    End With
+    uCtx = uEmpty
+    '--- success
+    TlsInitServer = True
+    Exit Function
+EH:
+    pvTlsSetLastError uCtx, Err.Number, Err.Source, Err.Description
 End Function
 
 Public Function TlsClose(uCtx As UcsTlsContext)
@@ -430,6 +446,9 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
         End If
         pvTlsSetLastError uCtx
         If .State = ucsTlsStateHandshakeStart Then
+            .State = ucsTlsStateExpectServerHello
+        End If
+        If .ContextReq = 0 Then
             lContextReq = lContextReq Or ISC_REQ_REPLAY_DETECT              ' Detect replayed messages that have been encoded by using the EncryptMessage or MakeSignature functions.
             lContextReq = lContextReq Or ISC_REQ_SEQUENCE_DETECT            ' Detect messages received out of sequence.
             lContextReq = lContextReq Or ISC_REQ_CONFIDENTIALITY            ' Encrypt messages by using the EncryptMessage function.
@@ -441,13 +460,17 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
 '            lContextReq = lContextReq Or ISC_REQ_INTEGRITY                  ' Sign messages and verify signatures by using the EncryptMessage and MakeSignature functions.
 '            lContextReq = lContextReq Or ISC_REQ_MANUAL_CRED_VALIDATION     ' Schannel must not authenticate the server automatically.
             .ContextReq = lContextReq
-            .State = ucsTlsStateExpectServerHello
         End If
         If lSize < 0 Then
             lSize = pvArraySize(baInput)
         End If
         If lSize > 0 Then
             .RecvPos = pvWriteBuffer(.RecvBuffer, .RecvPos, VarPtr(baInput(0)), lSize)
+        End If
+        If lSize = 7 Then
+            If baInput(0) = TLS_CONTENT_TYPE_ALERT Then
+                .LastAlertCode = baInput(6)
+            End If
         End If
 RetryCredentials:
         If .hTlsCredentials = 0 Then
@@ -464,6 +487,7 @@ RetryCredentials:
                         aCred(uCred.cCreds) = CertDuplicateCertificateContext(pCertContext)
                         uCred.cCreds = uCred.cCreds + 1
                         If Not .IsServer Then
+                            Call CertFreeCertificateContext(pCertContext)
                             Exit Do
                         End If
                     Loop
@@ -479,26 +503,21 @@ RetryCredentials:
                 Call CertFreeCertificateContext(aCred(lIdx))
             Next
         End If
-        If lSize = 7 Then
-            If baInput(0) = TLS_CONTENT_TYPE_ALERT Then
-                .LastAlertCode = baInput(6)
-            End If
-        End If
         If .hTlsContext = 0 Then
             pvInitSecDesc .InDesc, 3, .InBuffers
             pvInitSecDesc .OutDesc, 3, .OutBuffers
-            '--- note: on initial loop don't pass [in] phContext and [in] pInput
-            hResult = InitializeSecurityContext(.hTlsCredentials, ByVal 0, ByVal .RemoteHostName, .ContextReq, 0, _
-                SECURITY_NATIVE_DREP, ByVal 0, 0, .hTlsContext, .OutDesc, lContextAttr, 0)
+        End If
+        If .RecvPos > 0 Then
+            lPtr = VarPtr(.RecvBuffer(0))
         Else
-            If .RecvPos > 0 Then
-                lPtr = VarPtr(.RecvBuffer(0))
-            Else
-                lPtr = VarPtr(.RecvPos)
-            End If
-            pvInitSecBuffer .InBuffers(0), SECBUFFER_TOKEN, .RecvPos, lPtr
-            '--- note: pass .hTlsContext for [in] phContext and .InDesc for [in] pInput
-            hResult = InitializeSecurityContext(.hTlsCredentials, .hTlsContext, ByVal .RemoteHostName, .ContextReq, 0, _
+            lPtr = VarPtr(.RecvPos)
+        End If
+        pvInitSecBuffer .InBuffers(0), SECBUFFER_TOKEN, .RecvPos, lPtr
+        If .IsServer Then
+            hResult = AcceptSecurityContext(.hTlsCredentials, IIf(.hTlsContext <> 0, VarPtr(.hTlsContext), 0), .InDesc, .ContextReq, _
+                SECURITY_NATIVE_DREP, .hTlsContext, .OutDesc, lContextAttr, 0)
+        Else
+            hResult = InitializeSecurityContext(.hTlsCredentials, IIf(.hTlsContext <> 0, VarPtr(.hTlsContext), 0), ByVal .RemoteHostName, .ContextReq, 0, _
                 SECURITY_NATIVE_DREP, .InDesc, 0, .hTlsContext, .OutDesc, lContextAttr, 0)
         End If
         If hResult = SEC_E_INCOMPLETE_MESSAGE Then
@@ -531,6 +550,25 @@ RetryCredentials:
                 End With
                 pvInitSecBuffer .InBuffers(lIdx), SECBUFFER_EMPTY
             Next
+            For lIdx = 0 To UBound(.OutBuffers)
+                With .OutBuffers(lIdx)
+                    If .cbBuffer > 0 Then
+                        Select Case .BufferType
+                        Case SECBUFFER_TOKEN
+                            lOutputPos = pvWriteBuffer(baOutput, lOutputPos, .pvBuffer, .cbBuffer)
+                        Case SECBUFFER_ALERT
+                            #If ImplUseDebugLog Then
+                                DebugLog MODULE_NAME, FUNC_NAME, "OutBuffers, SECBUFFER_ALERT:" & vbCrLf & DesignDumpMemory(.pvBuffer, .cbBuffer), vbLogEventTypeWarning
+                            #End If
+                        End Select
+                        If .pvBuffer <> 0 Then
+                            Call FreeContextBuffer(.pvBuffer)
+                            Debug.Assert Err.LastDllError = 0
+                        End If
+                    End If
+                End With
+                pvInitSecBuffer .OutBuffers(lIdx), SECBUFFER_EMPTY
+            Next
             Select Case hResult
             Case SEC_E_OK
                 If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_STREAM_SIZES, .TlsSizes) <> 0 Then
@@ -538,12 +576,11 @@ RetryCredentials:
                 End If
                 pvInitSecDesc .InDesc, .TlsSizes.cBuffers, .InBuffers
                 pvInitSecDesc .OutDesc, .TlsSizes.cBuffers, .OutBuffers
-                If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_REMOTE_CERT_CONTEXT, pCertContext) <> 0 Then
-                    GoTo QH
-                End If
-                Call CopyMemory(uCertContext, ByVal pCertContext, Len(uCertContext))
-                If Not pvTlsExportFromCertStore(uCertContext.hCertStore, .RemoteCertificates) Then
-                    GoTo QH
+                If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_REMOTE_CERT_CONTEXT, pCertContext) = 0 Then
+                    Call CopyMemory(uCertContext, ByVal pCertContext, Len(uCertContext))
+                    If Not pvTlsExportFromCertStore(uCertContext.hCertStore, .RemoteCertificates) Then
+                        GoTo QH
+                    End If
                 End If
                 .State = ucsTlsStatePostHandshake
             Case SEC_I_CONTINUE_NEEDED
@@ -580,25 +617,6 @@ RetryCredentials:
                 GoTo QH
             End Select
         End If
-        For lIdx = 0 To UBound(.OutBuffers)
-            With .OutBuffers(lIdx)
-                If .cbBuffer > 0 Then
-                    Select Case .BufferType
-                    Case SECBUFFER_TOKEN
-                        lOutputPos = pvWriteBuffer(baOutput, lOutputPos, .pvBuffer, .cbBuffer)
-                    Case SECBUFFER_ALERT
-                        #If ImplUseDebugLog Then
-                            DebugLog MODULE_NAME, FUNC_NAME, "OutBuffers, SECBUFFER_ALERT:" & vbCrLf & DesignDumpMemory(.pvBuffer, .cbBuffer), vbLogEventTypeWarning
-                        #End If
-                    End Select
-                    If .pvBuffer <> 0 Then
-                        Call FreeContextBuffer(.pvBuffer)
-                        Debug.Assert Err.LastDllError = 0
-                        .pvBuffer = 0
-                    End If
-                End If
-            End With
-        Next
     End With
     '--- success
     TlsHandshake = True
@@ -704,6 +722,7 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
     Dim uOutDesc        As ApiSecBufferDesc
     Dim uOutBuffers()   As ApiSecBuffer
     Dim lPos            As Long
+    Dim lIdx            As Long
     
     On Error GoTo EH
     With uCtx
@@ -733,6 +752,9 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
             pvInitSecBuffer uOutBuffers(0), SECBUFFER_STREAM_HEADER, .TlsSizes.cbHeader, VarPtr(baOutput(lBufPos))
             pvInitSecBuffer uOutBuffers(1), SECBUFFER_DATA, lBufSize, VarPtr(baOutput(lBufPos + .TlsSizes.cbHeader))
             pvInitSecBuffer uOutBuffers(2), SECBUFFER_STREAM_TRAILER, .TlsSizes.cbTrailer, VarPtr(baOutput(lBufPos + .TlsSizes.cbHeader + lBufSize))
+            For lIdx = 3 To UBound(uOutBuffers)
+                pvInitSecBuffer uOutBuffers(lIdx), SECBUFFER_EMPTY
+            Next
             hResult = EncryptMessage(.hTlsContext, 0, uOutDesc, 0)
             If hResult < 0 Then
                 pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "EncryptMessage"
@@ -946,10 +968,6 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
                 sApiSource = "NCryptImportKey"
                 GoTo QH
             End If
-            Call NCryptFreeObject(hNKey)
-            hNKey = 0
-            Call NCryptFreeObject(hNProv)
-            hNProv = 0
             uProvInfo.pwszContainerName = StrPtr(sKeyName)
             uProvInfo.pwszProvName = StrPtr(sProvName)
         Case Else

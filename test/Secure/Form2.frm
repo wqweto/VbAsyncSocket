@@ -153,20 +153,20 @@ Private Sub Form_Load()
     End If
     Set m_oRootCa = New cTlsSocket
     m_oRootCa.PkiPemImportRootCaCertStore App.Path & "\ca-bundle.pem"
-'    Set m_oServerSocket = New cTlsSocket
-'    ChDir App.Path
-'    If Not m_oServerSocket.InitServerTls(PemFiles:=PEM_FILES, PfxFile:=PFX_FILE, Password:=PFX_PASSWORD) Then
-'        MsgBox "Error starting TLS server on localhost:10443" & vbCrLf & vbCrLf & "No private key found!", vbExclamation
-'        GoTo QH
-'    End If
-'    If Not m_oServerSocket.Create(SocketPort:=10443, SocketAddress:="localhost") Then
-'        GoTo QH
-'    End If
-'    If Not m_oServerSocket.Listen() Then
-'        GoTo QH
-'    End If
-'    Set m_cRequestHandlers = New Collection
-'    m_oServerSocket.Socket.GetSockName sAddr, lPort
+    Set m_oServerSocket = New cTlsSocket
+    ChDir App.Path
+    If Not m_oServerSocket.InitServerTls(PemFiles:=PEM_FILES, PfxFile:=PFX_FILE, Password:=PFX_PASSWORD) Then
+        MsgBox "Error starting TLS server on localhost:10443" & vbCrLf & vbCrLf & "No private key found!", vbExclamation
+        GoTo QH
+    End If
+    If Not m_oServerSocket.Create(SocketPort:=10443, SocketAddress:="localhost") Then
+        GoTo QH
+    End If
+    If Not m_oServerSocket.Listen() Then
+        GoTo QH
+    End If
+    Set m_cRequestHandlers = New Collection
+    m_oServerSocket.Socket.GetSockName sAddr, lPort
     #If ImplUseDebugLog Then
         DebugLog MODULE_NAME, "Form_Load", "Listening on " & sAddr & ":" & lPort
     #End If
