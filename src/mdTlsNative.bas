@@ -30,23 +30,18 @@ Private Const SCHANNEL_CRED_VERSION                     As Long = 4
 Private Const SCH_CRED_MANUAL_CRED_VALIDATION           As Long = 8
 Private Const SCH_CRED_NO_DEFAULT_CREDS                 As Long = &H10
 '-- for InitializeSecurityContext
-'Private Const ISC_REQ_MUTUAL_AUTH                       As Long = &H2
 Private Const ISC_REQ_REPLAY_DETECT                     As Long = &H4
 Private Const ISC_REQ_SEQUENCE_DETECT                   As Long = &H8
 Private Const ISC_REQ_CONFIDENTIALITY                   As Long = &H10
 Private Const ISC_REQ_USE_SUPPLIED_CREDS                As Long = &H80
 Private Const ISC_REQ_ALLOCATE_MEMORY                   As Long = &H100
-'Private Const ISC_REQ_CONNECTION                        As Long = &H800
 Private Const ISC_REQ_EXTENDED_ERROR                    As Long = &H4000
 Private Const ISC_REQ_STREAM                            As Long = &H8000&
-'Private Const ISC_REQ_INTEGRITY                         As Long = &H10000
-'Private Const ISC_REQ_MANUAL_CRED_VALIDATION             As Long = &H80000
 Private Const SECURITY_NATIVE_DREP                      As Long = &H10
 '--- for ApiSecBuffer.BufferType
 Private Const SECBUFFER_EMPTY                           As Long = 0   ' Undefined, replaced by provider
 Private Const SECBUFFER_DATA                            As Long = 1   ' Packet data
 Private Const SECBUFFER_TOKEN                           As Long = 2   ' Security token
-'Private Const SECBUFFER_MISSING                         As Long = 4   ' Missing Data indicator
 Private Const SECBUFFER_EXTRA                           As Long = 5   ' Extra data
 Private Const SECBUFFER_STREAM_TRAILER                  As Long = 6   ' Security Trailer
 Private Const SECBUFFER_STREAM_HEADER                   As Long = 7   ' Security Header
@@ -82,11 +77,10 @@ Private Const CERT_STORE_ADD_USE_EXISTING               As Long = 2
 '--- for CryptAcquireContext
 Private Const PROV_RSA_FULL                             As Long = 1
 Private Const CRYPT_NEWKEYSET                           As Long = &H8
-Private Const CRYPT_DELETEKEYSET                        As Long = &H10
+Private Const CRYPT_MACHINE_KEYSET                      As Long = &H20
 Private Const AT_KEYEXCHANGE                            As Long = 1
 '--- for CertGetCertificateContextProperty
 Private Const CERT_KEY_PROV_INFO_PROP_ID                As Long = 2
-Private Const LNG_FACILITY_WIN32                        As Long = &H80070000
 '--- OIDs
 Private Const szOID_RSA_RSA                             As String = "1.2.840.113549.1.1.1"
 Private Const szOID_ECC_PUBLIC_KEY                      As String = "1.2.840.10045.2.1"
@@ -191,7 +185,6 @@ Private Type BCRYPT_ECCKEY_BLOB
     Buffer(0 To 1000)   As Byte
 End Type
 
-
 Private Type CRYPT_BLOB_DATA
     cbData              As Long
     pbData              As Long
@@ -250,8 +243,11 @@ Private Const STR_FORMAT_ALERT              As String = "%1."
 '--- errors
 Private Const ERR_UNEXPECTED_RESULT         As String = "Unexpected result from %1 (%2)"
 Private Const ERR_CONNECTION_CLOSED         As String = "Connection closed"
+Private Const ERR_UNKNOWN_ECC_PRIVKEY       As String = "Unknown ECC private key (%1)"
+Private Const ERR_UNKNOWN_PUBKEY            As String = "Unknown public key (%1)"
 '--- numeric
 Private Const TLS_CONTENT_TYPE_ALERT        As Long = 21
+Private Const LNG_FACILITY_WIN32            As Long = &H80070000
 
 Public Enum UcsTlsLocalFeaturesEnum '--- bitmask
     ucsTlsSupportTls12 = 2 ^ 0
@@ -443,13 +439,9 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
             .ContextReq = .ContextReq Or ISC_REQ_REPLAY_DETECT              ' Detect replayed messages that have been encoded by using the EncryptMessage or MakeSignature functions.
             .ContextReq = .ContextReq Or ISC_REQ_SEQUENCE_DETECT            ' Detect messages received out of sequence.
             .ContextReq = .ContextReq Or ISC_REQ_CONFIDENTIALITY            ' Encrypt messages by using the EncryptMessage function.
-'            .ContextReq = .ContextReq Or ISC_REQ_USE_SUPPLIED_CREDS         ' Schannel must not attempt to supply credentials for the client automatically.
             .ContextReq = .ContextReq Or ISC_REQ_ALLOCATE_MEMORY            ' The security package allocates output buffers for you. When you have finished using the output buffers, free them by calling the FreeContextBuffer function.
-'            .ContextReq = .ContextReq Or ISC_REQ_CONNECTION                 ' The security context will not handle formatting messages.
             .ContextReq = .ContextReq Or ISC_REQ_EXTENDED_ERROR             ' When errors occur, the remote party will be notified.
             .ContextReq = .ContextReq Or ISC_REQ_STREAM                     ' Support a stream-oriented connection.
-'            .ContextReq = .ContextReq Or ISC_REQ_INTEGRITY                  ' Sign messages and verify signatures by using the EncryptMessage and MakeSignature functions.
-'            .ContextReq = .ContextReq Or ISC_REQ_MANUAL_CRED_VALIDATION     ' Schannel must not authenticate the server automatically.
         End If
         If lSize < 0 Then
             lSize = pvArraySize(baInput)
@@ -483,10 +475,12 @@ RetryCredentials:
                     Loop
                     Call CertCloseStore(hMemStore, 0)
                     uCred.paCred = VarPtr(aCred(0))
-                    .ContextReq = .ContextReq Or ISC_REQ_USE_SUPPLIED_CREDS
+                    .ContextReq = .ContextReq Or ISC_REQ_USE_SUPPLIED_CREDS     ' Schannel must not attempt to supply credentials for the client automatically.
                 End If
             End If
-            If AcquireCredentialsHandle(0, UNISP_NAME, IIf(.IsServer, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND), 0, uCred, 0, 0, .hTlsCredentials, 0) <> 0 Then
+            hResult = AcquireCredentialsHandle(0, UNISP_NAME, IIf(.IsServer, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND), 0, uCred, 0, 0, .hTlsCredentials, 0)
+            If hResult < 0 Then
+                pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "AcquireCredentialsHandle", , .LastAlertCode
                 GoTo QH
             End If
             For lIdx = 0 To uCred.cCreds - 1
@@ -900,6 +894,7 @@ End Function
 
 Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collection, hMemStore As Long) As Boolean
     Const FUNC_NAME     As String = "pvTlsImportToCertStore"
+    Const DEF_KEY_NAME  As String = "VbAsyncSocketKey"
     Dim hCertStore      As Long
     Dim lIdx            As Long
     Dim baCert()        As Byte
@@ -938,6 +933,7 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
         End If
     Next
     If pCertContext <> 0 And SearchCollection(cPrivKey, 1, RetVal:=baPrivKey) Then
+        sKeyName = DEF_KEY_NAME
         If Not pvAsn1DecodePrivateKey(baPrivKey, uPrivKeyInfo) Then
             GoTo QH
         End If
@@ -946,18 +942,21 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
         Call CopyMemory(uPublicKeyInfo, ByVal lPtr, Len(uPublicKeyInfo))
         Select Case pvToString(uPublicKeyInfo.Algorithm.pszObjId)
         Case szOID_RSA_RSA
-            Call CryptAcquireContext(0, 0, 0, PROV_RSA_FULL, CRYPT_DELETEKEYSET)
-            If CryptAcquireContext(hProv, 0, 0, PROV_RSA_FULL, CRYPT_NEWKEYSET) = 0 Then
-                hResult = Err.LastDllError
-                sApiSource = "CryptAcquireContext"
-                GoTo QH
+            If CryptAcquireContext(hProv, StrPtr(sKeyName), 0, PROV_RSA_FULL, CRYPT_MACHINE_KEYSET) = 0 Then
+                If CryptAcquireContext(hProv, StrPtr(sKeyName), 0, PROV_RSA_FULL, CRYPT_NEWKEYSET Or CRYPT_MACHINE_KEYSET) = 0 Then
+                    hResult = Err.LastDllError
+                    sApiSource = "CryptAcquireContext"
+                    GoTo QH
+                End If
             End If
-            If CryptImportKey(hProv, baPrivKey(0), UBound(baPrivKey) + 1, 0, 0, hKey) = 0 Then
+            If CryptImportKey(hProv, uPrivKeyInfo.KeyBlob(0), UBound(uPrivKeyInfo.KeyBlob) + 1, 0, 0, hKey) = 0 Then
                 hResult = Err.LastDllError
                 sApiSource = "CryptImportKey"
                 GoTo QH
             End If
+            uProvInfo.pwszContainerName = StrPtr(sKeyName)
             uProvInfo.dwProvType = PROV_RSA_FULL
+            uProvInfo.dwFlags = CRYPT_MACHINE_KEYSET
             uProvInfo.dwKeySpec = AT_KEYEXCHANGE
         Case szOID_ECC_PUBLIC_KEY
             Select Case uPrivKeyInfo.AlgoObjId
@@ -968,7 +967,7 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
             Case szOID_ECC_CURVE_P521
                 uEccBlob.dwMagic = BCRYPT_ECDSA_PRIVATE_P521_MAGIC
             Case Else
-                Err.Raise vbObjectError, , Replace("Unknown private key (%1)", "%1", uPrivKeyInfo.AlgoObjId)
+                Err.Raise vbObjectError, , Replace(ERR_UNKNOWN_ECC_PRIVKEY, "%1", uPrivKeyInfo.AlgoObjId)
             End Select
             lBlobSize = uPublicKeyInfo.PublicKey.cbData - 1
             uEccBlob.cbKey = UBound(uPrivKeyInfo.KeyBlob) + 1
@@ -976,7 +975,6 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
             Call CopyMemory(uEccBlob.Buffer(lBlobSize), uPrivKeyInfo.KeyBlob(0), uEccBlob.cbKey)
             lBlobSize = 8 + lBlobSize + uEccBlob.cbKey
             '--- import key
-            sKeyName = "VbAsyncSocketKey"
             sProvName = MS_KEY_STORAGE_PROVIDER
             hResult = NCryptOpenStorageProvider(hNProv, StrPtr(sProvName), 0)
             If hResult < 0 Then
@@ -993,7 +991,7 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
             uProvInfo.pwszContainerName = StrPtr(sKeyName)
             uProvInfo.pwszProvName = StrPtr(sProvName)
         Case Else
-            Err.Raise vbObjectError, , Replace("Unknown public key (%1)", "%1", pvToString(uPublicKeyInfo.Algorithm.pszObjId))
+            Err.Raise vbObjectError, , Replace(ERR_UNKNOWN_PUBKEY, "%1", pvToString(uPublicKeyInfo.Algorithm.pszObjId))
         End Select
         If CertSetCertificateContextProperty(pCertContext, CERT_KEY_PROV_INFO_PROP_ID, 0, uProvInfo) = 0 Then
             hResult = Err.LastDllError
