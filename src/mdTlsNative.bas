@@ -129,7 +129,6 @@ Private Declare Function CertSetCertificateContextProperty Lib "crypt32" (ByVal 
 Private Declare Function CertDuplicateCertificateContext Lib "crypt32" (ByVal pCertContext As Long) As Long
 Private Declare Function CertFreeCertificateContext Lib "crypt32" (ByVal pCertContext As Long) As Long
 Private Declare Function CertEnumCertificatesInStore Lib "crypt32" (ByVal hCertStore As Long, ByVal pPrevCertContext As Long) As Long
-Private Declare Function CertGetIssuerCertificateFromStore Lib "crypt32" (ByVal hCertStore As Long, ByVal pSubjectContext As Long, ByVal pPrevIssuerContext As Long, pdwFlags As Long) As Long
 '--- advapi32
 Private Declare Function CryptAcquireContext Lib "advapi32" Alias "CryptAcquireContextW" (phProv As Long, ByVal pszContainer As Long, ByVal pszProvider As Long, ByVal dwProvType As Long, ByVal dwFlags As Long) As Long
 Private Declare Function CryptReleaseContext Lib "advapi32" (ByVal hProv As Long, ByVal dwFlags As Long) As Long
@@ -417,10 +416,11 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
     Dim hMemStore       As Long
     Dim pCertContext    As Long
     Dim aCred(0 To 100) As Long
-    Dim uIssuerListInfo As SecPkgContext_IssuerListInfoEx
+    Dim uIssuerInfo     As SecPkgContext_IssuerListInfoEx
     Dim uIssuerList()   As CRYPT_BLOB_DATA
     Dim cIssuers        As Collection
     Dim baCaDn()        As Byte
+    Dim uCertContext    As CERT_CONTEXT
     
     On Error GoTo EH
     With uCtx
@@ -479,6 +479,11 @@ RetryCredentials:
                 Call CertFreeCertificateContext(aCred(lIdx))
             Next
         End If
+        If lSize = 7 Then
+            If baInput(0) = TLS_CONTENT_TYPE_ALERT Then
+                .LastAlertCode = baInput(6)
+            End If
+        End If
         If .hTlsContext = 0 Then
             pvInitSecDesc .InDesc, 3, .InBuffers
             pvInitSecDesc .OutDesc, 3, .OutBuffers
@@ -526,11 +531,6 @@ RetryCredentials:
                 End With
                 pvInitSecBuffer .InBuffers(lIdx), SECBUFFER_EMPTY
             Next
-            If lSize = 7 Then
-                If baInput(0) = TLS_CONTENT_TYPE_ALERT Then
-                    .LastAlertCode = baInput(6)
-                End If
-            End If
             Select Case hResult
             Case SEC_E_OK
                 If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_STREAM_SIZES, .TlsSizes) <> 0 Then
@@ -541,8 +541,8 @@ RetryCredentials:
                 If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_REMOTE_CERT_CONTEXT, pCertContext) <> 0 Then
                     GoTo QH
                 End If
-                Set .RemoteCertificates = New Collection
-                If Not pvTlsExportCertificatesFromContext(pCertContext, .RemoteCertificates) Then
+                Call CopyMemory(uCertContext, ByVal pCertContext, Len(uCertContext))
+                If Not pvTlsExportFromCertStore(uCertContext.hCertStore, .RemoteCertificates) Then
                     GoTo QH
                 End If
                 .State = ucsTlsStatePostHandshake
@@ -550,12 +550,12 @@ RetryCredentials:
                 '--- do nothing
             Case SEC_I_INCOMPLETE_CREDENTIALS
                 If .OnClientCertificate <> 0 Then
-                    If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_ISSUER_LIST_EX, uIssuerListInfo) <> 0 Then
+                    If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_ISSUER_LIST_EX, uIssuerInfo) <> 0 Then
                         GoTo QH
                     End If
-                    If uIssuerListInfo.cIssuers > 0 Then
-                        ReDim uIssuerList(0 To uIssuerListInfo.cIssuers - 1) As CRYPT_BLOB_DATA
-                        Call CopyMemory(uIssuerList(0), ByVal uIssuerListInfo.aIssuers, uIssuerListInfo.cIssuers * Len(uIssuerList(0)))
+                    If uIssuerInfo.cIssuers > 0 Then
+                        ReDim uIssuerList(0 To uIssuerInfo.cIssuers - 1) As CRYPT_BLOB_DATA
+                        Call CopyMemory(uIssuerList(0), ByVal uIssuerInfo.aIssuers, uIssuerInfo.cIssuers * Len(uIssuerList(0)))
                         Set cIssuers = New Collection
                         For lIdx = 0 To UBound(uIssuerList)
                             pvWriteBuffer baCaDn, 0, uIssuerList(lIdx).pbData, uIssuerList(lIdx).cbData
@@ -989,32 +989,26 @@ QH:
     End If
 End Function
 
-Private Function pvTlsExportCertificatesFromContext(ByVal pCertContext As Long, cCerts As Collection) As Boolean
-    Const FUNC_NAME     As String = "pvTlsExportCertificatesFromContext"
-    Dim uContext        As CERT_CONTEXT
-    Dim hCertStore      As Long
+Private Function pvTlsExportFromCertStore(ByVal hCertStore As Long, cCerts As Collection) As Boolean
+    Const FUNC_NAME     As String = "pvTlsExportFromCertStore"
+    Dim uCertContext        As CERT_CONTEXT
     Dim baCert()        As Byte
-    Dim pCurrentCert    As Long
-    Dim pIssuerCert     As Long
-    Dim dwFlags         As Long
-    
-    pCurrentCert = pCertContext
-    Do While pCurrentCert <> 0
-        Call CopyMemory(uContext, ByVal pCurrentCert, Len(uContext))
-        If hCertStore = 0 Then
-            hCertStore = uContext.hCertStore
+    Dim pCertContext    As Long
+
+    '--- export server X.509 certificates from certificate store
+    Set cCerts = New Collection
+    Do
+        pCertContext = CertEnumCertificatesInStore(hCertStore, pCertContext)
+        If pCertContext = 0 Then
+            Exit Do
         End If
-        pvWriteBuffer baCert, 0, uContext.pbCertEncoded, uContext.cbCertEncoded
-        pvArrayReallocate baCert, uContext.cbCertEncoded, MODULE_NAME & "." & FUNC_NAME
+        Call CopyMemory(uCertContext, ByVal pCertContext, Len(uCertContext))
+        pvWriteBuffer baCert, 0, uCertContext.pbCertEncoded, uCertContext.cbCertEncoded
+        pvArrayReallocate baCert, uCertContext.cbCertEncoded, MODULE_NAME & "." & FUNC_NAME
         cCerts.Add baCert
-        pIssuerCert = CertGetIssuerCertificateFromStore(hCertStore, pCurrentCert, 0, dwFlags)
-        If pCurrentCert <> pCertContext Then
-            Call CertFreeCertificateContext(pCurrentCert)
-        End If
-        pCurrentCert = pIssuerCert
     Loop
     '--- success
-    pvTlsExportCertificatesFromContext = True
+    pvTlsExportFromCertStore = True
 End Function
 
 Private Function pvAsn1DecodePrivateKey(baPrivKey() As Byte, uRetVal As UcsKeyInfo) As Boolean
