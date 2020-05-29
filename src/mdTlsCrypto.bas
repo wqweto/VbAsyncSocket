@@ -170,7 +170,7 @@ Private Const LNG_AESGCM_IVSZ           As Long = 12
 Private Const LNG_AESGCM_TAGSZ          As Long = 16
 Private Const LNG_LIBSODIUM_SHA512_CONTEXTSZ As Long = 64 + 16 + 128
 Private Const LNG_OUT_OF_MEMORY         As Long = 8
-Private Const STR_VL_ALERTS                             As String = "0|Close notify|10|Unexpected message|20|Bad record mac|40|Handshake failure|42|Bad certificate|44|Certificate revoked|45|Certificate expired|46|Certificate unknown|47|Illegal parameter|48|Unknown certificate authority|50|Decode error|51|Decrypt error|70|Protocol version|80|Internal error|90|User canceled|109|Missing extension|112|Unrecognized name|116|Certificate required|120|No application protocol"
+Private Const STR_VL_ALERTS                             As String = "0|Close notify|10|Unexpected message|20|Bad record mac|40|Handshake failure|42|Bad certificate|43|Unsupported certificate|44|Certificate revoked|45|Certificate expired|46|Certificate unknown|47|Illegal parameter|48|Unknown certificate authority|50|Decode error|51|Decrypt error|70|Protocol version|80|Internal error|90|User canceled|109|Missing extension|112|Unrecognized name|116|Certificate required|120|No application protocol"
 Private Const STR_VL_STATE                              As String = "0|New|1|Closed|2|HandshakeStart|3|ExpectServerHello|4|ExpectExtensions|5|ExpectServerFinished|6|ExpectClientHello|7|ExpectClientFinished|8|PostHandshake|9|Shutdown"
 Private Const STR_VL_HANDSHAKE_TYPE                     As String = "1|client_hello|2|server_hello|4|new_session_ticket|5|end_of_early_data|8|encrypted_extensions|11|certificate|12|server_key_exchange|13|certificate_request|14|server_hello_done|15|certificate_verify|16|client_key_exchange|20|finished|24|key_update|25|compressed_certificate|254|message_hash"
 Private Const STR_VL_EXTENSION_TYPE                     As String = "0|server_name|1|max_fragment_length|2|client_certificate_url|3|trusted_ca_keys|4|truncated_hmac|5|status_request|6|user_mapping|7|client_authz|8|server_authz|9|cert_type|10|supported_groups|11|ec_point_formats|12|srp|13|signature_algorithms|14|use_srtp|15|heartbeat|16|application_layer_protocol_negotiation|17|status_request_v2|18|signed_certificate_timestamp|19|client_certificate_type|20|server_certificate_type|21|padding|22|encrypt_then_mac|23|extended_master_secret|24|token_binding|25|cached_info|26|tls_lts|27|compress_certificate|28|record_size_limit|29|pwd_protect|30|pwd_clear|31|password_salt|32|ticket_pinning|33|tls_cert_with_extern_psk|34|delegated_credentials|35|session_ticket|41|pre_shared_key|42|early_data|43|supported_versions|44|cookie|45|psk_key_exchange_modes|47|certificate_authorities|48|oid_filters|49|post_handshake_auth|" & _
@@ -529,11 +529,9 @@ Public Property Get TlsIsClosed(uCtx As UcsTlsContext) As Boolean
     TlsIsClosed = (uCtx.State = ucsTlsStateClosed)
 End Property
 
-Public Property Let TlsIsClosed(uCtx As UcsTlsContext, ByVal bValue As Boolean)
-    If bValue Then
-        uCtx.State = ucsTlsStateClosed
-    End If
-End Property
+Public Function TlsClose(uCtx As UcsTlsContext)
+    uCtx.State = ucsTlsStateClosed
+End Function
 
 Public Property Get TlsIsStarted(uCtx As UcsTlsContext) As Boolean
     TlsIsStarted = (uCtx.State > ucsTlsStateClosed)
@@ -611,7 +609,7 @@ EH:
     Resume QH
 End Function
 
-Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize As Long, baOutput() As Byte, lPos As Long) As Boolean
+Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize As Long, baOutput() As Byte, lOutputPos As Long) As Boolean
     On Error GoTo EH
     With uCtx
         If .State = ucsTlsStateClosed Then
@@ -620,7 +618,7 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
         End If
         pvTlsSetLastError uCtx, vbNullString
         '--- swap-in
-        pvArraySwap .SendBuffer, .SendPos, baOutput, lPos
+        pvArraySwap .SendBuffer, .SendPos, baOutput, lOutputPos
         If .State = ucsTlsStateHandshakeStart Then
             .SendPos = pvTlsBuildClientHello(uCtx, .SendBuffer, .SendPos)
             .State = ucsTlsStateExpectServerHello
@@ -637,7 +635,7 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
         TlsHandshake = True
 QH:
         '--- swap-out
-        pvArraySwap baOutput, lPos, .SendBuffer, .SendPos
+        pvArraySwap baOutput, lOutputPos, .SendBuffer, .SendPos
     End With
     Exit Function
 EH:
@@ -645,8 +643,8 @@ EH:
     Resume QH
 End Function
 
-Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSize As Long, baOutput() As Byte, lPos As Long) As Boolean
-    Dim lDataPos        As Long
+Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSize As Long, baOutput() As Byte, lOutputPos As Long) As Boolean
+    Dim lPos            As Long
     
     On Error GoTo EH
     With uCtx
@@ -655,8 +653,8 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
         End If
         If lSize = 0 Then
             '--- flush
-            pvArraySwap .SendBuffer, .SendPos, baOutput, lPos
-            If VarPtr(lPos) <> VarPtr(.SendPos) Then
+            pvArraySwap .SendBuffer, .SendPos, baOutput, lOutputPos
+            If VarPtr(lOutputPos) <> VarPtr(.SendPos) Then
                 Erase .SendBuffer
                 .SendPos = 0
             End If
@@ -670,16 +668,16 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
         End If
         pvTlsSetLastError uCtx, vbNullString
         '--- swap-in
-        pvArraySwap .SendBuffer, .SendPos, baOutput, lPos
-        Do While lDataPos < lSize
-            .SendPos = pvTlsBuildApplicationData(uCtx, .SendBuffer, .SendPos, baPlainText, lDataPos, Clamp(lSize - lDataPos, 0, TLS_MAX_PLAINTEXT_RECORD_SIZE), TLS_CONTENT_TYPE_APPDATA)
-            lDataPos = lDataPos + TLS_MAX_PLAINTEXT_RECORD_SIZE
+        pvArraySwap .SendBuffer, .SendPos, baOutput, lOutputPos
+        Do While lPos < lSize
+            .SendPos = pvTlsBuildApplicationData(uCtx, .SendBuffer, .SendPos, baPlainText, lPos, Clamp(lSize - lPos, 0, TLS_MAX_PLAINTEXT_RECORD_SIZE), TLS_CONTENT_TYPE_APPDATA)
+            lPos = lPos + TLS_MAX_PLAINTEXT_RECORD_SIZE
         Loop
         '--- success
         TlsSend = True
 QH:
         '--- swap-out
-        pvArraySwap baOutput, lPos, .SendBuffer, .SendPos
+        pvArraySwap baOutput, lOutputPos, .SendBuffer, .SendPos
     End With
     Exit Function
 EH:
@@ -757,7 +755,7 @@ Public Function TlsGetLastError(uCtx As UcsTlsContext) As String
     End If
 End Function
 
-Public Function TlsGetLastAlert(uCtx As UcsTlsContext, Optional AlertCode As UcsTlsAlertDescriptionsEnum) As String
+Private Function TlsGetLastAlert(uCtx As UcsTlsContext, Optional AlertCode As UcsTlsAlertDescriptionsEnum) As String
     Static vTexts       As Variant
     
     AlertCode = uCtx.LastAlertCode
@@ -2205,7 +2203,7 @@ Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, ba
             bConfirmed = False
             If .CertRequestSignatureType = -1 And .OnClientCertificate <> 0 Then
                 Call vbaObjSetAddref(oCallback, .OnClientCertificate)
-                bConfirmed = oCallback.pvOnClientCertificate(.CertRequestCaDn)
+                bConfirmed = oCallback.FireOnClientCertificate(.CertRequestCaDn)
             End If
         Loop While bConfirmed
     End With

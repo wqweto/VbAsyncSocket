@@ -44,7 +44,7 @@ Event OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMas
 Event OnMessagePending(Handled As Boolean)
 Event BeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Cancel As Boolean)
 Event AfterNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum)
-Event OnClientCertificate(CaDn As Object, Confirmed As Boolean)
+Event OnClientCertificate(Issuers As Object, Confirmed As Boolean)
 
 '=========================================================================
 ' API
@@ -850,7 +850,7 @@ Public Sub PostEvent(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Optional By
             RaiseEvent OnAccept
         Case ucsSfdClose
             RaiseEvent OnClose
-            TlsIsClosed(m_uCtx) = True
+            TlsClose m_uCtx
         End Select
         RaiseEvent AfterNotify(EventMask)
         If EventMask = ucsSfdRead And AvailableBytes = 0 Then
@@ -1347,11 +1347,10 @@ Private Function pvOnBeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum
     pvOnBeforeNotify = Not bCancel
 End Function
 
-Public Function pvOnClientCertificate(CertRequestCaDn As Collection) As Boolean
-Attribute pvOnClientCertificate.VB_MemberFlags = "40"
-    RaiseEvent OnClientCertificate(CertRequestCaDn, pvOnClientCertificate)
+Public Function FireOnClientCertificate(CertRequestCaDn As Collection) As Boolean
+Attribute FireOnClientCertificate.VB_MemberFlags = "40"
+    RaiseEvent OnClientCertificate(CertRequestCaDn, FireOnClientCertificate)
 End Function
-
 
 '=========================================================================
 ' Socket events
@@ -1451,7 +1450,7 @@ Private Sub m_oSocket_OnClose()
         End If
         If pvOnBeforeNotify(ucsSfdClose) Then
             RaiseEvent OnClose
-            TlsIsClosed(m_uCtx) = True
+            TlsClose m_uCtx
             RaiseEvent AfterNotify(ucsSfdClose)
         End If
     Else
