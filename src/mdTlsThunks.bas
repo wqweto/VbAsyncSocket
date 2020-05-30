@@ -1998,6 +1998,11 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
         End If
         .ProtocolVersion = lRecordProtocol
         lPos = pvReadLong(baInput, lPos, lLegacyVersion, Size:=2)
+        If lLegacyVersion < TLS_PROTOCOL_VERSION_TLS12 Then
+            sError = ERR_UNSUPPORTED_PROTOCOL
+            eAlertCode = uscTlsAlertProtocolVersion
+            GoTo QH
+        End If
         lPos = pvReadArray(baInput, lPos, .RemoteExchRandom, TLS_HELLO_RANDOM_SIZE)
         lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, BlockSize:=lSize)
             lPos = pvReadArray(baInput, lPos, .RemoteSessionID, lSize)
@@ -2016,7 +2021,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
         lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
         If lCipherSuite = 0 Then
             sError = ERR_NO_SUPPORTED_CIPHER_SUITE
-            eAlertCode = uscTlsAlertHandshakeFailure
+            eAlertCode = uscTlsAlertProtocolVersion
             GoTo QH
         End If
         pvTlsSetupCipherSuite uCtx, lCipherSuite
