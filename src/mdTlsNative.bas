@@ -498,7 +498,7 @@ RetryCredentials:
         Else
             lPtr = VarPtr(.RecvPos)
         End If
-        pvInitSecBuffer .InBuffers(0), SECBUFFER_TOKEN, .RecvPos, lPtr
+        pvInitSecBuffer .InBuffers(0), SECBUFFER_TOKEN, lPtr, .RecvPos
         If .IsServer Then
             hResult = AcceptSecurityContext(.hTlsCredentials, IIf(.hTlsContext <> 0, VarPtr(.hTlsContext), 0), .InDesc, .ContextReq, _
                 SECURITY_NATIVE_DREP, .hTlsContext, .OutDesc, lContextAttr, 0)
@@ -640,7 +640,7 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
             Else
                 lPtr = VarPtr(.RecvPos)
             End If
-            pvInitSecBuffer .InBuffers(0), SECBUFFER_DATA, .RecvPos, lPtr
+            pvInitSecBuffer .InBuffers(0), SECBUFFER_DATA, lPtr, .RecvPos
             hResult = DecryptMessage(.hTlsContext, .InDesc, 0, 0)
             If hResult = SEC_E_INCOMPLETE_MESSAGE Then
                 pvInitSecBuffer .InBuffers(1), SECBUFFER_EMPTY
@@ -726,17 +726,22 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
             TlsSend = True
             Exit Function
         End If
+        '--- figure out upper bound of total output and reserve space in baOutput
+        lIdx = (lSize + .TlsSizes.cbMaximumMessage - 1) \ .TlsSizes.cbMaximumMessage
+        pvWriteReserved baOutput, lOutputPos, .TlsSizes.cbHeader * lIdx + lSize + .TlsSizes.cbTrailer * lIdx
         For lPos = 0 To lSize - 1 Step .TlsSizes.cbMaximumMessage
             lBufPos = lOutputPos
             lBufSize = lSize - lPos
             If lBufSize > .TlsSizes.cbMaximumMessage Then
                 lBufSize = .TlsSizes.cbMaximumMessage
             End If
-            lOutputPos = pvWriteReserved(baOutput, lOutputPos, .TlsSizes.cbHeader + lBufSize + .TlsSizes.cbTrailer)
-            Call CopyMemory(baOutput(lBufPos + .TlsSizes.cbHeader), baPlainText(lPos), lBufSize)
-            pvInitSecBuffer .InBuffers(0), SECBUFFER_STREAM_HEADER, .TlsSizes.cbHeader, VarPtr(baOutput(lBufPos))
-            pvInitSecBuffer .InBuffers(1), SECBUFFER_DATA, lBufSize, VarPtr(baOutput(lBufPos + .TlsSizes.cbHeader))
-            pvInitSecBuffer .InBuffers(2), SECBUFFER_STREAM_TRAILER, .TlsSizes.cbTrailer, VarPtr(baOutput(lBufPos + .TlsSizes.cbHeader + lBufSize))
+            pvWriteReserved baOutput, lOutputPos, .TlsSizes.cbHeader + lBufSize + .TlsSizes.cbTrailer
+            pvInitSecBuffer .InBuffers(0), SECBUFFER_STREAM_HEADER, VarPtr(baOutput(lBufPos)), .TlsSizes.cbHeader
+            lBufPos = lBufPos + .TlsSizes.cbHeader
+            Call CopyMemory(baOutput(lBufPos), baPlainText(lPos), lBufSize)
+            pvInitSecBuffer .InBuffers(1), SECBUFFER_DATA, VarPtr(baOutput(lBufPos)), lBufSize
+            lBufPos = lBufPos + lBufSize
+            pvInitSecBuffer .InBuffers(2), SECBUFFER_STREAM_TRAILER, VarPtr(baOutput(lBufPos)), .TlsSizes.cbTrailer
             For lIdx = 3 To UBound(.InBuffers)
                 pvInitSecBuffer .InBuffers(lIdx), SECBUFFER_EMPTY
             Next
@@ -745,6 +750,11 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
                 pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "EncryptMessage"
                 GoTo QH
             End If
+            Debug.Assert .InBuffers(0).cbBuffer = .TlsSizes.cbHeader
+            Debug.Assert .InBuffers(1).cbBuffer = lBufSize
+            '--- note: trailing MAC might be returned by EncryptMessage shorter than initial .TlsSizes.cbTrailer
+'            Debug.Assert .InBuffers(2).cbBuffer = .TlsSizes.cbTrailer
+            lOutputPos = lOutputPos + .InBuffers(0).cbBuffer + .InBuffers(1).cbBuffer + .InBuffers(2).cbBuffer
             For lIdx = 1 To UBound(.InBuffers)
                 With .InBuffers(lIdx)
                     If .cbBuffer > 0 Then
@@ -798,7 +808,7 @@ Public Function TlsShutdown(uCtx As UcsTlsContext, baOutput() As Byte, lPos As L
             GoTo QH
         End If
         lType = SCHANNEL_SHUTDOWN
-        pvInitSecBuffer .InBuffers(0), SECBUFFER_TOKEN, 4, VarPtr(lType)
+        pvInitSecBuffer .InBuffers(0), SECBUFFER_TOKEN, VarPtr(lType), 4
         hResult = ApplyControlToken(.hTlsContext, .InDesc)
         If hResult < 0 Then
             hResult = hResult
@@ -984,7 +994,7 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
                 GoTo QH
             End If
             pvInitSecDesc uDesc, 1, uBuffers
-            pvInitSecBuffer uBuffers(0), NCRYPTBUFFER_PKCS_KEY_NAME, LenB(sKeyName) + 2, StrPtr(sKeyName)
+            pvInitSecBuffer uBuffers(0), NCRYPTBUFFER_PKCS_KEY_NAME, StrPtr(sKeyName), LenB(sKeyName) + 2
             hResult = NCryptImportKey(hNProv, 0, StrPtr("ECCPRIVATEBLOB"), uDesc, hNKey, uEccBlob, lBlobSize, NCRYPT_OVERWRITE_KEY_FLAG)
             If hResult < 0 Then
                 sApiSource = "NCryptImportKey"
@@ -1171,11 +1181,11 @@ Private Sub pvInitSecDesc(uDesc As ApiSecBufferDesc, ByVal lCount As Long, uBuff
     End With
 End Sub
 
-Private Sub pvInitSecBuffer(uBuffer As ApiSecBuffer, ByVal lType As Long, Optional ByVal lSize As Long, Optional ByVal lPtr As Long)
+Private Sub pvInitSecBuffer(uBuffer As ApiSecBuffer, ByVal lType As Long, Optional ByVal lPtr As Long, Optional ByVal lSize As Long)
     With uBuffer
         .BufferType = lType
-        .cbBuffer = lSize
         .pvBuffer = lPtr
+        .cbBuffer = lSize
     End With
 End Sub
 
