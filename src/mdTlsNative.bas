@@ -324,6 +324,8 @@ Public Enum UcsTlsAlertDescriptionsEnum
     uscTlsAlertNoApplicationProtocol = 120
 End Enum
 
+Public g_oRequestSocket             As cTlsSocket
+
 '=========================================================================
 ' Properties
 '=========================================================================

@@ -370,12 +370,17 @@ EH:
     PrintError FUNC_NAME
 End Sub
 
-Public Sub Listen()
+Public Sub Listen( _
+            Optional PemFiles As String, _
+            Optional PfxFile As String, _
+            Optional Password As String, _
+            Optional Certificates As Collection, _
+            Optional PrivateKey As Collection)
     Const FUNC_NAME     As String = "Listen"
     
     On Error GoTo EH
     If m_eProtocol = sckTLSProtocol Then
-        pvSocket.StartServerTls
+        pvSocket.InitServerTls PemFiles, PfxFile, Password, Certificates, PrivateKey
     End If
     If Not pvSocket.Listen() Then
         On Error GoTo 0

@@ -1,7 +1,7 @@
 VERSION 5.00
 Object = "{248DD890-BB45-11CF-9ABC-0080C7E7B78D}#1.0#0"; "MSWINSCK.OCX"
-Begin VB.Form Form1 
-   Caption         =   "Form1"
+Begin VB.Form Form2 
+   Caption         =   "Form2"
    ClientHeight    =   2952
    ClientLeft      =   108
    ClientTop       =   456
@@ -34,7 +34,7 @@ Begin VB.Form Form1
       Top             =   924
       Width           =   1524
    End
-   Begin WinsockTest.ctxWinsock ctxServer 
+   Begin WinsockNative.ctxWinsock ctxServer 
       Index           =   0
       Left            =   2604
       Top             =   840
@@ -49,7 +49,7 @@ Begin VB.Form Form1
       Top             =   252
       Width           =   1524
    End
-   Begin WinsockTest.ctxWinsock ctxWinsock 
+   Begin WinsockNative.ctxWinsock ctxWinsock 
       Left            =   2604
       Top             =   252
       _ExtentX        =   677
@@ -71,7 +71,7 @@ Begin VB.Form Form1
       _Version        =   393216
    End
 End
-Attribute VB_Name = "Form1"
+Attribute VB_Name = "Form2"
 Attribute VB_GlobalNameSpace = False
 Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
