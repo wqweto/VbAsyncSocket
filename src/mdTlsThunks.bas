@@ -650,6 +650,7 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
                     pvArraySwap .DecrBuffer, .DecrPos, baPlainText, lPos
                 Else
                     lPos = pvWriteBuffer(baPlainText, lPos, VarPtr(.DecrBuffer(0)), .DecrPos)
+                    .DecrPos = 0
                 End If
             End If
             '--- success
@@ -694,6 +695,7 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
                     pvArraySwap .SendBuffer, .SendPos, baOutput, lOutputPos
                 Else
                     lOutputPos = pvWriteBuffer(baOutput, lOutputPos, VarPtr(.SendBuffer(0)), .SendPos)
+                    .SendPos = 0
                 End If
             End If
             '--- success

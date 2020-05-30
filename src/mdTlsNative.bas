@@ -722,6 +722,7 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
             '--- flush
             If .SendPos > 0 Then
                 lOutputPos = pvWriteBuffer(baOutput, lOutputPos, VarPtr(.SendBuffer(0)), .SendPos)
+                .SendPos = 0
             End If
             '--- success
             TlsSend = True
