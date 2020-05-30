@@ -750,7 +750,7 @@ Public Function SendArray( _
         lInputSize = pvArraySize(Buffer)
         m_lSendBytes = m_lSendBytes + lInputSize
         If Not TlsSend(m_uCtx, Buffer, lInputSize, m_baSendBuffer, m_lSendPos) Then
-            RaiseEvent OnError(vbObjectError, ucsSfdWrite)
+            RaiseEvent OnError(LastError.Number, ucsSfdWrite)
             GoTo QH
         End If
         If TlsIsReady(m_uCtx) Then
@@ -1221,7 +1221,7 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
                 GoTo QH
             End If
             If Not bResult Then
-                RaiseEvent OnError(vbObjectError, ucsSfdRead)
+                RaiseEvent OnError(LastError.Number, ucsSfdRead)
             End If
             If TlsIsClosed(m_uCtx) Then
                 If pvOnBeforeNotify(ucsSfdClose) Then
@@ -1240,11 +1240,11 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
                     #End If
                 ElseIf RemoteCertificates Is Nothing Then
                     pvSetLastError ERR_NO_CERTIFICATE
-                    RaiseEvent OnError(vbObjectError, ucsSfdRead)
+                    RaiseEvent OnError(LastError.Number, ucsSfdRead)
                     GoTo QH
                 ElseIf Not pvPkiCertChainValidate(RemoteHostName, RemoteCertificates, frRootStore, sError) Then
                     pvSetLastError sError
-                    RaiseEvent OnError(vbObjectError, ucsSfdRead)
+                    RaiseEvent OnError(LastError.Number, ucsSfdRead)
                     GoTo QH
                 End If
             End If
@@ -1280,7 +1280,7 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
         End If
     End If
     If Not bResult Then
-        RaiseEvent OnError(vbObjectError, ucsSfdRead)
+        RaiseEvent OnError(LastError.Number, ucsSfdRead)
         GoTo QH
     End If
     '--- success
@@ -1330,6 +1330,7 @@ Private Function pvOnShutdown() As Boolean
     
     On Error GoTo EH
     If Not TlsShutdown(m_uCtx, m_baSendBuffer, m_lSendPos) Then
+        RaiseEvent OnError(LastError.Number, ucsSfdWrite)
         GoTo QH
     End If
     If Not pvOnSend() Then

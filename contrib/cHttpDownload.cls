@@ -647,9 +647,11 @@ Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsy
     Const FUNC_NAME     As String = "m_oSocket_OnError"
     
     On Error GoTo EH
-    If m_oSocket.LastError <> 0 Then
-        pvSetError ErrorCode
-    End If
+    With m_oSocket.LastError
+        If .Number <> 0 Then
+            pvSetError .Number, .Description
+        End If
+    End With
     Exit Sub
 EH:
     PrintError FUNC_NAME
