@@ -35,9 +35,11 @@ Attribute VB_Name = "mdTlsThunks"
 '=========================================================================
 Option Explicit
 DefObj A-Z
+Private Const MODULE_NAME As String = "mdTlsThunks"
 
 #Const ImplUseLibSodium = (ASYNCSOCKET_USE_LIBSODIUM <> 0)
 #Const ImplUseShared = (ASYNCSOCKET_USE_SHARED <> 0)
+#Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
 
 '=========================================================================
 ' API
