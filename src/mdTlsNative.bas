@@ -75,6 +75,7 @@ Private Const CERT_STORE_CREATE_NEW_FLAG                As Long = &H2000
 '--- for CertAddEncodedCertificateToStore
 Private Const CERT_STORE_ADD_USE_EXISTING               As Long = 2
 '--- for CryptAcquireContext
+Private Const MS_DEF_PROV                               As String = "Microsoft Base Cryptographic Provider v1.0"
 Private Const PROV_RSA_FULL                             As Long = 1
 Private Const CRYPT_NEWKEYSET                           As Long = &H8
 Private Const CRYPT_MACHINE_KEYSET                      As Long = &H20
@@ -809,11 +810,13 @@ Public Function TlsShutdown(uCtx As UcsTlsContext, baOutput() As Byte, lPos As L
         End If
         lType = SCHANNEL_SHUTDOWN
         pvInitSecBuffer .InBuffers(0), SECBUFFER_TOKEN, VarPtr(lType), 4
+        '--- note: passing more than one input buffer fails w/ SEC_E_INVALID_TOKEN (&H80090308)
+        .InDesc.cBuffers = 1
         hResult = ApplyControlToken(.hTlsContext, .InDesc)
+        .InDesc.cBuffers = .TlsSizes.cBuffers
         If hResult < 0 Then
-            hResult = hResult
-'            pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "ApplyControlToken"
-'            GoTo QH
+            pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "ApplyControlToken"
+            GoTo QH
         End If
         pvInitSecBuffer .OutBuffers(0), SECBUFFER_TOKEN
         For lIdx = 1 To UBound(.OutBuffers)
@@ -859,7 +862,7 @@ Public Function TlsGetLastError(uCtx As UcsTlsContext, Optional LastErrNumber As
     LastErrNumber = uCtx.LastErrNumber
     TlsGetLastError = uCtx.LastError
     If uCtx.LastAlertCode <> -1 Then
-        TlsGetLastError = IIf(LenB(TlsGetLastError) <> 0, TlsGetLastError & ". ", vbNullString) & Replace(STR_FORMAT_ALERT, "%1", TlsGetLastAlert(uCtx))
+        TlsGetLastError = IIf(LenB(TlsGetLastError) <> 0, TlsGetLastError & ". ", vbNullString) & Replace(STR_FORMAT_ALERT, "%1", pvTlsGetLastAlert(uCtx))
     End If
 End Function
 
@@ -887,7 +890,7 @@ Private Sub pvTlsSetLastError(uCtx As UcsTlsContext, Optional ByVal lNumber As L
     End With
 End Sub
 
-Private Function TlsGetLastAlert(uCtx As UcsTlsContext, Optional AlertCode As UcsTlsAlertDescriptionsEnum) As String
+Private Function pvTlsGetLastAlert(uCtx As UcsTlsContext, Optional AlertCode As UcsTlsAlertDescriptionsEnum) As String
     Static vTexts       As Variant
     
     AlertCode = uCtx.LastAlertCode
@@ -896,10 +899,10 @@ Private Function TlsGetLastAlert(uCtx As UcsTlsContext, Optional AlertCode As Uc
             vTexts = SplitOrReindex(STR_VL_ALERTS, "|")
         End If
         If AlertCode <= UBound(vTexts) Then
-            TlsGetLastAlert = vTexts(AlertCode)
+            pvTlsGetLastAlert = vTexts(AlertCode)
         End If
-        If LenB(TlsGetLastAlert) = 0 Then
-            TlsGetLastAlert = Replace(STR_UNKNOWN, "%1", AlertCode)
+        If LenB(pvTlsGetLastAlert) = 0 Then
+            pvTlsGetLastAlert = Replace(STR_UNKNOWN, "%1", AlertCode)
         End If
     End If
 End Function
@@ -954,8 +957,9 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
         Call CopyMemory(uPublicKeyInfo, ByVal lPtr, Len(uPublicKeyInfo))
         Select Case pvToString(uPublicKeyInfo.Algorithm.pszObjId)
         Case szOID_RSA_RSA
-            If CryptAcquireContext(hProv, StrPtr(sKeyName), 0, PROV_RSA_FULL, CRYPT_MACHINE_KEYSET) = 0 Then
-                If CryptAcquireContext(hProv, StrPtr(sKeyName), 0, PROV_RSA_FULL, CRYPT_NEWKEYSET Or CRYPT_MACHINE_KEYSET) = 0 Then
+            sProvName = MS_DEF_PROV
+            If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), PROV_RSA_FULL, CRYPT_MACHINE_KEYSET) = 0 Then
+                If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), PROV_RSA_FULL, CRYPT_NEWKEYSET Or CRYPT_MACHINE_KEYSET) = 0 Then
                     hResult = Err.LastDllError
                     sApiSource = "CryptAcquireContext"
                     GoTo QH
@@ -967,6 +971,7 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
                 GoTo QH
             End If
             uProvInfo.pwszContainerName = StrPtr(sKeyName)
+            uProvInfo.pwszProvName = StrPtr(sProvName)
             uProvInfo.dwProvType = PROV_RSA_FULL
             uProvInfo.dwFlags = CRYPT_MACHINE_KEYSET
             uProvInfo.dwKeySpec = AT_KEYEXCHANGE
