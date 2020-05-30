@@ -852,7 +852,7 @@ Public Sub PostEvent(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Optional By
             RaiseEvent OnAccept
         Case ucsSfdClose
             RaiseEvent OnClose
-            TlsClose m_uCtx
+            TlsTerminate m_uCtx
         End Select
         RaiseEvent AfterNotify(EventMask)
         If EventMask = ucsSfdRead And AvailableBytes = 0 Then
@@ -1454,7 +1454,7 @@ Private Sub m_oSocket_OnClose()
         End If
         If pvOnBeforeNotify(ucsSfdClose) Then
             RaiseEvent OnClose
-            TlsClose m_uCtx
+            TlsTerminate m_uCtx
             RaiseEvent AfterNotify(ucsSfdClose)
         End If
     Else

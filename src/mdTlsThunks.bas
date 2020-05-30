@@ -523,10 +523,6 @@ Public Property Get TlsIsClosed(uCtx As UcsTlsContext) As Boolean
     TlsIsClosed = (uCtx.State = ucsTlsStateClosed)
 End Property
 
-Public Function TlsClose(uCtx As UcsTlsContext)
-    uCtx.State = ucsTlsStateClosed
-End Function
-
 Public Property Get TlsIsStarted(uCtx As UcsTlsContext) As Boolean
     TlsIsStarted = (uCtx.State > ucsTlsStateClosed)
 End Property
@@ -603,6 +599,10 @@ EH:
     Resume QH
 End Function
 
+Public Function TlsTerminate(uCtx As UcsTlsContext)
+    uCtx.State = ucsTlsStateClosed
+End Function
+
 Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize As Long, baOutput() As Byte, lOutputPos As Long) As Boolean
     On Error GoTo EH
     With uCtx
@@ -627,50 +627,6 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
         End If
         '--- success
         TlsHandshake = True
-QH:
-        '--- swap-out
-        pvArraySwap baOutput, lOutputPos, .SendBuffer, .SendPos
-    End With
-    Exit Function
-EH:
-    pvTlsSetLastError uCtx, Err.Description
-    Resume QH
-End Function
-
-Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSize As Long, baOutput() As Byte, lOutputPos As Long) As Boolean
-    Dim lPos            As Long
-    
-    On Error GoTo EH
-    With uCtx
-        If lSize < 0 Then
-            lSize = pvArraySize(baPlainText)
-        End If
-        If lSize = 0 Then
-            '--- flush
-            If .SendPos > 0 Then
-                If lOutputPos = 0 Then
-                    pvArraySwap .SendBuffer, .SendPos, baOutput, lOutputPos
-                Else
-                    lOutputPos = pvWriteBuffer(baOutput, lOutputPos, VarPtr(.SendBuffer(0)), .SendPos)
-                End If
-            End If
-            '--- success
-            TlsSend = True
-            Exit Function
-        End If
-        If .State = ucsTlsStateClosed Then
-            pvTlsSetLastError uCtx, ERR_CONNECTION_CLOSED
-            Exit Function
-        End If
-        pvTlsSetLastError uCtx, vbNullString
-        '--- swap-in
-        pvArraySwap .SendBuffer, .SendPos, baOutput, lOutputPos
-        Do While lPos < lSize
-            .SendPos = pvTlsBuildApplicationData(uCtx, .SendBuffer, .SendPos, baPlainText, lPos, Clamp(lSize - lPos, 0, TLS_MAX_PLAINTEXT_RECORD_SIZE), TLS_CONTENT_TYPE_APPDATA)
-            lPos = lPos + TLS_MAX_PLAINTEXT_RECORD_SIZE
-        Loop
-        '--- success
-        TlsSend = True
 QH:
         '--- swap-out
         pvArraySwap baOutput, lOutputPos, .SendBuffer, .SendPos
@@ -716,6 +672,50 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
 QH:
         '--- swap-out
         pvArraySwap baPlainText, lPos, .DecrBuffer, .DecrPos
+    End With
+    Exit Function
+EH:
+    pvTlsSetLastError uCtx, Err.Description
+    Resume QH
+End Function
+
+Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSize As Long, baOutput() As Byte, lOutputPos As Long) As Boolean
+    Dim lPos            As Long
+    
+    On Error GoTo EH
+    With uCtx
+        If lSize < 0 Then
+            lSize = pvArraySize(baPlainText)
+        End If
+        If lSize = 0 Then
+            '--- flush
+            If .SendPos > 0 Then
+                If lOutputPos = 0 Then
+                    pvArraySwap .SendBuffer, .SendPos, baOutput, lOutputPos
+                Else
+                    lOutputPos = pvWriteBuffer(baOutput, lOutputPos, VarPtr(.SendBuffer(0)), .SendPos)
+                End If
+            End If
+            '--- success
+            TlsSend = True
+            Exit Function
+        End If
+        If .State = ucsTlsStateClosed Then
+            pvTlsSetLastError uCtx, ERR_CONNECTION_CLOSED
+            Exit Function
+        End If
+        pvTlsSetLastError uCtx, vbNullString
+        '--- swap-in
+        pvArraySwap .SendBuffer, .SendPos, baOutput, lOutputPos
+        Do While lPos < lSize
+            .SendPos = pvTlsBuildApplicationData(uCtx, .SendBuffer, .SendPos, baPlainText, lPos, Clamp(lSize - lPos, 0, TLS_MAX_PLAINTEXT_RECORD_SIZE), TLS_CONTENT_TYPE_APPDATA)
+            lPos = lPos + TLS_MAX_PLAINTEXT_RECORD_SIZE
+        Loop
+        '--- success
+        TlsSend = True
+QH:
+        '--- swap-out
+        pvArraySwap baOutput, lOutputPos, .SendBuffer, .SendPos
     End With
     Exit Function
 EH:

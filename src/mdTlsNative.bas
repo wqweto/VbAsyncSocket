@@ -398,7 +398,7 @@ EH:
     pvTlsSetLastError uCtx, Err.Number, Err.Source, Err.Description
 End Function
 
-Public Function TlsClose(uCtx As UcsTlsContext)
+Public Function TlsTerminate(uCtx As UcsTlsContext)
     With uCtx
         .State = ucsTlsStateClosed
         If .hTlsContext <> 0 Then
