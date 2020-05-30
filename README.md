@@ -12,7 +12,7 @@ Additionally there is a source-compatible `cTlsSocket` class for transparent TLS
 
 2. Native client-side and server-side TLS support using OS provided SSPI library for all available protocol versions.
 
-The VB6 with thunks backend optionally can leverage libsodium primitives for performance reasons (e.g. server-side implementations).
+The VB6 with thunks backend optionally can leverage libsodium primitives for performance reasons (e.g. server-side implementations) although current thunks implementation auto-detects AES-NI and PCLMULQDQ instruction set availability on client machine and switches to [performance optimized implementation of AES](https://github.com/wqweto/VbAsyncSocket/blob/4b7f4d8bc650688e2b6ad5460c997ed1df26d2e0/lib/thunks/sshaes.c#L100-L240)[-GCM](https://github.com/wqweto/VbAsyncSocket/blob/4b7f4d8bc650688e2b6ad5460c997ed1df26d2e0/lib/thunks/gf128.c#L116-L165) which is even faster that OS native SSPI implementation of this cyphersuit.
 
 ### Usage
 
@@ -41,14 +41,13 @@ At first the communication goes over unencrypted plain-text socket, then later i
 
 Which produces debug output in `Immediate Window` similar to this:
     
-    220 smtp.gmail.com ESMTP r3sm6722824lfm.52 - gsmtp
+    220 smtp.gmail.com ESMTP c69sm2955334lfg.23 - gsmtp
     250 smtp.gmail.com at your service
     220 2.0.0 Ready to start TLS
-    Using TLS_CHACHA20_POLY1305_SHA256 from smtp.gmail.com   49158.41 
-    Valid ECDSA_SECP256R1_SHA256 signature     49158.42 
+    1428790.043 [INFO] Using TLS_AES_128_GCM_SHA256 from smtp.gmail.com [mdTlsThunks.pvTlsParseHandshakeServerHello]
+    1428790.057 [INFO] Valid ECDSA_SECP256R1_SHA256 signature [mdTlsThunks.pvTlsSignatureVerify]
     TLS handshake complete: smtp.gmail.com
-    221 2.0.0 closing connection r3sm6722824lfm.52 - gsmtp
-
+    221 2.0.0 closing connection c69sm2955334lfg.23 - gsmtp
 
 ### ToDo
 
