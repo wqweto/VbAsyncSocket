@@ -584,7 +584,7 @@ RetryCredentials:
                         Set cIssuers = New Collection
                         For lIdx = 0 To UBound(uIssuerList)
                             pvWriteBuffer baCaDn, 0, uIssuerList(lIdx).pbData, uIssuerList(lIdx).cbData
-                            pvArrayReallocate baCaDn, uIssuerList(lIdx).cbData, MODULE_NAME & "." & FUNC_NAME
+                            pvArrayReallocate baCaDn, uIssuerList(lIdx).cbData, FUNC_NAME & ".baCaDn"
                             cIssuers.Add baCaDn
                         Next
                     End If
@@ -1054,7 +1054,7 @@ Private Function pvTlsExportFromCertStore(ByVal hCertStore As Long, cCerts As Co
         End If
         Call CopyMemory(uCertContext, ByVal pCertContext, Len(uCertContext))
         pvWriteBuffer baCert, 0, uCertContext.pbCertEncoded, uCertContext.cbCertEncoded
-        pvArrayReallocate baCert, uCertContext.cbCertEncoded, MODULE_NAME & "." & FUNC_NAME
+        pvArrayReallocate baCert, uCertContext.cbCertEncoded, FUNC_NAME & ".baCert"
         cCerts.Add baCert
     Loop
     '--- success
@@ -1126,7 +1126,7 @@ Private Sub pvArrayAllocate(baRetVal() As Byte, ByVal lSize As Long, sFuncName A
     Else
         baRetVal = vbNullString
     End If
-    Debug.Assert RedimStats(sFuncName, lSize)
+    Debug.Assert RedimStats(MODULE_NAME & "." & sFuncName, lSize)
 End Sub
 
 Private Sub pvArrayReallocate(baArray() As Byte, ByVal lSize As Long, sFuncName As String)
@@ -1135,7 +1135,7 @@ Private Sub pvArrayReallocate(baArray() As Byte, ByVal lSize As Long, sFuncName 
     Else
         baArray = vbNullString
     End If
-    Debug.Assert RedimStats(sFuncName, lSize)
+    Debug.Assert RedimStats(MODULE_NAME & "." & sFuncName, lSize)
 End Sub
 
 Private Property Get pvArraySize(baArray() As Byte) As Long
@@ -1300,7 +1300,7 @@ Private Function SplitOrReindex(Expression As String, Delimiter As String) As Va
             End If
         Next
         ReDim vResult(0 To lSize) As Variant
-        Debug.Assert RedimStats("SplitOrReindex.vResult", 0)
+        Debug.Assert RedimStats(MODULE_NAME & ".SplitOrReindex.vResult", 0)
         For lIdx = 0 To UBound(vTemp) Step 2
             vResult(vTemp(lIdx)) = vTemp(lIdx + 1)
         Next

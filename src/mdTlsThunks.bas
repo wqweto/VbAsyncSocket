@@ -3143,7 +3143,7 @@ Private Sub pvArrayAllocate(baRetVal() As Byte, ByVal lSize As Long, sFuncName A
     Else
         baRetVal = vbNullString
     End If
-    Debug.Assert RedimStats(sFuncName, UBound(baRetVal) + 1)
+    Debug.Assert RedimStats(MODULE_NAME & "." & sFuncName, UBound(baRetVal) + 1)
 End Sub
 
 Private Sub pvArrayReallocate(baArray() As Byte, ByVal lSize As Long, sFuncName As String)
@@ -3152,7 +3152,7 @@ Private Sub pvArrayReallocate(baArray() As Byte, ByVal lSize As Long, sFuncName 
     Else
         baArray = vbNullString
     End If
-    Debug.Assert RedimStats(sFuncName, UBound(baArray) + 1)
+    Debug.Assert RedimStats(MODULE_NAME & "." & sFuncName, UBound(baArray) + 1)
 End Sub
 
 Private Property Get pvArraySize(baArray() As Byte) As Long
@@ -4574,7 +4574,7 @@ Private Function SplitOrReindex(Expression As String, Delimiter As String) As Va
             End If
         Next
         ReDim vResult(0 To lSize) As Variant
-        Debug.Assert RedimStats("SplitOrReindex.vResult", 0)
+        Debug.Assert RedimStats(MODULE_NAME & ".SplitOrReindex.vResult", 0)
         For lIdx = 0 To UBound(vTemp) Step 2
             vResult(vTemp(lIdx)) = vTemp(lIdx + 1)
         Next

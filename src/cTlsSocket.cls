@@ -2202,7 +2202,7 @@ Private Function pvPkiCloneKeyWithExportPolicy(ByVal hKey As Long, ByVal lPolicy
     
     '--- export PKCS#8 password protected blob
     ReDim uParams.Buffers(0 To 2) As NCryptBuffer
-    Debug.Assert RedimStats(FUNC_NAME & ".uParams.Buffers", 0)
+    Debug.Assert RedimStats(MODULE_NAME & "." & FUNC_NAME & ".uParams.Buffers", 0)
     uParams.cBuffers = UBound(uParams.Buffers) + 1
     uParams.pBuffers = VarPtr(uParams.Buffers(0))
     sSecret = STR_PASSWORD
@@ -2256,7 +2256,7 @@ Private Function pvPkiCloneKeyWithExportPolicy(ByVal hKey As Long, ByVal lPolicy
     sKeyName = Replace(CStr(baBuffer), vbNullChar, vbNullString)
     '--- import PKCS#8 blob and set Export Policy before finalizing
     ReDim uParams.Buffers(0 To 1) As NCryptBuffer
-    Debug.Assert RedimStats(FUNC_NAME & ".uParams.Buffers", 0)
+    Debug.Assert RedimStats(MODULE_NAME & "." & FUNC_NAME & ".uParams.Buffers", 0)
     uParams.cBuffers = UBound(uParams.Buffers) + 1
     uParams.pBuffers = VarPtr(uParams.Buffers(0))
     sSecret = STR_PASSWORD
@@ -2314,7 +2314,7 @@ Private Sub pvArrayAllocate(baRetVal() As Byte, ByVal lSize As Long, sFuncName A
     Else
         baRetVal = vbNullString
     End If
-    Debug.Assert RedimStats(sFuncName, lSize)
+    Debug.Assert RedimStats(MODULE_NAME & "." & sFuncName, lSize)
 End Sub
 
 Private Sub pvArrayReallocate(baArray() As Byte, ByVal lSize As Long, sFuncName As String)
@@ -2323,7 +2323,7 @@ Private Sub pvArrayReallocate(baArray() As Byte, ByVal lSize As Long, sFuncName 
     Else
         baArray = vbNullString
     End If
-    Debug.Assert RedimStats(sFuncName, lSize)
+    Debug.Assert RedimStats(MODULE_NAME & "." & sFuncName, lSize)
 End Sub
 
 Private Property Get pvArraySize(baArray() As Byte) As Long
