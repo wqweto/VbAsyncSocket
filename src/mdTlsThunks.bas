@@ -310,14 +310,6 @@ Private Const ERR_NO_REMOTE_RANDOM                      As String = "Missing rem
 Private Const ERR_NO_SERVER_CERTIFICATE                 As String = "Missing server certificate"
 Private Const ERR_NO_SUPPORTED_CIPHER_SUITE             As String = "Missing supported ciphersuite"
 Private Const ERR_NO_PRIVATE_KEY                        As String = "Missing server private key"
-'Private Const ERR_NO_MATCHING_ALT_NAME                  As String = "No certificate subject name matches target host name"
-'Private Const ERR_TRUST_IS_REVOKED                      As String = "Trust for this certificate or one of the certificates in the certificate chain has been revoked"
-'Private Const ERR_TRUST_IS_PARTIAL_CHAIN                As String = "The certificate chain is not complete"
-'Private Const ERR_TRUST_IS_UNTRUSTED_ROOT               As String = "The certificate or certificate chain is based on an untrusted root"
-'Private Const ERR_TRUST_IS_NOT_TIME_VALID               As String = "The certificate has expired"
-'Private Const ERR_TRUST_REVOCATION_STATUS_UNKNOWN       As String = "The revocation status of the certificate or one of the certificates in the certificate chain is unknown"
-'Private Const STR_CHR1                                  As String = "" '--- CHAR(1)
-'Private Const DEF_TIMEOUT                               As Long = 5000
 
 Private m_baBuffer()                As Byte
 Private m_lBuffIdx                  As Long
@@ -1438,14 +1430,6 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
                 pvArrayXor baRemoteIV, .RemoteTrafficIV, .RemoteTrafficSeqNo
                 If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
                     bResult = pvTlsAeadDecrypt(.AeadAlgo, baRemoteIV, .RemoteTrafficKey, baInput, lRecordPos, LNG_AAD_SIZE, baInput, lPos, lRecordSize)
-                    '--- trim zero padding at the end of decrypted record
-                    Do While lEnd > lPos
-                        lEnd = lEnd - 1
-                        If baInput(lEnd) <> 0 Then
-                            Exit Do
-                        End If
-                    Loop
-                    lRecordType = baInput(lEnd)
                 ElseIf .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
                     If .IvDynamicSize > 0 Then '--- AES in TLS 1.2
                         pvWriteBuffer baRemoteIV, .IvSize - .IvDynamicSize, VarPtr(baInput(lPos)), .IvDynamicSize
@@ -1465,6 +1449,16 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
                     GoTo QH
                 End If
                 .RemoteTrafficSeqNo = UnsignedAdd(.RemoteTrafficSeqNo, 1)
+                If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
+                    '--- trim zero padding at the end of decrypted record
+                    Do While lEnd > lPos
+                        lEnd = lEnd - 1
+                        If baInput(lEnd) <> 0 Then
+                            Exit Do
+                        End If
+                    Loop
+                    lRecordType = baInput(lEnd)
+                End If
             Else
                 lEnd = lPos + lRecordSize
             End If
@@ -2195,7 +2189,7 @@ Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, ba
         Do
             If SearchCollection(.LocalPrivateKey, 1, RetVal:=baCert) Then
                 If Not pvAsn1DecodePrivateKey(baCert, uCertInfo) Then
-                    sError = ERR_UNSUPPORTED_CERTIFICATE
+                    sError = ERR_UNSUPPORTED_PRIVATE_KEY
                     eAlertCode = uscTlsAlertHandshakeFailure
                     GoTo QH
                 End If
@@ -2854,8 +2848,8 @@ Private Sub pvTlsSignatureSign(cPrivKey As Collection, ByVal lSignatureType As L
         If Not CryptoEccSecp256r1Sign(baTemp, uKeyInfo.KeyBlob, baVerifyHash) Then
             Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEccSecp256r1Sign")
         End If
-        If Not pvAsn1EncodeEccSignature(baSignature, baTemp, TLS_SECP256R1_KEY_SIZE) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "pvAsn1EncodeEccSignature")
+        If Not pvAsn1EncodeEcdsaSignature(baSignature, baTemp, TLS_SECP256R1_KEY_SIZE) Then
+            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "pvAsn1EncodeEcdsaSignature")
         End If
     Case TLS_SIGNATURE_ECDSA_SECP384R1_SHA384
         Debug.Assert uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P384
@@ -2865,8 +2859,8 @@ Private Sub pvTlsSignatureSign(cPrivKey As Collection, ByVal lSignatureType As L
         If Not CryptoEccSecp384r1Sign(baTemp, uKeyInfo.KeyBlob, baVerifyHash) Then
             Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEccSecp384r1Sign")
         End If
-        If Not pvAsn1EncodeEccSignature(baSignature, baTemp, TLS_SECP384R1_KEY_SIZE) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "pvAsn1EncodeEccSignature")
+        If Not pvAsn1EncodeEcdsaSignature(baSignature, baTemp, TLS_SECP384R1_KEY_SIZE) Then
+            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "pvAsn1EncodeEcdsaSignature")
         End If
     Case Else
         Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_SIGNATURE_TYPE, "%1", "0x" & Hex$(lSignatureType))
@@ -2922,7 +2916,7 @@ InvalidSignature:
         End If
         pvTlsArrayHash baVerifyHash, pvTlsSignatureDigestAlgo(lSignatureType), baVerifyData, 0
         lCurveSize = UBound(uCertInfo.KeyBlob) \ 2
-        If Not pvAsn1DecodeEccSignature(baPlainSig, baSignature, lCurveSize) Then
+        If Not pvAsn1DecodeEcdsaSignature(baPlainSig, baSignature, lCurveSize) Then
             GoTo InvalidSignature
         End If
         If UBound(baVerifyHash) + 1 < lCurveSize Then
@@ -3334,7 +3328,7 @@ Private Function pvCryptoEmsaPkcs1Encode(baRetVal() As Byte, baMessage() As Byte
     
     '--- from RFC 8017, Section 9.2.
     pvArrayHash lHashSize, baMessage, baHash
-    If Not pvAsn1EncodePkcs1SignatureHash(baHash, baDerHash) Then
+    If Not pvAsn1EncodePkcs1Signature(baHash, baDerHash) Then
         GoTo QH
     End If
     pvArrayAllocate baRetVal, (lBitLen + 7) \ 8, FUNC_NAME & ".baRetVal"
@@ -3360,7 +3354,7 @@ Private Function pvCryptoEmsaPkcs1Decode(baMessage() As Byte, baEnc() As Byte, B
         GoTo QH
     End If
     pvArrayHash lHashSize, baMessage, baHash
-    If Not pvAsn1EncodePkcs1SignatureHash(baHash, baDerHash) Then
+    If Not pvAsn1EncodePkcs1Signature(baHash, baDerHash) Then
         GoTo QH
     End If
     For lPos = 2 To UBound(baEnc) - UBound(baDerHash) - 3
@@ -3668,8 +3662,8 @@ QH:
     End If
 End Function
 
-Private Function pvAsn1EncodePkcs1SignatureHash(baHash() As Byte, baRetVal() As Byte) As Boolean
-    Const FUNC_NAME     As String = "pvAsn1EncodePkcs1SignatureHash"
+Private Function pvAsn1EncodePkcs1Signature(baHash() As Byte, baRetVal() As Byte) As Boolean
+    Const FUNC_NAME     As String = "pvAsn1EncodePkcs1Signature"
     Dim baPrefix()      As Byte
     
     Select Case UBound(baHash) + 1
@@ -3684,12 +3678,12 @@ Private Function pvAsn1EncodePkcs1SignatureHash(baHash() As Byte, baRetVal() As 
     Call CopyMemory(baRetVal(0), baPrefix(0), UBound(baPrefix) + 1)
     Call CopyMemory(baRetVal(UBound(baPrefix) + 1), baHash(0), UBound(baHash) + 1)
     '--- success
-    pvAsn1EncodePkcs1SignatureHash = True
+    pvAsn1EncodePkcs1Signature = True
 QH:
 End Function
 
-Private Function pvAsn1DecodeEccSignature(baRetVal() As Byte, baDerSig() As Byte, ByVal lCurveSize As Long) As Boolean
-    Const FUNC_NAME     As String = "pvAsn1DecodeEccSignature"
+Private Function pvAsn1DecodeEcdsaSignature(baRetVal() As Byte, baDerSig() As Byte, ByVal lCurveSize As Long) As Boolean
+    Const FUNC_NAME     As String = "pvAsn1DecodeEcdsaSignature"
     Dim lType           As Long
     Dim lPos            As Long
     Dim lSize           As Long
@@ -3727,11 +3721,11 @@ Private Function pvAsn1DecodeEccSignature(baRetVal() As Byte, baDerSig() As Byte
         End If
     lPos = pvReadEndOfBlock(baDerSig, lPos, cStack)
     '--- success
-    pvAsn1DecodeEccSignature = True
+    pvAsn1DecodeEcdsaSignature = True
 QH:
 End Function
 
-Private Function pvAsn1EncodeEccSignature(baRetVal() As Byte, baPlainSig() As Byte, ByVal lPartSize As Long) As Boolean
+Private Function pvAsn1EncodeEcdsaSignature(baRetVal() As Byte, baPlainSig() As Byte, ByVal lPartSize As Long) As Boolean
     Dim lPos            As Long
     Dim cStack          As Collection
     Dim lStart          As Long
@@ -3763,9 +3757,9 @@ Private Function pvAsn1EncodeEccSignature(baRetVal() As Byte, baPlainSig() As By
             lPos = pvWriteBuffer(baRetVal, lPos, VarPtr(baPlainSig(lPartSize + lStart)), lPartSize - lStart)
         lPos = pvWriteEndOfBlock(baRetVal, lPos, cStack)
     lPos = pvWriteEndOfBlock(baRetVal, lPos, cStack)
-    pvAsn1EncodeEccSignature = baRetVal
+    pvAsn1EncodeEcdsaSignature = baRetVal
     '--- success
-    pvAsn1EncodeEccSignature = True
+    pvAsn1EncodeEcdsaSignature = True
 End Function
 
 '=========================================================================
