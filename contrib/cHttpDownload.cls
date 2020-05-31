@@ -34,7 +34,7 @@ Event DownloadComplete(ByVal LocalFileName As String)
 Event UploadProgress(ByVal BytesWritten As Double, ByVal BytesTotal As Double)
 Event UploadComplete(ByVal LocalFileName As String)
 Event OperationStart()
-Event OperationError(ByVal Number As Long, ByVal Description As String)
+Event OperationError(ByVal Number As Long, ByVal Description As String, ByVal Source As String)
 
 '=========================================================================
 ' API
@@ -255,7 +255,7 @@ Private Function pvRecvHeaders(baBuffer() As Byte) As Boolean
                 If Left$(LCase$(vElem), Len(HDR_LOCATION)) = HDR_LOCATION Then
                     vElem = Trim$(Mid$(vElem, Len(HDR_LOCATION) + 1))
                     If Not pvParseUrl(CStr(vElem), uRedirect, m_uRemote.Protocol) Then
-                        pvSetError vbObjectError, Replace(ERR_INVALID_REDIRECT, "%1", vElem)
+                        pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "pvParseUrl", Replace(ERR_INVALID_REDIRECT, "%1", vElem)
                         GoTo QH
                     End If
                     uRedirect.User = m_uRemote.User
@@ -266,21 +266,21 @@ Private Function pvRecvHeaders(baBuffer() As Byte) As Boolean
             Select Case LCase$(uRedirect.Protocol)
             Case "http", "https"
             Case Else
-                pvSetError vbObjectError, ERR_HTTP_ONLY
+                pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_HTTP_ONLY
                 GoTo QH
             End Select
             m_uRemote = uRedirect
             m_oSocket.Close_
             If Not m_oSocket.Create(SocketType:=ucsSckStream) Then
-                pvSetError m_oSocket.LastError
+                pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.Create"
                 GoTo QH
             End If
             If Not m_oSocket.Connect(m_uRemote.Host, m_uRemote.Port, UseTls:=pvIsProtocolSecure(m_uRemote.Protocol)) Then
-                pvSetError m_oSocket.LastError
+                pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.Connect"
                 GoTo QH
             End If
         Case Else
-            pvSetError vbObjectError, Replace(ERR_INVALID_RESPONSE, "%1", Mid$(vSplit(0), 10))
+            pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Replace(ERR_INVALID_RESPONSE, "%1", Mid$(vSplit(0), 10))
             GoTo QH
         End Select
     End If
@@ -313,7 +313,7 @@ Private Function pvRecvBody(baBuffer() As Byte, Optional ByVal Flush As Boolean)
         hResult = IStream_Write(m_pFileStream, m_baFileBuffer)
         m_baFileBuffer = vbNullString
         If hResult < 0 Then
-            pvSetError hResult
+            pvSetError hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "IStream_Write"
             GoTo QH
         End If
     End If
@@ -336,7 +336,7 @@ Private Function pvSendBody() As Boolean
         ReDim m_baFileBuffer(0 To m_lBufferSize - 1) As Byte
         hResult = IStream_Read(m_pFileStream, m_baFileBuffer, lSize)
         If hResult < 0 Then
-            pvSetError hResult
+            pvSetError hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "IStream_Read"
             GoTo QH
         End If
     Else
@@ -345,7 +345,7 @@ Private Function pvSendBody() As Boolean
     If lSize > 0 Then
         If m_oSocket.Send(VarPtr(m_baFileBuffer(0)), lSize) < 0 Then
             If Not m_oSocket.HasPendingEvent Then
-                pvSetError m_oSocket.LastError
+                pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.Send"
                 GoTo QH
             End If
             If lSize < UBound(m_baFileBuffer) + 1 Then
@@ -367,7 +367,7 @@ Private Function pvSendBody() As Boolean
         m_baFileBuffer = vbNullString
         If Not m_oSocket.SendText(m_sBoundaryData, CodePage:=ucsScpAcp) Then
             If Not m_oSocket.HasPendingEvent Then
-                pvSetError m_oSocket.LastError
+                pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.SendText"
                 GoTo QH
             End If
         Else
@@ -408,7 +408,7 @@ Private Function pvSendComplete(baBuffer() As Byte) As Boolean
                 Call CallbackWeakRef.UploadComplete(Me, m_sLocalFileName)
             End If
         Case Else
-            pvSetError vbObjectError, Replace(ERR_INVALID_RESPONSE, "%1", Mid$(vSplit(0), 10))
+            pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Replace(ERR_INVALID_RESPONSE, "%1", Mid$(vSplit(0), 10))
             GoTo QH
         End Select
         m_oSocket.Close_
@@ -420,21 +420,21 @@ EH:
     Resume Next
 End Function
 
-Private Sub pvSetError(ByVal lNumber As Long, Optional sDescription As String)
+Private Sub pvSetError(ByVal ErrNumber As Long, Optional ErrSource As String, Optional ErrDescription As String)
     Const FUNC_NAME     As String = "pvSetError"
     
     On Error GoTo EH
-    If LenB(sDescription) = 0 Then
+    If LenB(ErrDescription) = 0 Then
         If Not m_oSocket Is Nothing Then
-            sDescription = m_oSocket.GetErrorDescription(lNumber)
+            ErrDescription = m_oSocket.GetErrorDescription(ErrNumber)
         Else
-            sDescription = "Error " & lNumber
+            ErrDescription = "Error " & ErrNumber
         End If
     End If
     CancelOperation
-    RaiseEvent OperationError(lNumber, sDescription)
+    RaiseEvent OperationError(ErrNumber, ErrDescription, ErrSource)
     If m_lCallbackPtr <> 0 Then
-        Call CallbackWeakRef.OperationError(Me, lNumber, sDescription)
+        Call CallbackWeakRef.OperationError(Me, ErrNumber, ErrDescription, ErrSource)
     End If
     Exit Sub
 EH:
@@ -530,7 +530,7 @@ Private Sub m_oSocket_OnConnect()
         If Not m_oSocket.SendText("GET " & m_uRemote.Path & m_uRemote.QueryString & " HTTP/1.0" & vbCrLf & _
                 "Host: " & m_uRemote.Host & vbCrLf & _
                 "Accept: */*" & vbCrLf & vbCrLf, CodePage:=ucsScpAcp) Then
-            pvSetError m_oSocket.LastError
+            pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.SendText"
         End If
     Else
         m_eState = ucsWaitSendBody
@@ -544,7 +544,7 @@ Private Sub m_oSocket_OnConnect()
                 "Content-Type: multipart/form-data; boundary=" & STR_BOUNDARY & vbCrLf & _
                 "Accept: */*" & vbCrLf & vbCrLf & _
                 sPostData, CodePage:=ucsScpAcp) Then
-            pvSetError m_oSocket.LastError
+            pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.SendText"
         End If
     End If
     Exit Sub
@@ -559,7 +559,7 @@ Private Sub m_oSocket_OnReceive()
     On Error GoTo EH
     If m_eState = ucsWaitRecvHeaders Then
         If Not m_oSocket.ReceiveArray(baBuffer) Then
-            pvSetError m_oSocket.LastError
+            pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.ReceiveArray"
             GoTo QH
         End If
         If UBound(baBuffer) < 0 Then
@@ -572,7 +572,7 @@ Private Sub m_oSocket_OnReceive()
     If m_eState = ucsWaitRecvBody Then
         If Not m_oSocket.ReceiveArray(baBuffer) Then
             If m_dblBytesProgress < m_dblContentLength Then
-                pvSetError m_oSocket.LastError
+                pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.ReceiveArray"
             End If
             GoTo QH
         End If
@@ -585,7 +585,7 @@ Private Sub m_oSocket_OnReceive()
     End If
     If m_eState >= ucsWaitSendBody Then
         If Not m_oSocket.ReceiveArray(baBuffer) Then
-            pvSetError m_oSocket.LastError
+            pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.ReceiveArray"
             GoTo QH
         End If
         If UBound(baBuffer) < 0 Then
@@ -649,7 +649,7 @@ Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsy
     On Error GoTo EH
     With m_oSocket.LastError
         If .Number <> 0 Then
-            pvSetError .Number, .Description
+            pvSetError .Number, .Source, .Description
         End If
     End With
     Exit Sub

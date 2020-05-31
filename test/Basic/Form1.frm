@@ -196,7 +196,7 @@ Private Sub m_oSocket_OnConnect()
 End Sub
 
 Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
-    DebugLog MODULE_NAME, "m_oSocket_OnError", "ErrorCode=" & ErrorCode & ", EventMask=" & EventMask & ", Desc=" & m_oSocket.GetErrorDescription(ErrorCode)
+    DebugLog MODULE_NAME, "m_oSocket_OnError", m_oSocket.GetErrorDescription(ErrorCode) & " &H" & Hex$(ErrorCode) & " [EventMask=&H" & Hex$(EventMask) & "]", vbLogEventTypeError
 End Sub
 
 Private Sub m_oSocket_OnResolve(Address As String)
@@ -306,7 +306,7 @@ Private Sub Command4_Click()
     Exit Sub
 QH:
     With oTlsSocket.LastError
-        DebugLog MODULE_NAME, FUNC_NAME, "&H" & Hex$(.Number) & " " & .Description & " at " & .Source, vbLogEventTypeError
+        DebugLog MODULE_NAME, FUNC_NAME & ", " & Replace(.Source, vbCrLf, ", "), .Description & " &H" & Hex$(.Number), vbLogEventTypeError
     End With
     Screen.MousePointer = vbDefault
 End Sub
@@ -365,7 +365,7 @@ Repeat:
 QH:
     If Not oTlsSocket Is Nothing Then
         With oTlsSocket.LastError
-            DebugLog MODULE_NAME, FUNC_NAME, "&H" & Hex$(.Number) & " " & .Description & " at " & .Source, vbLogEventTypeError
+            DebugLog MODULE_NAME, FUNC_NAME & ", " & Replace(.Source, vbCrLf, ", "), .Description & " &H" & Hex$(.Number), vbLogEventTypeError
         End With
     End If
     Screen.MousePointer = vbDefault
@@ -473,23 +473,27 @@ Private Function pvInitHttpRequest( _
 QH:
     If Not oRetVal Is Nothing Then
         With oRetVal.LastError
-            DebugLog MODULE_NAME, FUNC_NAME, "&H" & Hex$(.Number) & " " & .Description & " at " & .Source, vbLogEventTypeError
+            DebugLog MODULE_NAME, FUNC_NAME & ", " & Replace(.Source, vbCrLf, ", "), .Description & " &H" & Hex$(.Number), vbLogEventTypeError
         End With
     End If
 End Function
 
 Private Sub m_oClientSocket_OnClientCertificate(CaDn As Object, Confirmed As Boolean)
-    #If ImplUseDebugLog Then
-        DebugLog MODULE_NAME, "m_oClientSocket_OnClientCertificate", "TODO: Show choose certificate dialog"
-    #End If
+    DebugLog MODULE_NAME, "m_oClientSocket_OnClientCertificate", "TODO: Show choose certificate dialog"
 End Sub
 
 Private Sub m_oClientSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
-    If m_oClientSocket.LastError <> 0 Then
-        #If ImplUseDebugLog Then
-            DebugLog MODULE_NAME, "m_oClientSocket_OnError", "LastError=&H" & Hex$(m_oClientSocket.LastError.Number) & " " & m_oClientSocket.LastError.Description, vbLogEventTypeError
-        #End If
-    End If
+    Const FUNC_NAME     As String = "m_oClientSocket_OnError"
+    
+    With m_oClientSocket.LastError
+        If .Number <> 0 Then
+            #If ImplUseDebugLog Then
+                DebugLog MODULE_NAME, FUNC_NAME & ", " & Replace(.Source, vbCrLf, ", "), .Description & " &H" & Hex$(.Number), vbLogEventTypeError
+            #Else
+                Debug.Print "Error: " & .Description & " [" & MODULE_NAME & "." & FUNC_NAME & "]"
+            #End If
+        End If
+    End With
 End Sub
 
 Private Function pvParseUrl(sUrl As String, uParsed As UcsParsedUrl, Optional DefProtocol As String) As Boolean
@@ -562,7 +566,7 @@ Private Sub Command6_Click()
 QH:
     If Not oTlsSocket Is Nothing Then
         With oTlsSocket.LastError
-            DebugLog MODULE_NAME, FUNC_NAME, "&H" & Hex$(.Number) & " " & .Description & " at " & .Source, vbLogEventTypeError
+            DebugLog MODULE_NAME, FUNC_NAME & ", " & Replace(.Source, vbCrLf, ", "), .Description & " &H" & Hex$(.Number), vbLogEventTypeError
         End With
     End If
 End Sub
@@ -632,7 +636,7 @@ Private Sub Command7_Click()
     Exit Sub
 QH:
     With oTlsSocket.LastError
-        DebugLog MODULE_NAME, FUNC_NAME, "&H" & Hex$(.Number) & " " & .Description & " at " & .Source, vbLogEventTypeError
+        DebugLog MODULE_NAME, FUNC_NAME & ", " & Replace(.Source, vbCrLf, ", "), .Description & " &H" & Hex$(.Number), vbLogEventTypeError
     End With
     Screen.MousePointer = vbDefault
 End Sub
@@ -754,10 +758,10 @@ Private Sub m_oHttpDownload_DownloadComplete(ByVal LocalFileName As String)
     MsgBox "Download to " & LocalFileName & " complete", vbExclamation
 End Sub
 
-Private Sub m_oHttpDownload_OperationError(ByVal Number As Long, ByVal Description As String)
+Private Sub m_oHttpDownload_OperationError(ByVal Number As Long, ByVal Description As String, ByVal Source As String)
     Const FUNC_NAME     As String = "m_oHttpDownload_OperationError"
     
-    DebugLog MODULE_NAME, FUNC_NAME, Hex$(Number) & ": " & Description
+    DebugLog MODULE_NAME, FUNC_NAME, Description & " &H" & Hex$(Number) & " [" & Replace(Source, vbCrLf, "->") & "]"
     MsgBox Description, vbCritical, TypeName(m_oHttpDownload)
 End Sub
 

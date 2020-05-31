@@ -172,7 +172,7 @@ Private Const LNG_AESGCM_IVSZ           As Long = 12
 Private Const LNG_AESGCM_TAGSZ          As Long = 16
 Private Const LNG_LIBSODIUM_SHA512_CONTEXTSZ As Long = 64 + 16 + 128
 Private Const LNG_OUT_OF_MEMORY         As Long = 8
-Private Const STR_VL_ALERTS                             As String = "0|Close notify|10|Unexpected message|20|Bad record mac|40|Handshake failure|42|Bad certificate|43|Unsupported certificate|44|Certificate revoked|45|Certificate expired|46|Certificate unknown|47|Illegal parameter|48|Unknown certificate authority|50|Decode error|51|Decrypt error|70|Protocol version|80|Internal error|90|User canceled|109|Missing extension|112|Unrecognized name|116|Certificate required|120|No application protocol"
+Private Const STR_VL_ALERTS                             As String = "0|Close notify|10|Unexpected message|20|Bad record mac|21|Decryption failed|22|Record overflow|30|Decompression failure|40|Handshake failure|41|No certificate|42|Bad certificate|43|Unsupported certificate|44|Certificate revoked|45|Certificate expired|46|Certificate unknown|47|Illegal parameter|48|Unknown certificate authority|50|Decode error|51|Decrypt error|70|Protocol version|71|Insufficient security|80|Internal error|90|User canceled|100|No renegotiation|109|Missing extension|110|Unsupported expension|112|Unrecognized name|116|Certificate required|120|No application protocol"
 Private Const STR_VL_STATE                              As String = "0|New|1|Closed|2|HandshakeStart|3|ExpectServerHello|4|ExpectExtensions|5|ExpectServerFinished|6|ExpectClientHello|7|ExpectClientFinished|8|PostHandshake|9|Shutdown"
 Private Const STR_VL_HANDSHAKE_TYPE                     As String = "1|client_hello|2|server_hello|4|new_session_ticket|5|end_of_early_data|8|encrypted_extensions|11|certificate|12|server_key_exchange|13|certificate_request|14|server_hello_done|15|certificate_verify|16|client_key_exchange|20|finished|24|key_update|25|compressed_certificate|254|message_hash"
 Private Const STR_VL_EXTENSION_TYPE                     As String = "0|server_name|1|max_fragment_length|2|client_certificate_url|3|trusted_ca_keys|4|truncated_hmac|5|status_request|6|user_mapping|7|client_authz|8|server_authz|9|cert_type|10|supported_groups|11|ec_point_formats|12|srp|13|signature_algorithms|14|use_srtp|15|heartbeat|16|application_layer_protocol_negotiation|17|status_request_v2|18|signed_certificate_timestamp|19|client_certificate_type|20|server_certificate_type|21|padding|22|encrypt_then_mac|23|extended_master_secret|24|token_binding|25|cached_info|26|tls_lts|27|compress_certificate|28|record_size_limit|29|pwd_protect|30|pwd_clear|31|password_salt|32|ticket_pinning|33|tls_cert_with_extern_psk|34|delegated_credentials|35|session_ticket|41|pre_shared_key|42|early_data|43|supported_versions|44|cookie|45|psk_key_exchange_modes|47|certificate_authorities|48|oid_filters|49|post_handshake_auth|" & _
@@ -378,6 +378,7 @@ Public Enum UcsTlsAlertDescriptionsEnum
     uscTlsAlertProtocolVersion = 70
     uscTlsAlertInternalError = 80
     uscTlsAlertUserCanceled = 90
+    uscTlsAlertNoRenegotiation = 100
     uscTlsAlertMissingExtension = 109
     uscTlsAlertUnrecognizedName = 112
     uscTlsAlertCertificateRequired = 116
@@ -392,7 +393,9 @@ Public Type UcsTlsContext
     OnClientCertificate As Long
     '--- state
     State               As UcsTlsStatesEnum
+    LastErrNumber       As Long
     LastError           As String
+    LastErrSource       As String
     LastAlertCode       As UcsTlsAlertDescriptionsEnum
     BlocksStack         As Collection
     '--- handshake
@@ -551,7 +554,7 @@ Public Function TlsInitClient( _
         GoTo QH
     End If
     With uEmpty
-        pvTlsSetLastError uEmpty, vbNullString
+        pvTlsSetLastError uEmpty
         .State = ucsTlsStateHandshakeStart
         .RemoteHostName = RemoteHostName
         .LocalFeatures = LocalFeatures
@@ -564,7 +567,7 @@ Public Function TlsInitClient( _
 QH:
     Exit Function
 EH:
-    pvTlsSetLastError uCtx, Err.Description
+    pvTlsSetLastError uCtx, Err.Number, Err.Source, Err.Description
     Resume QH
 End Function
 
@@ -580,7 +583,7 @@ Public Function TlsInitServer( _
         GoTo QH
     End If
     With uEmpty
-        pvTlsSetLastError uEmpty, vbNullString
+        pvTlsSetLastError uEmpty
         .IsServer = True
         .State = ucsTlsStateExpectClientHello
         .RemoteHostName = RemoteHostName
@@ -595,7 +598,7 @@ Public Function TlsInitServer( _
 QH:
     Exit Function
 EH:
-    pvTlsSetLastError uCtx, Err.Description
+    pvTlsSetLastError uCtx, Err.Number, Err.Source, Err.Description
     Resume QH
 End Function
 
@@ -604,13 +607,15 @@ Public Function TlsTerminate(uCtx As UcsTlsContext)
 End Function
 
 Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize As Long, baOutput() As Byte, lOutputPos As Long) As Boolean
+    Const FUNC_NAME     As String = "TlsHandshake"
+    
     On Error GoTo EH
     With uCtx
         If .State = ucsTlsStateClosed Then
-            pvTlsSetLastError uCtx, ERR_CONNECTION_CLOSED
+            pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_CONNECTION_CLOSED
             Exit Function
         End If
-        pvTlsSetLastError uCtx, vbNullString
+        pvTlsSetLastError uCtx
         '--- swap-in
         pvArraySwap .SendBuffer, .SendPos, baOutput, lOutputPos
         If .State = ucsTlsStateHandshakeStart Then
@@ -621,7 +626,7 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
                 lSize = pvArraySize(baInput)
             End If
             If Not pvTlsParsePayload(uCtx, baInput, lSize, .LastError, .LastAlertCode) Then
-                pvTlsSetLastError uCtx, .LastError, .LastAlertCode
+                pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, .LastError, .LastAlertCode
                 GoTo QH
             End If
         End If
@@ -633,11 +638,13 @@ QH:
     End With
     Exit Function
 EH:
-    pvTlsSetLastError uCtx, Err.Description
+    pvTlsSetLastError uCtx, Err.Number, Err.Source, Err.Description
     Resume QH
 End Function
 
 Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize As Long, baPlainText() As Byte, lPos As Long) As Boolean
+    Const FUNC_NAME     As String = "TlsReceive"
+    
     On Error GoTo EH
     With uCtx
         If lSize < 0 Then
@@ -658,14 +665,14 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
             Exit Function
         End If
         If .State = ucsTlsStateClosed Then
-            pvTlsSetLastError uCtx, ERR_CONNECTION_CLOSED
+            pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_CONNECTION_CLOSED
             Exit Function
         End If
-        pvTlsSetLastError uCtx, vbNullString
+        pvTlsSetLastError uCtx
         '--- swap-in
         pvArraySwap .DecrBuffer, .DecrPos, baPlainText, lPos
         If Not pvTlsParsePayload(uCtx, baInput, lSize, .LastError, .LastAlertCode) Then
-            pvTlsSetLastError uCtx, .LastError, .LastAlertCode
+            pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, .LastError, .LastAlertCode
             GoTo QH
         End If
         '--- success
@@ -676,11 +683,12 @@ QH:
     End With
     Exit Function
 EH:
-    pvTlsSetLastError uCtx, Err.Description
+    pvTlsSetLastError uCtx, Err.Number, Err.Source, Err.Description
     Resume QH
 End Function
 
 Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSize As Long, baOutput() As Byte, lOutputPos As Long) As Boolean
+    Const FUNC_NAME     As String = "TlsSend"
     Dim lPos            As Long
     
     On Error GoTo EH
@@ -703,10 +711,10 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
             Exit Function
         End If
         If .State = ucsTlsStateClosed Then
-            pvTlsSetLastError uCtx, ERR_CONNECTION_CLOSED
+            pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_CONNECTION_CLOSED
             Exit Function
         End If
-        pvTlsSetLastError uCtx, vbNullString
+        pvTlsSetLastError uCtx
         '--- swap-in
         pvArraySwap .SendBuffer, .SendPos, baOutput, lOutputPos
         Do While lPos < lSize
@@ -721,7 +729,7 @@ QH:
     End With
     Exit Function
 EH:
-    pvTlsSetLastError uCtx, Err.Description
+    pvTlsSetLastError uCtx, Err.Number, Err.Source, Err.Description
     Resume QH
 End Function
 
@@ -731,7 +739,7 @@ Public Function TlsShutdown(uCtx As UcsTlsContext, baOutput() As Byte, lPos As L
         If .State = ucsTlsStateClosed Then
             Exit Function
         End If
-        pvTlsSetLastError uCtx, vbNullString
+        pvTlsSetLastError uCtx
         '--- swap-in
         pvArraySwap .SendBuffer, .SendPos, baOutput, lPos
         .SendPos = pvTlsBuildAlert(uCtx, .SendBuffer, .SendPos, uscTlsAlertCloseNotify, TLS_ALERT_LEVEL_WARNING)
@@ -744,17 +752,21 @@ QH:
     End With
     Exit Function
 EH:
-    pvTlsSetLastError uCtx, Err.Description
+    pvTlsSetLastError uCtx, Err.Number, Err.Source, Err.Description
     Resume QH
 End Function
 
-Public Function TlsGetLastError(uCtx As UcsTlsContext, Optional LastErrNumber As Long) As String
+Public Function TlsGetLastError(uCtx As UcsTlsContext, Optional LastErrNumber As Long, Optional LastErrSource As String) As String
+    LastErrNumber = uCtx.LastErrNumber
+    LastErrSource = uCtx.LastErrSource
     TlsGetLastError = uCtx.LastError
     If uCtx.LastAlertCode <> -1 Then
         TlsGetLastError = IIf(LenB(TlsGetLastError) <> 0, TlsGetLastError & ". ", vbNullString) & Replace(STR_FORMAT_ALERT, "%1", TlsGetLastAlert(uCtx))
-    End If
-    If uCtx.LastAlertCode <> uscTlsAlertCloseNotify Or LenB(uCtx.LastError) <> 0 Then
-        LastErrNumber = vbObjectError
+        '--- warnings
+        Select Case uCtx.LastAlertCode
+        Case uscTlsAlertCloseNotify, uscTlsAlertUserCanceled, uscTlsAlertNoRenegotiation
+            LastErrNumber = 0
+        End Select
     End If
 End Function
 
@@ -2422,15 +2434,22 @@ Private Function pvTlsPrepareCipherSuitsOrder(ByVal eFilter As UcsTlsLocalFeatur
     Set pvTlsPrepareCipherSuitsOrder = oRetVal
 End Function
 
-Private Sub pvTlsSetLastError(uCtx As UcsTlsContext, sError As String, Optional ByVal AlertDesc As UcsTlsAlertDescriptionsEnum = -1)
+Private Sub pvTlsSetLastError( _
+            uCtx As UcsTlsContext, _
+            Optional ByVal ErrNumber As Long, _
+            Optional ErrSource As String, _
+            Optional ErrDescription As String, _
+            Optional ByVal AlertCode As UcsTlsAlertDescriptionsEnum = -1)
     With uCtx
-        .LastError = sError
-        .LastAlertCode = AlertDesc
-        If LenB(sError) = 0 Then
+        .LastErrNumber = ErrNumber
+        .LastErrSource = ErrSource
+        .LastError = ErrDescription
+        .LastAlertCode = AlertCode
+        If LenB(ErrDescription) = 0 Then
             Set .BlocksStack = Nothing
         Else
-            If AlertDesc >= 0 Then
-                .SendPos = pvTlsBuildAlert(uCtx, .SendBuffer, .SendPos, AlertDesc, TLS_ALERT_LEVEL_FATAL)
+            If AlertCode >= 0 Then
+                .SendPos = pvTlsBuildAlert(uCtx, .SendBuffer, .SendPos, AlertCode, TLS_ALERT_LEVEL_FATAL)
             End If
             .State = ucsTlsStateClosed
         End If

@@ -100,11 +100,17 @@ Private Sub m_oSocket_OnClose()
 End Sub
 
 Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
-    If m_oSocket.LastError <> 0 Then
-        #If ImplUseDebugLog Then
-            DebugLog MODULE_NAME, "m_oSocket_OnError", "&H" & Hex$(m_oSocket.LastError) & " " & m_oSocket.LastError.Description, vbLogEventTypeError
-        #End If
-    End If
+    Const FUNC_NAME     As String = "m_oSocket_OnError"
+    
+    With m_oSocket.LastError
+        If .Number <> 0 Then
+            #If ImplUseDebugLog Then
+                DebugLog MODULE_NAME, FUNC_NAME & ", " & Replace(.Source, vbCrLf, ", "), .Description & " &H" & Hex$(.Number), vbLogEventTypeError
+            #Else
+                Debug.Print "Error: " & .Description & " &H" & Hex$(.Number) & " [" & MODULE_NAME & "." & FUNC_NAME & ", " & Replace(.Source, vbCrLf, ", ") & "]"
+            #End If
+        End If
+    End With
     Parent.frRemoveHandler m_sKey
 End Sub
 

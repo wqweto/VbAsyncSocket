@@ -238,7 +238,7 @@ End Type
 ' Constants and member variables
 '=========================================================================
 
-Private Const STR_VL_ALERTS                 As String = "0|Close notify|10|Unexpected message|20|Bad record mac|40|Handshake failure|42|Bad certificate|44|Certificate revoked|45|Certificate expired|46|Certificate unknown|47|Illegal parameter|48|Unknown certificate authority|50|Decode error|51|Decrypt error|70|Protocol version|80|Internal error|90|User canceled|109|Missing extension|112|Unrecognized name|116|Certificate required|120|No application protocol"
+Private Const STR_VL_ALERTS                 As String = "0|Close notify|10|Unexpected message|20|Bad record mac|21|Decryption failed|22|Record overflow|30|Decompression failure|40|Handshake failure|41|No certificate|42|Bad certificate|43|Unsupported certificate|44|Certificate revoked|45|Certificate expired|46|Certificate unknown|47|Illegal parameter|48|Unknown certificate authority|50|Decode error|51|Decrypt error|70|Protocol version|71|Insufficient security|80|Internal error|90|User canceled|100|No renegotiation|109|Missing extension|110|Unsupported expension|112|Unrecognized name|116|Certificate required|120|No application protocol"
 Private Const STR_UNKNOWN                   As String = "Unknown (%1)"
 Private Const STR_FORMAT_ALERT              As String = "%1."
 '--- errors
@@ -483,7 +483,7 @@ RetryCredentials:
             End If
             hResult = AcquireCredentialsHandle(0, UNISP_NAME, IIf(.IsServer, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND), 0, uCred, 0, 0, .hTlsCredentials, 0)
             If hResult < 0 Then
-                pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "AcquireCredentialsHandle", , .LastAlertCode
+                pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "AcquireCredentialsHandle", AlertCode:=.LastAlertCode
                 GoTo QH
             End If
             For lIdx = 0 To uCred.cCreds - 1
@@ -512,7 +512,7 @@ RetryCredentials:
         If hResult = SEC_E_INCOMPLETE_MESSAGE Then
             pvInitSecBuffer .InBuffers(1), SECBUFFER_EMPTY
         ElseIf hResult < 0 Then
-            pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & sApiSource, , .LastAlertCode
+            pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & sApiSource, AlertCode:=.LastAlertCode
             GoTo QH
         Else
             .RecvPos = 0
@@ -599,10 +599,11 @@ RetryCredentials:
                     .ContextReq = .ContextReq Or ISC_REQ_USE_SUPPLIED_CREDS
                     GoTo RetryCredentials
                 End If
-                pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME, , .LastAlertCode
+                pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME, AlertCode:=.LastAlertCode
                 GoTo QH
             Case Else
-                pvTlsSetLastError uCtx, vbObjectError, FUNC_NAME, Replace(Replace(ERR_UNEXPECTED_RESULT, "%1", sApiSource), "%2", "&H" & Hex$(hResult)), .LastAlertCode
+                pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & sApiSource, _
+                    Replace(Replace(ERR_UNEXPECTED_RESULT, "%1", sApiSource), "%2", "&H" & Hex$(hResult)), AlertCode:=.LastAlertCode
                 GoTo QH
             End Select
         End If
@@ -689,7 +690,8 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
                 .State = ucsTlsStateShutdown
                 Exit Do
             Case Else
-                pvTlsSetLastError uCtx, vbObjectError, FUNC_NAME, Replace(Replace(ERR_UNEXPECTED_RESULT, "%1", "DecryptMessage"), "%2", "&H" & Hex$(hResult))
+                pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "DecryptMessage", _
+                    Replace(Replace(ERR_UNEXPECTED_RESULT, "%1", "DecryptMessage"), "%2", "&H" & Hex$(hResult))
                 GoTo QH
             End Select
         Loop
@@ -780,7 +782,8 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
             Case SEC_E_OK
                 '--- do nothing
             Case Else
-                pvTlsSetLastError uCtx, vbObjectError, FUNC_NAME, Replace(Replace(ERR_UNEXPECTED_RESULT, "%1", "EncryptMessage"), "%2", "&H" & Hex$(hResult))
+                pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "EncryptMessage", _
+                    Replace(Replace(ERR_UNEXPECTED_RESULT, "%1", "EncryptMessage"), "%2", "&H" & Hex$(hResult))
                 GoTo QH
             End Select
         Next
@@ -859,25 +862,31 @@ EH:
     Resume QH
 End Function
 
-Public Function TlsGetLastError(uCtx As UcsTlsContext, Optional LastErrNumber As Long) As String
+Public Function TlsGetLastError(uCtx As UcsTlsContext, Optional LastErrNumber As Long, Optional LastErrSource As String) As String
     LastErrNumber = uCtx.LastErrNumber
+    LastErrSource = uCtx.LastErrSource
     TlsGetLastError = uCtx.LastError
     If uCtx.LastAlertCode <> -1 Then
         TlsGetLastError = IIf(LenB(TlsGetLastError) <> 0, TlsGetLastError & ". ", vbNullString) & Replace(STR_FORMAT_ALERT, "%1", pvTlsGetLastAlert(uCtx))
     End If
 End Function
 
-Private Sub pvTlsSetLastError(uCtx As UcsTlsContext, Optional ByVal lNumber As Long, Optional sSource As String, Optional sDescription As String, Optional ByVal AlertDesc As UcsTlsAlertDescriptionsEnum = -1)
+Private Sub pvTlsSetLastError( _
+            uCtx As UcsTlsContext, _
+            Optional ByVal ErrNumber As Long, _
+            Optional ErrSource As String, _
+            Optional ErrDescription As String, _
+            Optional ByVal AlertCode As UcsTlsAlertDescriptionsEnum = -1)
     With uCtx
-        .LastErrNumber = lNumber
-        .LastErrSource = sSource
-        .LastAlertCode = AlertDesc
-        If lNumber <> 0 And LenB(sDescription) = 0 Then
+        .LastErrNumber = ErrNumber
+        .LastErrSource = ErrSource
+        .LastAlertCode = AlertCode
+        If ErrNumber <> 0 And LenB(ErrDescription) = 0 Then
             With New cAsyncSocket
-                uCtx.LastError = .GetErrorDescription(lNumber)
+                uCtx.LastError = .GetErrorDescription(ErrNumber)
             End With
         Else
-            .LastError = sDescription
+            .LastError = ErrDescription
         End If
         If Right$(.LastError, 2) = vbCrLf Then
             .LastError = Left$(.LastError, Len(.LastError) - 2)

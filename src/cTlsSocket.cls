@@ -418,26 +418,29 @@ End Property
 
 Property Get LastError() As VBA.ErrObject
     Dim lErrNumber      As Long
+    Dim sErrSource      As String
     
     Set LastError = Err
     With LastError
-        .Description = TlsGetLastError(m_uCtx, lErrNumber)
+        .Description = TlsGetLastError(m_uCtx, lErrNumber, sErrSource)
         If LenB(.Description) <> 0 And lErrNumber <> 0 Then
             .Number = lErrNumber
-            .Source = MODULE_NAME
+            .Source = sErrSource
         ElseIf m_oSocket.LastError <> 0 And Not m_oSocket.HasPendingEvent Then
             .Description = m_oSocket.GetErrorDescription(m_oSocket.LastError)
             .Number = m_oSocket.LastError
             .Source = "cAsyncSocket"
         Else
             .Number = 0
-            .Source = vbNullString
+            .Source = sErrSource
         End If
     End With
 End Property
 
-Private Function pvSetLastError(sError As String)
+Private Function pvSetLastError(sError As String, sErrSource As String)
+    m_uCtx.LastErrNumber = vbObjectError
     m_uCtx.LastError = sError
+    m_uCtx.LastErrSource = sErrSource
 End Function
 
 Property Get IsClosed() As Boolean
@@ -1239,11 +1242,11 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
                         DebugLog MODULE_NAME, FUNC_NAME, "Will skip server certificate checks for " & RemoteHostName
                     #End If
                 ElseIf RemoteCertificates Is Nothing Then
-                    pvSetLastError ERR_NO_CERTIFICATE
+                    pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
                     RaiseEvent OnError(LastError.Number, ucsSfdRead)
                     GoTo QH
                 ElseIf Not pvPkiCertChainValidate(RemoteHostName, RemoteCertificates, frRootStore, sError) Then
-                    pvSetLastError sError
+                    pvSetLastError sError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & MODULE_NAME & ".pvPkiCertChainValidate"
                     RaiseEvent OnError(LastError.Number, ucsSfdRead)
                     GoTo QH
                 End If
@@ -1451,7 +1454,7 @@ Private Sub m_oSocket_OnClose()
     On Error GoTo EH
     If m_bUseTls Then
         If Not pvOnReceive(Flush:=True) Then
-            'GoTo QH
+            '--- do nothing
         End If
         If pvOnBeforeNotify(ucsSfdClose) Then
             RaiseEvent OnClose
