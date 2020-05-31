@@ -185,7 +185,7 @@ Private Sub Command1_Click()
     End With
     Exit Sub
 EH:
-    MsgBox Err.Description, vbCritical
+    MsgBox Err.Description, vbCritical, FUNC_NAME
 End Sub
 
 Private Sub m_oSocket_OnConnect()
@@ -723,8 +723,8 @@ End Sub
 
 Private Sub Command11_Click()
     Set m_oHttpDownload = New cHttpDownload
-'    m_oHttpDownload.DownloadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://dl.unicontsoft.com/upload/pix/ss_vbyoga_flex_container.gif", Environ$("TMP") & "\aaa.gif"
-    m_oHttpDownload.DownloadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://dl.unicontsoft.com/upload/aaa.zip", Environ$("TMP") & "\aaa.zip"
+    m_oHttpDownload.DownloadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://dl.unicontsoft.com/upload/pix/ss_vbyoga_flex_container.gif", Environ$("TMP") & "\aaa.gif"
+'    m_oHttpDownload.DownloadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://dl.unicontsoft.com/upload/aaa.zip", Environ$("TMP") & "\aaa.zip"
 End Sub
 
 Private Sub m_oHttpDownload_OperationStart()
@@ -761,8 +761,8 @@ End Sub
 Private Sub m_oHttpDownload_OperationError(ByVal Number As Long, ByVal Description As String, ByVal Source As String)
     Const FUNC_NAME     As String = "m_oHttpDownload_OperationError"
     
-    DebugLog MODULE_NAME, FUNC_NAME, Description & " &H" & Hex$(Number) & " [" & Replace(Source, vbCrLf, "->") & "]"
-    MsgBox Description, vbCritical, TypeName(m_oHttpDownload)
+    DebugLog MODULE_NAME, FUNC_NAME & ", " & Replace(Source, vbCrLf, ", "), Description & " &H" & Hex$(Number)
+    MsgBox Description, vbCritical, FUNC_NAME
 End Sub
 
 Private Sub Command12_Click()
