@@ -58,6 +58,8 @@ Private Const SEC_E_INCOMPLETE_MESSAGE                  As Long = &H80090318
 Private Const SECPKG_ATTR_STREAM_SIZES                  As Long = 4
 Private Const SECPKG_ATTR_REMOTE_CERT_CONTEXT           As Long = &H53
 Private Const SECPKG_ATTR_ISSUER_LIST_EX                As Long = &H59
+Private Const SECPKG_ATTR_CONNECTION_INFO               As Long = &H5A
+Private Const SECPKG_ATTR_CIPHER_INFO                   As Long = &H64
 '--- for ApplyControlToken
 Private Const SCHANNEL_SHUTDOWN                         As Long = 1   ' gracefully close down a connection
 '--- for CryptDecodeObjectEx
@@ -102,6 +104,7 @@ Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal uc
 Private Declare Function VirtualProtect Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flNewProtect As Long, ByRef lpflOldProtect As Long) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
 Private Declare Function lstrlen Lib "kernel32" Alias "lstrlenA" (ByVal lpString As Long) As Long
+Private Declare Function lstrlenW Lib "kernel32" (ByVal lpString As Long) As Long
 Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
 '--- security
 Private Declare Function AcquireCredentialsHandle Lib "security" Alias "AcquireCredentialsHandleA" (ByVal pszPrincipal As Long, ByVal pszPackage As String, ByVal fCredentialUse As Long, ByVal pvLogonId As Long, pAuthData As Any, ByVal pGetKeyFn As Long, ByVal pvGetKeyArgument As Long, phCredential As Currency, ByVal ptsExpiry As Long) As Long
@@ -232,6 +235,35 @@ End Type
 Private Type SecPkgContext_IssuerListInfoEx
     aIssuers            As Long
     cIssuers            As Long
+End Type
+
+Private Type SecPkgContext_ConnectionInfo
+    dwProtocol          As Long
+    aiCipher            As Long
+    dwCipherStrength    As Long
+    aiHash              As Long
+    dwHashStrength      As Long
+    aiExch              As Long
+    dwExchStrength      As Long
+End Type
+
+Private Const SZ_ALG_MAX_SIZE  As Long = 64
+Private Type SecPkgContext_CipherInfo
+    dwVersion           As Long
+    dwProtocol          As Long
+    dwCipherSuite       As Long
+    dwBaseCipherSuite   As Long
+    szCipherSuite(0 To SZ_ALG_MAX_SIZE - 1) As Integer
+    szCipher(0 To SZ_ALG_MAX_SIZE - 1) As Integer
+    dwCipherLen         As Long
+    dwCipherBlockLen    As Long
+    szHash(0 To SZ_ALG_MAX_SIZE - 1) As Integer
+    dwHashLen           As Long
+    szExchange(0 To SZ_ALG_MAX_SIZE - 1) As Integer
+    dwMinExchangeLen    As Long
+    dwMaxExchangeLen    As Long
+    szCertificate(0 To SZ_ALG_MAX_SIZE - 1) As Integer
+    dwKeyType           As Long
 End Type
 
 '=========================================================================
@@ -430,6 +462,8 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
     Dim baCaDn()        As Byte
     Dim uCertContext    As CERT_CONTEXT
     Dim sApiSource      As String
+    Dim uConnInfo       As SecPkgContext_ConnectionInfo
+    Dim uCipherInfo     As SecPkgContext_CipherInfo
     
     On Error GoTo EH
     With uCtx
@@ -571,6 +605,16 @@ RetryCredentials:
                         GoTo QH
                     End If
                 End If
+                #If ImplUseDebugLog Then
+                    If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_CIPHER_INFO, uCipherInfo) = 0 Then
+                        DebugLog MODULE_NAME, FUNC_NAME, "Using " & pvToStringW(VarPtr(uCipherInfo.szCipherSuite(0))) & " (&H" & Hex$(uCipherInfo.dwCipherSuite) & ") from " & .RemoteHostName
+                    ElseIf QueryContextAttributes(.hTlsContext, SECPKG_ATTR_CONNECTION_INFO, uConnInfo) = 0 Then
+                        DebugLog MODULE_NAME, FUNC_NAME, "For " & pvTlsGetAlgName(uConnInfo.dwProtocol) & " using " & _
+                            pvTlsGetAlgName(uConnInfo.aiCipher) & " with " & _
+                            pvTlsGetAlgName(uConnInfo.aiHash) & " and " & _
+                            pvTlsGetAlgName(uConnInfo.aiExch) & " key-exchange from " & .RemoteHostName
+                    End If
+                #End If
                 .State = ucsTlsStatePostHandshake
             Case SEC_I_CONTINUE_NEEDED
                 '--- do nothing
@@ -917,6 +961,67 @@ Private Function pvTlsGetLastAlert(uCtx As UcsTlsContext, Optional AlertCode As 
     End If
 End Function
 
+#If ImplUseDebugLog Then
+Private Function pvTlsGetAlgName(ByVal lAlgId As Long) As String
+    Select Case lAlgId
+    Case &H20&
+        pvTlsGetAlgName = "SSL3_CLIENT"
+    Case &H80&
+        pvTlsGetAlgName = "TLS1_0_CLIENT"
+    Case &H200&
+        pvTlsGetAlgName = "TLS1_1_CLIENT"
+    Case &H800&
+        pvTlsGetAlgName = "TLS1_2_CLIENT"
+    Case &H10&
+        pvTlsGetAlgName = "SSL3_SERVER"
+    Case &H40&
+        pvTlsGetAlgName = "TLS1_0_SERVER"
+    Case &H100&
+        pvTlsGetAlgName = "TLS1_1_SERVER"
+    Case &H400&
+        pvTlsGetAlgName = "TLS1_2_SERVER"
+    Case &H6602&
+        pvTlsGetAlgName = "RC2"
+    Case &H6801&
+        pvTlsGetAlgName = "RC4"
+    Case &H6601&
+        pvTlsGetAlgName = "DES"
+    Case &H6603&
+        pvTlsGetAlgName = "3DES"
+    Case &H660E&
+        pvTlsGetAlgName = "AES_128"
+    Case &H660F&
+        pvTlsGetAlgName = "AES_192"
+    Case &H6610&
+        pvTlsGetAlgName = "AES_256"
+    Case &H8001&
+        pvTlsGetAlgName = "MD2"
+    Case &H8003&
+        pvTlsGetAlgName = "MD5"
+    Case &H8004&
+        pvTlsGetAlgName = "SHA1"
+    Case &H800C&
+        pvTlsGetAlgName = "SHA_256"
+    Case &H800D&
+        pvTlsGetAlgName = "SHA_384"
+    Case &H800E&
+        pvTlsGetAlgName = "SHA_512"
+    Case &HA400&
+        pvTlsGetAlgName = "RSA_KEYX"
+    Case &H2400&
+        pvTlsGetAlgName = "RSA_SIGN"
+    Case &HAA02&
+        pvTlsGetAlgName = "DH_EPHEM"
+    Case &HAA05&
+        pvTlsGetAlgName = "ECDH"
+    Case &HAE06&
+        pvTlsGetAlgName = "ECDH_EPHEM"
+    Case Else
+        pvTlsGetAlgName = "&H" & Hex$(lAlgId)
+    End Select
+End Function
+#End If
+
 Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collection, hMemStore As Long) As Boolean
     Const FUNC_NAME     As String = "pvTlsImportToCertStore"
     Const DEF_KEY_NAME  As String = "VbAsyncSocketKey"
@@ -1210,6 +1315,15 @@ Private Function pvToString(ByVal lPtr As Long) As String
         Call CopyMemory(ByVal pvToString, ByVal lPtr, Len(pvToString))
     End If
 End Function
+
+#If ImplUseDebugLog Then
+Private Function pvToStringW(ByVal lPtr As Long) As String
+    If lPtr Then
+        pvToStringW = String$(lstrlenW(lPtr), 0)
+        Call CopyMemory(ByVal StrPtr(pvToStringW), ByVal lPtr, LenB(pvToStringW))
+    End If
+End Function
+#End If
 
 Private Function pvCollectionCount(oCol As Collection) As Long
     If Not oCol Is Nothing Then
