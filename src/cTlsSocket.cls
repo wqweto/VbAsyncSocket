@@ -46,6 +46,13 @@ Event BeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Cancel As Boo
 Event AfterNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum)
 Event OnClientCertificate(Issuers As Object, Confirmed As Boolean)
 
+Public Enum UcsTlsLocalFeaturesEnum '--- bitmask
+    ucsTlsSupportTls12 = 2 ^ 0
+    ucsTlsSupportTls13 = 2 ^ 1
+    ucsTlsIgnoreServerCertificateErrors = 2 ^ 2
+    ucsTlsSupportAll = ucsTlsSupportTls12 Or ucsTlsSupportTls13
+End Enum
+
 '=========================================================================
 ' API
 '=========================================================================
@@ -101,6 +108,8 @@ Private Const CERT_TRUST_IS_PARTIAL_CHAIN               As Long = &H10000
 Private Const CERT_FIND_EXISTING                        As Long = &HD0000
 '--- for CERT_ALT_NAME_ENTRY
 Private Const CERT_ALT_NAME_DNS_NAME                    As Long = 3
+'--- for CertCreateCertificateChainEngine
+Private Const CERT_CHAIN_CACHE_END_CERT                 As Long = 1
 '--- OIDs
 Private Const szOID_RSA_RSA                             As String = "1.2.840.113549.1.1.1"
 Private Const szOID_ECC_CURVE_P256                      As String = "1.2.840.10045.3.1.7"
@@ -360,6 +369,9 @@ Private Const ERR_TRUST_IS_PARTIAL_CHAIN                As String = "The certifi
 Private Const ERR_TRUST_IS_UNTRUSTED_ROOT               As String = "The certificate or certificate chain is based on an untrusted root"
 Private Const ERR_TRUST_IS_NOT_TIME_VALID               As String = "The certificate has expired"
 Private Const ERR_TRUST_REVOCATION_STATUS_UNKNOWN       As String = "The revocation status of the certificate or one of the certificates in the certificate chain is unknown"
+Private Const ERR_UNKNOWN_CNG_MAGIC                     As String = "Unknown CNG private key magic (%1)"
+Private Const ERR_UNKNOWN_CAPI_MAGIC                    As String = "Unknown CAPI private key magic (%1)"
+Private Const ERR_UNKNOWN_CERTIFICATECHAIN_ERROR_MASK   As String = "Unknown CertGetCertificateChain error mask (%1)"
 
 Private WithEvents m_oSocket    As cAsyncSocket
 Attribute m_oSocket.VB_VarHelpID = -1
@@ -409,15 +421,15 @@ End Sub
 ' Properties
 '=========================================================================
 
-Property Get Socket() As cAsyncSocket
+Public Property Get Socket() As cAsyncSocket
     Set Socket = m_oSocket
 End Property
 
-Property Get SocketHandle() As Long
+Public Property Get SocketHandle() As Long
     SocketHandle = m_oSocket.SocketHandle
 End Property
 
-Property Get LastError() As VBA.ErrObject
+Public Property Get LastError() As VBA.ErrObject
     Dim lErrNumber      As Long
     Dim sErrSource      As String
     
@@ -444,7 +456,7 @@ Private Function pvSetLastError(sError As String, sErrSource As String)
     m_uCtx.LastErrSource = sErrSource
 End Function
 
-Property Get IsClosed() As Boolean
+Public Property Get IsClosed() As Boolean
     If m_bUseTls Then
         IsClosed = TlsIsClosed(m_uCtx)
     Else
@@ -452,7 +464,7 @@ Property Get IsClosed() As Boolean
     End If
 End Property
 
-Property Get AvailableBytes() As Long
+Public Property Get AvailableBytes() As Long
     If m_bUseTls Then
         AvailableBytes = m_lRecvPos
     Else
@@ -460,7 +472,7 @@ Property Get AvailableBytes() As Long
     End If
 End Property
 
-Property Get LastSendBytes() As Long
+Public Property Get LastSendBytes() As Long
     If m_bUseTls Then
         LastSendBytes = m_lLastSendBytes
     Else
@@ -468,43 +480,43 @@ Property Get LastSendBytes() As Long
     End If
 End Property
 
-Property Get HasPendingEvent() As Boolean
+Public Property Get HasPendingEvent() As Boolean
     HasPendingEvent = m_oSocket.HasPendingEvent
 End Property
 
-Property Get IsServer() As Boolean
+Public Property Get IsServer() As Boolean
     IsServer = m_bIsServer
 End Property
 
-Property Get RemoteHostName() As String
+Public Property Get RemoteHostName() As String
     RemoteHostName = m_sRemoteHostName
 End Property
 
-Property Get LocalFeatures() As UcsTlsLocalFeaturesEnum
+Public Property Get LocalFeatures() As UcsTlsLocalFeaturesEnum
     LocalFeatures = m_eLocalFeatures
 End Property
 
-Property Get LocalCertificates() As Collection
+Public Property Get LocalCertificates() As Collection
     Set LocalCertificates = m_uCtx.LocalCertificates
 End Property
 
-Property Set LocalCertificates(oValue As Collection)
+Public Property Set LocalCertificates(oValue As Collection)
     Set m_uCtx.LocalCertificates = oValue
 End Property
 
-Property Get LocalPrivateKey() As Collection
+Public Property Get LocalPrivateKey() As Collection
     Set LocalPrivateKey = m_uCtx.LocalPrivateKey
 End Property
 
-Property Set LocalPrivateKey(oValue As Collection)
+Public Property Set LocalPrivateKey(oValue As Collection)
     Set m_uCtx.LocalPrivateKey = oValue
 End Property
 
-Property Get RemoteCertificates() As Collection
+Public Property Get RemoteCertificates() As Collection
     Set RemoteCertificates = m_uCtx.RemoteCertificates
 End Property
 
-Property Get AlpnNegotiated() As String
+Public Property Get AlpnNegotiated() As String
     AlpnNegotiated = m_uCtx.AlpnNegotiated
 End Property
 
@@ -1839,7 +1851,7 @@ Private Function pvPkiCertChainValidate(sRemoteHostName As String, cCerts As Col
     Loop
     '--- build custom chain engine that trusts the additional root CA certificates if provided
     If hRootStore <> 0 Then
-        If OsVersion < ucsOsvWin7 Then
+        If OsVersion <= ucsOsvWin7 Then
             uEngineConfig.cbSize = Len(uEngineConfig) - 12
             uEngineConfig.cAdditionalStore = 1
             uEngineConfig.rghAdditionalStore = VarPtr(hRootStore)
@@ -1847,6 +1859,7 @@ Private Function pvPkiCertChainValidate(sRemoteHostName As String, cCerts As Col
             uEngineConfig.cbSize = Len(uEngineConfig)
             uEngineConfig.hExclusiveRoot = hRootStore
         End If
+        uEngineConfig.dwFlags = CERT_CHAIN_CACHE_END_CERT
         If CertCreateCertificateChainEngine(uEngineConfig, hChainEngine) = 0 Then
             hResult = Err.LastDllError
             sApiSource = "CertCreateCertificateChainEngine"
@@ -1888,7 +1901,7 @@ Private Function pvPkiCertChainValidate(sRemoteHostName As String, cCerts As Col
         ElseIf (dwErrorStatus And CERT_TRUST_REVOCATION_STATUS_UNKNOWN) <> 0 Then
             sError = ERR_TRUST_REVOCATION_STATUS_UNKNOWN
         Else
-            sError = "CertGetCertificateChain error mask: 0x" & Hex$(dwErrorStatus)
+            sError = Replace(ERR_UNKNOWN_CERTIFICATECHAIN_ERROR_MASK, "%1", "&H" & Hex$(dwErrorStatus))
         End If
         GoTo QH
     End If
@@ -2046,7 +2059,7 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, baPrivKey() A
             End If
         Case Else
             #If ImplUseDebugLog Then
-                DebugLog MODULE_NAME, FUNC_NAME, "Unknown CNG private key magic (0x" & Hex$(lMagic) & ")", vbLogEventTypeWarning
+                DebugLog MODULE_NAME, FUNC_NAME, Replace(ERR_UNKNOWN_CNG_MAGIC, "%1", "&H" & Hex$(lMagic)), vbLogEventTypeWarning
             #End If
         End Select
     Else
@@ -2095,7 +2108,7 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, baPrivKey() A
             End If
         Case Else
             #If ImplUseDebugLog Then
-                DebugLog MODULE_NAME, FUNC_NAME, "Unknown CAPI private key magic (0x" & Hex$(lMagic) & ")", vbLogEventTypeWarning
+                DebugLog MODULE_NAME, FUNC_NAME, Replace(ERR_UNKNOWN_CAPI_MAGIC, "%1", "&H" & Hex$(lMagic)), vbLogEventTypeWarning
             #End If
         End Select
     End If

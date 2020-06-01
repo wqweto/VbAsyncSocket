@@ -152,26 +152,7 @@ End Type
 ' Constants and member variables
 '=========================================================================
 
-Private Const STR_LIBSODIUM_SHA384_STATE As String = "2J4FwV2du8sH1Xw2KimaYhfdcDBaAVmROVkO99jsLxUxC8D/ZyYzZxEVWGiHSrSOp4/5ZA0uDNukT/q+HUi1Rw=="
-'--- numeric
-Private Const LNG_SHA256_HASHSZ         As Long = 32
-Private Const LNG_SHA256_BLOCKSZ        As Long = 64
-Private Const LNG_SHA384_HASHSZ         As Long = 48
-Private Const LNG_SHA384_BLOCKSZ        As Long = 128
-Private Const LNG_SHA384_CONTEXTSZ      As Long = 200
-Private Const LNG_SHA512_HASHSZ         As Long = 64
-Private Const LNG_HMAC_INNER_PAD        As Long = &H36
-Private Const LNG_HMAC_OUTER_PAD        As Long = &H5C
-Private Const LNG_FACILITY_WIN32        As Long = &H80070000
-Private Const LNG_CHACHA20_KEYSZ        As Long = 32
-Private Const LNG_CHACHA20POLY1305_IVSZ As Long = 12
-Private Const LNG_CHACHA20POLY1305_TAGSZ As Long = 16
-Private Const LNG_AES128_KEYSZ          As Long = 16
-Private Const LNG_AES256_KEYSZ          As Long = 32
-Private Const LNG_AESGCM_IVSZ           As Long = 12
-Private Const LNG_AESGCM_TAGSZ          As Long = 16
-Private Const LNG_LIBSODIUM_SHA512_CONTEXTSZ As Long = 64 + 16 + 128
-Private Const LNG_OUT_OF_MEMORY         As Long = 8
+Private Const STR_LIBSODIUM_SHA384_STATE                As String = "2J4FwV2du8sH1Xw2KimaYhfdcDBaAVmROVkO99jsLxUxC8D/ZyYzZxEVWGiHSrSOp4/5ZA0uDNukT/q+HUi1Rw=="
 Private Const STR_VL_ALERTS                             As String = "0|Close notify|10|Unexpected message|20|Bad record mac|21|Decryption failed|22|Record overflow|30|Decompression failure|40|Handshake failure|41|No certificate|42|Bad certificate|43|Unsupported certificate|44|Certificate revoked|45|Certificate expired|46|Certificate unknown|47|Illegal parameter|48|Unknown certificate authority|50|Decode error|51|Decrypt error|70|Protocol version|71|Insufficient security|80|Internal error|90|User canceled|100|No renegotiation|109|Missing extension|110|Unsupported expension|112|Unrecognized name|116|Certificate required|120|No application protocol"
 Private Const STR_VL_STATE                              As String = "0|New|1|Closed|2|HandshakeStart|3|ExpectServerHello|4|ExpectExtensions|5|ExpectServerFinished|6|ExpectClientHello|7|ExpectClientFinished|8|PostHandshake|9|Shutdown"
 Private Const STR_VL_HANDSHAKE_TYPE                     As String = "1|client_hello|2|server_hello|4|new_session_ticket|5|end_of_early_data|8|encrypted_extensions|11|certificate|12|server_key_exchange|13|certificate_request|14|server_hello_done|15|certificate_verify|16|client_key_exchange|20|finished|24|key_update|25|compressed_certificate|254|message_hash"
@@ -180,11 +161,28 @@ Private Const STR_VL_EXTENSION_TYPE                     As String = "0|server_na
 Private Const STR_UNKNOWN                               As String = "Unknown (%1)"
 Private Const STR_FORMAT_ALERT                          As String = "%1."
 '--- numeric
+Private Const LNG_SHA256_HASHSZ                         As Long = 32
+Private Const LNG_SHA256_BLOCKSZ                        As Long = 64
+Private Const LNG_SHA384_HASHSZ                         As Long = 48
+Private Const LNG_SHA384_BLOCKSZ                        As Long = 128
+Private Const LNG_SHA384_CONTEXTSZ                      As Long = 200
+Private Const LNG_SHA512_HASHSZ                         As Long = 64
+Private Const LNG_HMAC_INNER_PAD                        As Long = &H36
+Private Const LNG_HMAC_OUTER_PAD                        As Long = &H5C
+Private Const LNG_FACILITY_WIN32                        As Long = &H80070000
+Private Const LNG_CHACHA20_KEYSZ                        As Long = 32
+Private Const LNG_CHACHA20POLY1305_IVSZ                 As Long = 12
+Private Const LNG_CHACHA20POLY1305_TAGSZ                As Long = 16
+Private Const LNG_AES128_KEYSZ                          As Long = 16
+Private Const LNG_AES256_KEYSZ                          As Long = 32
+Private Const LNG_AESGCM_IVSZ                           As Long = 12
+Private Const LNG_AESGCM_TAGSZ                          As Long = 16
+Private Const LNG_LIBSODIUM_SHA512_CONTEXTSZ            As Long = 64 + 16 + 128
+Private Const LNG_OUT_OF_MEMORY                         As Long = 8
 Private Const LNG_AAD_SIZE                              As Long = 5     '--- size of additional authenticated data for TLS 1.3
 Private Const LNG_LEGACY_AAD_SIZE                       As Long = 13    '--- for TLS 1.2
 Private Const LNG_ANS1_TYPE_SEQUENCE                    As Long = &H30
 Private Const LNG_ANS1_TYPE_INTEGER                     As Long = &H2
-'Private Const LNG_FACILITY_WIN32                        As Long = &H80070000
 '--- TLS
 Private Const TLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC       As Long = 20
 Private Const TLS_CONTENT_TYPE_ALERT                    As Long = 21
@@ -316,18 +314,14 @@ Private m_lBuffIdx                  As Long
 Private m_uData                     As UcsCryptoThunkData
 Public g_oRequestSocket             As cTlsSocket
 
-'=========================================================================
-' Public enums
-'=========================================================================
-
-Public Enum UcsTlsLocalFeaturesEnum '--- bitmask
+Private Enum UcsTlsLocalFeaturesEnum '--- bitmask
     ucsTlsSupportTls12 = 2 ^ 0
     ucsTlsSupportTls13 = 2 ^ 1
     ucsTlsIgnoreServerCertificateErrors = 2 ^ 2
     ucsTlsSupportAll = ucsTlsSupportTls12 Or ucsTlsSupportTls13
 End Enum
 
-Public Enum UcsTlsStatesEnum '--- sync w/ STR_VL_STATE
+Private Enum UcsTlsStatesEnum '--- sync w/ STR_VL_STATE
     ucsTlsStateNew = 0
     ucsTlsStateClosed = 1
     ucsTlsStateHandshakeStart = 2
@@ -341,7 +335,7 @@ Public Enum UcsTlsStatesEnum '--- sync w/ STR_VL_STATE
     ucsTlsStateShutdown = 9
 End Enum
 
-Public Enum UcsTlsCryptoAlgorithmsEnum
+Private Enum UcsTlsCryptoAlgorithmsEnum
     '--- key exchange
     ucsTlsAlgoExchX25519 = 1
     ucsTlsAlgoExchSecp256r1 = 2
@@ -362,7 +356,7 @@ Public Enum UcsTlsCryptoAlgorithmsEnum
     ucsTlsAlgoSignaturePss = 33
 End Enum
 
-Public Enum UcsTlsAlertDescriptionsEnum
+Private Enum UcsTlsAlertDescriptionsEnum
     uscTlsAlertCloseNotify = 0
     uscTlsAlertUnexpectedMessage = 10
     uscTlsAlertBadRecordMac = 20
@@ -547,7 +541,7 @@ End Property
 Public Function TlsInitClient( _
             uCtx As UcsTlsContext, _
             Optional RemoteHostName As String, _
-            Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum = ucsTlsSupportAll, _
+            Optional ByVal LocalFeatures As Long = ucsTlsSupportAll, _
             Optional OnClientCertificate As Object, _
             Optional AlpnProtocols As String) As Boolean
     Dim uEmpty          As UcsTlsContext

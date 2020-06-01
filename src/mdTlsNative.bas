@@ -111,6 +111,8 @@ Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref
 Private Declare Function lstrlen Lib "kernel32" Alias "lstrlenA" (ByVal lpString As Long) As Long
 Private Declare Function lstrlenW Lib "kernel32" (ByVal lpString As Long) As Long
 Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
+Private Declare Function GetFileVersionInfo Lib "Version" Alias "GetFileVersionInfoA" (ByVal lptstrFilename As String, ByVal dwHandle As Long, ByVal dwLen As Long, lpData As Any) As Long
+Private Declare Function VerQueryValue Lib "Version" Alias "VerQueryValueA" (pBlock As Any, ByVal lpSubBlock As String, lplpBuffer As Any, puLen As Long) As Long
 '--- security
 Private Declare Function AcquireCredentialsHandle Lib "security" Alias "AcquireCredentialsHandleA" (ByVal pszPrincipal As Long, ByVal pszPackage As String, ByVal fCredentialUse As Long, ByVal pvLogonId As Long, pAuthData As Any, ByVal pGetKeyFn As Long, ByVal pvGetKeyArgument As Long, phCredential As Currency, ByVal ptsExpiry As Long) As Long
 Private Declare Function FreeCredentialsHandle Lib "security" (phContext As Currency) As Long
@@ -223,7 +225,7 @@ Private Type CRYPT_ECC_PRIVATE_KEY_INFO
 End Type
 
 Private Type CRYPT_PRIVATE_KEY_INFO
-    Version             As Long
+    dwVersion           As Long
     Algorithm           As CRYPT_ALGORITHM_IDENTIFIER
     PrivateKey          As CRYPT_BLOB_DATA
     pAttributes         As Long
@@ -295,20 +297,56 @@ Private Const ERR_UNKNOWN_PUBKEY            As String = "Unknown public key (%1)
 Private Const TLS_CONTENT_TYPE_ALERT        As Long = 21
 Private Const LNG_FACILITY_WIN32            As Long = &H80070000
 
-Public Enum UcsTlsLocalFeaturesEnum '--- bitmask
+Private Enum UcsTlsLocalFeaturesEnum '--- bitmask
     ucsTlsSupportTls12 = 2 ^ 0
     ucsTlsSupportTls13 = 2 ^ 1
     ucsTlsIgnoreServerCertificateErrors = 2 ^ 2
     ucsTlsSupportAll = ucsTlsSupportTls12 Or ucsTlsSupportTls13
 End Enum
 
-Public Enum UcsTlsStatesEnum
+Private Enum UcsTlsStatesEnum
     ucsTlsStateNew = 0
     ucsTlsStateClosed = 1
     ucsTlsStateHandshakeStart = 2
     ucsTlsStatePostHandshake = 8
     ucsTlsStateShutdown = 9
 End Enum
+
+Private Enum UcsTlsAlertDescriptionsEnum
+    uscTlsAlertCloseNotify = 0
+    uscTlsAlertUnexpectedMessage = 10
+    uscTlsAlertBadRecordMac = 20
+    uscTlsAlertHandshakeFailure = 40
+    uscTlsAlertBadCertificate = 42
+    uscTlsAlertCertificateRevoked = 44
+    uscTlsAlertCertificateExpired = 45
+    uscTlsAlertCertificateUnknown = 46
+    uscTlsAlertIllegalParameter = 47
+    uscTlsAlertUnknownCa = 48
+    uscTlsAlertDecodeError = 50
+    uscTlsAlertDecryptError = 51
+    uscTlsAlertProtocolVersion = 70
+    uscTlsAlertInternalError = 80
+    uscTlsAlertUserCanceled = 90
+    uscTlsAlertMissingExtension = 109
+    uscTlsAlertUnrecognizedName = 112
+    uscTlsAlertCertificateRequired = 116
+    uscTlsAlertNoApplicationProtocol = 120
+End Enum
+
+#If Not ImplUseShared Then
+Private Enum UcsOsVersionEnum
+    ucsOsvNt4 = 400
+    ucsOsvWin98 = 410
+    ucsOsvWin2000 = 500
+    ucsOsvXp = 501
+    ucsOsvVista = 600
+    ucsOsvWin7 = 601
+    ucsOsvWin8 = 602
+    [ucsOsvWin8.1] = 603
+    ucsOsvWin10 = 1000
+End Enum
+#End If
 
 Public Type UcsTlsContext
     '--- config
@@ -322,7 +360,7 @@ Public Type UcsTlsContext
     LastErrNumber       As Long
     LastError           As String
     LastErrSource       As String
-    LastAlertCode       As Long
+    LastAlertCode       As UcsTlsAlertDescriptionsEnum
     AlpnNeedSend        As Boolean
     AlpnNegotiated      As String
     '--- handshake
@@ -350,28 +388,6 @@ Private Type UcsKeyInfo
     KeyBlob()           As Byte
     BitLen              As Long
 End Type
-
-Public Enum UcsTlsAlertDescriptionsEnum
-    uscTlsAlertCloseNotify = 0
-    uscTlsAlertUnexpectedMessage = 10
-    uscTlsAlertBadRecordMac = 20
-    uscTlsAlertHandshakeFailure = 40
-    uscTlsAlertBadCertificate = 42
-    uscTlsAlertCertificateRevoked = 44
-    uscTlsAlertCertificateExpired = 45
-    uscTlsAlertCertificateUnknown = 46
-    uscTlsAlertIllegalParameter = 47
-    uscTlsAlertUnknownCa = 48
-    uscTlsAlertDecodeError = 50
-    uscTlsAlertDecryptError = 51
-    uscTlsAlertProtocolVersion = 70
-    uscTlsAlertInternalError = 80
-    uscTlsAlertUserCanceled = 90
-    uscTlsAlertMissingExtension = 109
-    uscTlsAlertUnrecognizedName = 112
-    uscTlsAlertCertificateRequired = 116
-    uscTlsAlertNoApplicationProtocol = 120
-End Enum
 
 Public g_oRequestSocket             As cTlsSocket
 
@@ -402,7 +418,7 @@ End Property
 Public Function TlsInitClient( _
             uCtx As UcsTlsContext, _
             Optional RemoteHostName As String, _
-            Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum = ucsTlsSupportAll, _
+            Optional ByVal LocalFeatures As Long = ucsTlsSupportAll, _
             Optional OnClientCertificate As Object, _
             Optional AlpnProtocols As String) As Boolean
     Dim uEmpty          As UcsTlsContext
@@ -414,7 +430,9 @@ Public Function TlsInitClient( _
         .RemoteHostName = RemoteHostName
         .LocalFeatures = LocalFeatures
         .OnClientCertificate = ObjPtr(OnClientCertificate)
-        .AlpnProtocols = AlpnProtocols
+        If RealOsVersion >= [ucsOsvWin8.1] Then
+            .AlpnProtocols = AlpnProtocols
+        End If
     End With
     uCtx = uEmpty
     '--- success
@@ -441,7 +459,9 @@ Public Function TlsInitServer( _
         .LocalFeatures = ucsTlsSupportAll
         Set .LocalCertificates = Certificates
         Set .LocalPrivateKey = PrivateKey
-        .AlpnProtocols = AlpnProtocols
+        If RealOsVersion >= [ucsOsvWin8.1] Then
+            .AlpnProtocols = AlpnProtocols
+        End If
     End With
     uCtx = uEmpty
     '--- success
@@ -651,11 +671,13 @@ RetryCredentials:
                             GoTo QH
                         End If
                     End If
-                    .AlpnNegotiated = vbNullString
-                    If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_APPLICATION_PROTOCOL, uAppProtocol) = 0 Then
-                        If uAppProtocol.ProtoNegoStatus = SecApplicationProtocolNegotiationStatus_Success Then
-                            uAppProtocol.ProtocolId(uAppProtocol.ProtocolIdSize) = 0
-                            .AlpnNegotiated = pvToString(VarPtr(uAppProtocol.ProtocolId(0)))
+                    If LenB(.AlpnProtocols) <> 0 Then
+                        .AlpnNegotiated = vbNullString
+                        If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_APPLICATION_PROTOCOL, uAppProtocol) = 0 Then
+                            If uAppProtocol.ProtoNegoStatus = SecApplicationProtocolNegotiationStatus_Success Then
+                                uAppProtocol.ProtocolId(uAppProtocol.ProtocolIdSize) = 0
+                                .AlpnNegotiated = pvToString(VarPtr(uAppProtocol.ProtocolId(0)))
+                            End If
                         End If
                     End If
                     #If ImplUseDebugLog Then
@@ -972,7 +994,7 @@ Private Sub pvTlsSetLastError( _
             Optional ByVal ErrNumber As Long, _
             Optional ErrSource As String, _
             Optional ErrDescription As String, _
-            Optional ByVal AlertCode As UcsTlsAlertDescriptionsEnum = -1)
+            Optional ByVal AlertCode As Long = -1)
     With uCtx
         .LastErrNumber = ErrNumber
         .LastErrSource = ErrSource
@@ -999,7 +1021,7 @@ Private Sub pvTlsSetLastError( _
     End With
 End Sub
 
-Private Function pvTlsGetLastAlert(uCtx As UcsTlsContext, Optional AlertCode As UcsTlsAlertDescriptionsEnum) As String
+Private Function pvTlsGetLastAlert(uCtx As UcsTlsContext, Optional AlertCode As Long) As String
     Static vTexts       As Variant
     
     AlertCode = uCtx.LastAlertCode
@@ -1491,4 +1513,21 @@ Private Function SplitOrReindex(Expression As String, Delimiter As String) As Va
         SplitOrReindex = vResult
     End If
 End Function
+
+Private Property Get RealOsVersion() As UcsOsVersionEnum
+    Static lVersion     As Long
+    Dim baBuffer()      As Byte
+    Dim lPtr            As Long
+    Dim lSize           As Long
+    Dim aVer(0 To 9)    As Integer
+    
+    If lVersion = 0 Then
+        ReDim baBuffer(0 To 8192) As Byte
+        Call GetFileVersionInfo("kernel32.dll", 0, UBound(baBuffer), baBuffer(0))
+        Call VerQueryValue(baBuffer(0), "\", lPtr, lSize)
+        Call CopyMemory(aVer(0), ByVal lPtr, 20)
+        lVersion = aVer(9) * 100 + aVer(8)
+    End If
+    RealOsVersion = lVersion
+End Property
 #End If
