@@ -46,6 +46,7 @@ Private Const SECBUFFER_EXTRA                           As Long = 5   ' Extra da
 Private Const SECBUFFER_STREAM_TRAILER                  As Long = 6   ' Security Trailer
 Private Const SECBUFFER_STREAM_HEADER                   As Long = 7   ' Security Header
 Private Const SECBUFFER_ALERT                           As Long = 17
+Private Const SECBUFFER_APPLICATION_PROTOCOLS           As Long = 18
 Private Const SECBUFFER_VERSION                         As Long = 0
 '--- SSPI/Schannel retvals
 Private Const SEC_E_OK                                  As Long = 0
@@ -60,6 +61,7 @@ Private Const SECPKG_ATTR_REMOTE_CERT_CONTEXT           As Long = &H53
 Private Const SECPKG_ATTR_ISSUER_LIST_EX                As Long = &H59
 Private Const SECPKG_ATTR_CONNECTION_INFO               As Long = &H5A
 Private Const SECPKG_ATTR_CIPHER_INFO                   As Long = &H64
+Private Const SECPKG_ATTR_APPLICATION_PROTOCOL          As Long = 35
 '--- for ApplyControlToken
 Private Const SCHANNEL_SHUTDOWN                         As Long = 1   ' gracefully close down a connection
 '--- for CryptDecodeObjectEx
@@ -84,6 +86,9 @@ Private Const CRYPT_MACHINE_KEYSET                      As Long = &H20
 Private Const AT_KEYEXCHANGE                            As Long = 1
 '--- for CertGetCertificateContextProperty
 Private Const CERT_KEY_PROV_INFO_PROP_ID                As Long = 2
+'--- for ALPN
+Private Const SecApplicationProtocolNegotiationExt_ALPN As Long = 2
+Private Const SecApplicationProtocolNegotiationStatus_Success As Long = 1
 '--- OIDs
 Private Const szOID_RSA_RSA                             As String = "1.2.840.113549.1.1.1"
 Private Const szOID_ECC_PUBLIC_KEY                      As String = "1.2.840.10045.2.1"
@@ -266,6 +271,14 @@ Private Type SecPkgContext_CipherInfo
     dwKeyType           As Long
 End Type
 
+Private Const MAX_PROTOCOL_ID_SIZE As Long = &HFF&
+Private Type SecPkgContext_ApplicationProtocol
+    ProtoNegoStatus     As Long
+    ProtoNegoExt        As Long
+    ProtocolIdSize      As Byte
+    ProtocolId(0 To MAX_PROTOCOL_ID_SIZE) As Byte
+End Type
+
 '=========================================================================
 ' Constants and member variables
 '=========================================================================
@@ -303,12 +316,15 @@ Public Type UcsTlsContext
     RemoteHostName      As String
     LocalFeatures       As UcsTlsLocalFeaturesEnum
     OnClientCertificate As Long
+    AlpnProtocols       As String
     '--- state
     State               As UcsTlsStatesEnum
     LastErrNumber       As Long
     LastError           As String
     LastErrSource       As String
     LastAlertCode       As Long
+    AlpnNeedSend        As Boolean
+    AlpnNegotiated      As String
     '--- handshake
     LocalCertificates   As Collection
     LocalPrivateKey     As Collection
@@ -387,7 +403,8 @@ Public Function TlsInitClient( _
             uCtx As UcsTlsContext, _
             Optional RemoteHostName As String, _
             Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum = ucsTlsSupportAll, _
-            Optional OnClientCertificate As Object) As Boolean
+            Optional OnClientCertificate As Object, _
+            Optional AlpnProtocols As String) As Boolean
     Dim uEmpty          As UcsTlsContext
     
     On Error GoTo EH
@@ -397,6 +414,7 @@ Public Function TlsInitClient( _
         .RemoteHostName = RemoteHostName
         .LocalFeatures = LocalFeatures
         .OnClientCertificate = ObjPtr(OnClientCertificate)
+        .AlpnProtocols = AlpnProtocols
     End With
     uCtx = uEmpty
     '--- success
@@ -410,7 +428,8 @@ Public Function TlsInitServer( _
             uCtx As UcsTlsContext, _
             Optional RemoteHostName As String, _
             Optional Certificates As Collection, _
-            Optional PrivateKey As Collection) As Boolean
+            Optional PrivateKey As Collection, _
+            Optional AlpnProtocols As String) As Boolean
     Dim uEmpty          As UcsTlsContext
     
     On Error GoTo EH
@@ -422,6 +441,7 @@ Public Function TlsInitServer( _
         .LocalFeatures = ucsTlsSupportAll
         Set .LocalCertificates = Certificates
         Set .LocalPrivateKey = PrivateKey
+        .AlpnProtocols = AlpnProtocols
     End With
     uCtx = uEmpty
     '--- success
@@ -464,6 +484,11 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
     Dim sApiSource      As String
     Dim uConnInfo       As SecPkgContext_ConnectionInfo
     Dim uCipherInfo     As SecPkgContext_CipherInfo
+    Dim baBuffer()      As Byte
+    Dim lPos            As Long
+    Dim sProtocol       As String
+    Dim vElem           As Variant
+    Dim uAppProtocol    As SecPkgContext_ApplicationProtocol
     
     On Error GoTo EH
     With uCtx
@@ -527,6 +552,7 @@ RetryCredentials:
         If .hTlsContext = 0 Then
             pvInitSecDesc .InDesc, 3, .InBuffers
             pvInitSecDesc .OutDesc, 3, .OutBuffers
+            .AlpnNeedSend = LenB(.AlpnProtocols) <> 0
         End If
         Do
             If .RecvPos > 0 Then
@@ -534,6 +560,22 @@ RetryCredentials:
                 lPtr = VarPtr(.InDesc)
             Else
                 lPtr = 0
+            End If
+            If .AlpnNeedSend Then
+                .AlpnNeedSend = False
+                lPos = pvWriteReserved(baBuffer, 0, 4)
+                lPos = pvWriteBuffer(baBuffer, lPos, VarPtr(SecApplicationProtocolNegotiationExt_ALPN), 4)
+                lPos = pvWriteReserved(baBuffer, lPos, 2)
+                For Each vElem In Split(.AlpnProtocols, "|")
+                    lIdx = Len(vElem)
+                    lPos = pvWriteBuffer(baBuffer, lPos, VarPtr(lIdx), 1)
+                    sProtocol = StrConv(vElem, vbFromUnicode)
+                    lPos = pvWriteBuffer(baBuffer, lPos, StrPtr(sProtocol), Len(vElem))
+                Next
+                pvWriteBuffer baBuffer, 8, VarPtr(lPos - 10), 2
+                pvWriteBuffer baBuffer, 0, VarPtr(lPos - 4), 4
+                pvInitSecBuffer .InBuffers(IIf(lPtr <> 0, 1, 0)), SECBUFFER_APPLICATION_PROTOCOLS, VarPtr(baBuffer(0)), lPos
+                lPtr = VarPtr(.InDesc)
             End If
             If .IsServer Then
                 hResult = AcceptSecurityContext(.hTlsCredentials, IIf(.hTlsContext <> 0, VarPtr(.hTlsContext), 0), ByVal lPtr, .ContextReq, _
@@ -609,14 +651,23 @@ RetryCredentials:
                             GoTo QH
                         End If
                     End If
+                    .AlpnNegotiated = vbNullString
+                    If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_APPLICATION_PROTOCOL, uAppProtocol) = 0 Then
+                        If uAppProtocol.ProtoNegoStatus = SecApplicationProtocolNegotiationStatus_Success Then
+                            uAppProtocol.ProtocolId(uAppProtocol.ProtocolIdSize) = 0
+                            .AlpnNegotiated = pvToString(VarPtr(uAppProtocol.ProtocolId(0)))
+                        End If
+                    End If
                     #If ImplUseDebugLog Then
                         If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_CIPHER_INFO, uCipherInfo) = 0 Then
                             DebugLog MODULE_NAME, FUNC_NAME, "Using " & pvToStringW(VarPtr(uCipherInfo.szCipherSuite(0))) & " (&H" & Hex$(uCipherInfo.dwCipherSuite) & ") from " & .RemoteHostName
-                        ElseIf QueryContextAttributes(.hTlsContext, SECPKG_ATTR_CONNECTION_INFO, uConnInfo) = 0 Then
-                            DebugLog MODULE_NAME, FUNC_NAME, "For " & pvTlsGetAlgName(uConnInfo.dwProtocol) & " using " & _
-                                pvTlsGetAlgName(uConnInfo.aiCipher) & " with " & _
-                                pvTlsGetAlgName(uConnInfo.aiHash) & " and " & _
-                                pvTlsGetAlgName(uConnInfo.aiExch) & " key-exchange from " & .RemoteHostName
+                        End If
+                        If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_CONNECTION_INFO, uConnInfo) = 0 Then
+                            DebugLog MODULE_NAME, FUNC_NAME, pvTlsGetAlgName(uConnInfo.dwProtocol) & " using " & _
+                                pvTlsGetAlgName(uConnInfo.aiCipher) & " cipher with " & _
+                                pvTlsGetAlgName(uConnInfo.aiHash) & " hash and " & _
+                                pvTlsGetAlgName(uConnInfo.aiExch) & " key-exchange" & _
+                                IIf(LenB(.AlpnNegotiated) <> 0, " over " & .AlpnNegotiated & " from ALPN", vbNullString)
                         End If
                     #End If
                     .State = ucsTlsStatePostHandshake

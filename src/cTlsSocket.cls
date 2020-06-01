@@ -370,6 +370,7 @@ Private m_eLocalFeatures        As UcsTlsLocalFeaturesEnum
 Private m_uCtx                  As UcsTlsContext
 Private m_hRootStore            As Long
 Private m_oRootCa               As cTlsSocket
+Private m_sAlpnProtocols        As String
 Private m_lSendActual           As Long
 Private m_lSendBytes            As Long
 Private m_lLastSendBytes        As Long
@@ -503,6 +504,10 @@ Property Get RemoteCertificates() As Collection
     Set RemoteCertificates = m_uCtx.RemoteCertificates
 End Property
 
+Property Get AlpnNegotiated() As String
+    AlpnNegotiated = m_uCtx.AlpnNegotiated
+End Property
+
 Friend Property Get frRootStore() As Long
     If Not m_oRootCa Is Nothing Then
         frRootStore = m_oRootCa.frRootStore
@@ -520,7 +525,8 @@ Public Function InitServerTls( _
             Optional PfxFile As String, _
             Optional Password As String, _
             Optional Certificates As Collection, _
-            Optional PrivateKey As Collection) As Boolean
+            Optional PrivateKey As Collection, _
+            Optional AlpnProtocols As String) As Boolean
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
     
@@ -550,7 +556,8 @@ StartTls:
     m_bIsServer = True
     m_oSocket.GetPeerName m_sRemoteHostName, 0
     m_eLocalFeatures = ucsTlsSupportTls13
-    If Not TlsInitServer(m_uCtx, m_sRemoteHostName, cCerts, cPrivKey) Then
+    m_sAlpnProtocols = AlpnProtocols
+    If Not TlsInitServer(m_uCtx, m_sRemoteHostName, cCerts, cPrivKey, m_sAlpnProtocols) Then
         GoTo QH
     End If
     '--- success
@@ -562,7 +569,8 @@ Public Function Accept( _
             ConnectedSocket As cTlsSocket, _
             Optional SocketAddress As String, _
             Optional SocketPort As Long, _
-            Optional ByVal UseTls As Boolean = True) As Boolean
+            Optional ByVal UseTls As Boolean = True, _
+            Optional AlpnProtocols As String) As Boolean
     Const FUNC_NAME     As String = "Accept"
     
     On Error GoTo EH
@@ -573,7 +581,7 @@ Public Function Accept( _
         GoTo QH
     End If
     If UseTls Then
-        If Not ConnectedSocket.InitServerTls(Certificates:=LocalCertificates, PrivateKey:=LocalPrivateKey) Then
+        If Not ConnectedSocket.InitServerTls(Certificates:=LocalCertificates, PrivateKey:=LocalPrivateKey, AlpnProtocols:=AlpnProtocols) Then
             GoTo QH
         End If
     End If
@@ -591,7 +599,8 @@ Public Function Connect( _
             ByVal HostPort As Long, _
             Optional ByVal UseTls As Boolean = True, _
             Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum, _
-            Optional RootCa As cTlsSocket) As Boolean
+            Optional RootCa As cTlsSocket, _
+            Optional AlpnProtocols As String) As Boolean
     Const FUNC_NAME     As String = "Connect"
     
     On Error GoTo EH
@@ -599,6 +608,7 @@ Public Function Connect( _
     m_sRemoteHostName = HostAddress
     m_eLocalFeatures = LocalFeatures
     Set m_oRootCa = RootCa
+    m_sAlpnProtocols = AlpnProtocols
     If Not m_oSocket.Connect(HostAddress, HostPort) Then
         GoTo QH
     End If
@@ -614,7 +624,8 @@ End Function
 Public Function StartTls( _
             Optional RemoteHostName As String, _
             Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum, _
-            Optional RootCa As cTlsSocket) As Boolean
+            Optional RootCa As cTlsSocket, _
+            Optional AlpnProtocols As String) As Boolean
     Const FUNC_NAME     As String = "StartTls"
     Dim bResult         As Boolean
     Dim baEmpty()       As Byte
@@ -642,9 +653,12 @@ Public Function StartTls( _
             m_hRootStore = 0
         End If
     End If
+    If LenB(AlpnProtocols) <> 0 Then
+        m_sAlpnProtocols = AlpnProtocols
+    End If
     Set cCerts = LocalCertificates
     Set cPrivKey = LocalPrivateKey
-    If Not TlsInitClient(m_uCtx, m_sRemoteHostName, m_eLocalFeatures, Me) Then
+    If Not TlsInitClient(m_uCtx, m_sRemoteHostName, m_eLocalFeatures, Me, m_sAlpnProtocols) Then
         GoTo QH
     End If
     Set LocalCertificates = cCerts
@@ -923,7 +937,8 @@ Public Function SyncConnect( _
             Optional ByVal Timeout As Long, _
             Optional ByVal UseTls As Boolean = True, _
             Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum, _
-            Optional RootCa As cTlsSocket) As Boolean
+            Optional RootCa As cTlsSocket, _
+            Optional AlpnProtocols As String) As Boolean
     Const FUNC_NAME     As String = "SyncConnect"
     
     On Error GoTo EH
@@ -931,7 +946,7 @@ Public Function SyncConnect( _
         If Timeout = 0 Then
             Timeout = DEF_TIMEOUT
         End If
-        If Not Connect(HostAddress, HostPort, UseTls:=UseTls, LocalFeatures:=LocalFeatures, RootCa:=RootCa) Then
+        If Not Connect(HostAddress, HostPort, UseTls:=UseTls, LocalFeatures:=LocalFeatures, RootCa:=RootCa, AlpnProtocols:=AlpnProtocols) Then
             GoTo QH
         End If
         If Not SyncWaitForEvent(Timeout, ucsSfdConnect) Then

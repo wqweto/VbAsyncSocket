@@ -391,6 +391,7 @@ Public Type UcsTlsContext
     RemoteHostName      As String
     LocalFeatures       As UcsTlsLocalFeaturesEnum
     OnClientCertificate As Long
+    AlpnProtocols       As String
     '--- state
     State               As UcsTlsStatesEnum
     LastErrNumber       As Long
@@ -398,6 +399,7 @@ Public Type UcsTlsContext
     LastErrSource       As String
     LastAlertCode       As UcsTlsAlertDescriptionsEnum
     BlocksStack         As Collection
+    AlpnNegotiated      As String
     '--- handshake
     LocalSessionID()    As Byte
     LocalExchRandom()   As Byte
@@ -546,7 +548,8 @@ Public Function TlsInitClient( _
             uCtx As UcsTlsContext, _
             Optional RemoteHostName As String, _
             Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum = ucsTlsSupportAll, _
-            Optional OnClientCertificate As Object) As Boolean
+            Optional OnClientCertificate As Object, _
+            Optional AlpnProtocols As String) As Boolean
     Dim uEmpty          As UcsTlsContext
     
     On Error GoTo EH
@@ -559,6 +562,7 @@ Public Function TlsInitClient( _
         .RemoteHostName = RemoteHostName
         .LocalFeatures = LocalFeatures
         .OnClientCertificate = ObjPtr(OnClientCertificate)
+        .AlpnProtocols = AlpnProtocols
         pvTlsArrayRandom .LocalExchRandom, TLS_HELLO_RANDOM_SIZE
     End With
     uCtx = uEmpty
@@ -575,7 +579,8 @@ Public Function TlsInitServer( _
             uCtx As UcsTlsContext, _
             Optional RemoteHostName As String, _
             Optional Certificates As Collection, _
-            Optional PrivateKey As Collection) As Boolean
+            Optional PrivateKey As Collection, _
+            Optional AlpnProtocols As String) As Boolean
     Dim uEmpty          As UcsTlsContext
     
     On Error GoTo EH
@@ -590,6 +595,7 @@ Public Function TlsInitServer( _
         .LocalFeatures = ucsTlsSupportTls13
         Set .LocalCertificates = Certificates
         Set .LocalPrivateKey = PrivateKey
+        .AlpnProtocols = AlpnProtocols
         pvTlsArrayRandom .LocalExchRandom, TLS_HELLO_RANDOM_SIZE
     End With
     uCtx = uEmpty

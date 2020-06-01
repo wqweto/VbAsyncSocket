@@ -255,7 +255,7 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
         Set m_oSocket = New cTlsSocket
         If Not m_oSocket.SyncConnect(uRemote.Host, uRemote.Port, _
                 LocalFeatures:=IIf(pvIsKnownBadCertificate(uRemote.Host), ucsTlsIgnoreServerCertificateErrors, 0), _
-                RootCa:=m_oRootCa) Then
+                RootCa:=m_oRootCa, AlpnProtocols:="http/1.1") Then
             sError = m_oSocket.LastError.Description
             GoTo QH
         End If
@@ -406,7 +406,7 @@ Private Sub m_oServerSocket_OnAccept()
     Dim sKey            As String
     
     On Error GoTo EH
-    If Not m_oServerSocket.Accept(oSocket) Then
+    If Not m_oServerSocket.Accept(oSocket, AlpnProtocols:="http/1.1") Then
         GoTo QH
     End If
     Set oHandler = New cRequestHandler
