@@ -208,7 +208,7 @@ Private Const TLS_EXTENSION_TYPE_SERVER_NAME            As Long = 0
 Private Const TLS_EXTENSION_TYPE_SUPPORTED_GROUPS       As Long = 10
 Private Const TLS_EXTENSION_TYPE_EC_POINT_FORMAT        As Long = 11
 Private Const TLS_EXTENSION_TYPE_SIGNATURE_ALGORITHMS   As Long = 13
-'Private Const TLS_EXTENSION_TYPE_ALPN                   As Long = 16
+Private Const TLS_EXTENSION_TYPE_ALPN                   As Long = 16
 Private Const TLS_EXTENSION_TYPE_EXTENDED_MASTER_SECRET As Long = 23
 'Private Const TLS_EXTENSION_TYPE_COMPRESS_CERTIFICATE   As Long = 27
 'Private Const TLS_EXTENSION_TYPE_PRE_SHARED_KEY         As Long = 41
@@ -889,6 +889,19 @@ Private Function pvTlsBuildClientHello(uCtx As UcsTlsContext, baOutput() As Byte
                             lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
                         lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
                     End If
+                    If LenB(.AlpnProtocols) <> 0 Then
+                        '--- Extension - ALPN
+                        lPos = pvWriteLong(baOutput, lPos, TLS_EXTENSION_TYPE_ALPN, Size:=2)
+                        lPos = pvWriteBeginOfBlock(baOutput, lPos, .BlocksStack, Size:=2)
+                            lPos = pvWriteBeginOfBlock(baOutput, lPos, .BlocksStack, Size:=2)
+                                For Each vElem In Split(.AlpnProtocols, "|")
+                                    lPos = pvWriteBeginOfBlock(baOutput, lPos, .BlocksStack)
+                                        lPos = pvWriteString(baOutput, lPos, Left$(vElem, 255))
+                                    lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
+                                Next
+                            lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
+                        lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
+                    End If
                     '--- Extension - Supported Groups
                     lPos = pvWriteLong(baOutput, lPos, TLS_EXTENSION_TYPE_SUPPORTED_GROUPS, Size:=2)
                     lPos = pvWriteBeginOfBlock(baOutput, lPos, .BlocksStack, Size:=2)
@@ -1224,7 +1237,16 @@ Private Function pvTlsBuildServerHandshakeFinished(uCtx As UcsTlsContext, baOutp
             lPos = pvWriteLong(baOutput, lPos, TLS_HANDSHAKE_TYPE_ENCRYPTED_EXTENSIONS)
             lPos = pvWriteBeginOfBlock(baOutput, lPos, .BlocksStack, Size:=3)
                 lPos = pvWriteBeginOfBlock(baOutput, lPos, .BlocksStack, Size:=2)
-                    lPos = lPos '--- empty
+                    If LenB(.AlpnNegotiated) <> 0 Then
+                        lPos = pvWriteLong(baOutput, lPos, TLS_EXTENSION_TYPE_ALPN, Size:=2)
+                        lPos = pvWriteBeginOfBlock(baOutput, lPos, .BlocksStack, Size:=2)
+                            lPos = pvWriteBeginOfBlock(baOutput, lPos, .BlocksStack, Size:=2)
+                                lPos = pvWriteBeginOfBlock(baOutput, lPos, .BlocksStack)
+                                    lPos = pvWriteString(baOutput, lPos, .AlpnNegotiated)
+                                lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
+                            lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
+                        lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
+                    End If
                 lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
             lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
             '--- Server Certificate
@@ -1570,6 +1592,11 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
     Dim lSignSize       As Long
     Dim baTemp()        As Byte
     Dim baEmpty()       As Byte
+    Dim lBlockSize      As Long
+    Dim lBlockEnd       As Long
+    Dim lExtType        As Long
+    Dim lExtSize        As Long
+    Dim lStringSize     As Long
     
     On Error GoTo EH
     With uCtx
@@ -1616,6 +1643,26 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                 End If
             Case ucsTlsStateExpectExtensions
                 Select Case lMessageType
+                Case TLS_HANDSHAKE_TYPE_ENCRYPTED_EXTENSIONS
+                    lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lBlockSize)
+                    lBlockEnd = lPos + lBlockSize
+                    Do While lPos < lBlockEnd
+                        lPos = pvReadLong(baInput, lPos, lExtType, Size:=2)
+                        #If ImplUseDebugLog Then
+'                            DebugLog MODULE_NAME, FUNC_NAME, "EncryptedExtensions " & pvTlsGetExtensionType(lExtType)
+                        #End If
+                        lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lExtSize)
+                            Select Case lExtType
+                            Case TLS_EXTENSION_TYPE_ALPN
+                                lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2)
+                                    lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, BlockSize:=lStringSize)
+                                        lPos = pvReadString(baInput, lPos, .AlpnNegotiated, lStringSize)
+                                    lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
+                                lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
+                            End Select
+                        lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
+                    Loop
+                    lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
                 Case TLS_HANDSHAKE_TYPE_CERTIFICATE
                     If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
                         lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, BlockSize:=lCertSize)
@@ -1876,6 +1923,7 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
     Dim lExtSize        As Long
     Dim lExchGroup      As Long
     Dim lPublicSize     As Long
+    Dim lNameSize       As Long
     
     On Error GoTo EH
     If pvArraySize(baHelloRetryRandom) = 0 Then
@@ -1915,7 +1963,7 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
                 Do While lPos < lBlockEnd
                     lPos = pvReadLong(baInput, lPos, lExtType, Size:=2)
                     #If ImplUseDebugLog Then
-'                        DebugLog MODULE_NAME, FUNC_NAME, "lExtType=" & pvTlsGetExtensionType(lExtType)
+'                        DebugLog MODULE_NAME, FUNC_NAME, "ServerHello " & pvTlsGetExtensionType(lExtType)
                     #End If
                     lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lExtSize)
                         Select Case lExtType
@@ -1954,6 +2002,12 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
                                 GoTo QH
                             End If
                             lPos = pvReadArray(baInput, lPos, .HelloRetryCookie, lExtSize)
+                        Case TLS_EXTENSION_TYPE_ALPN
+                            lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2)
+                                lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, BlockSize:=lNameSize)
+                                    lPos = pvReadString(baInput, lPos, .AlpnNegotiated, lNameSize)
+                                lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
+                            lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
                         Case Else
                             lPos = lPos + lExtSize
                         End Select
@@ -1995,6 +2049,11 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
     Dim lIdx            As Long
     Dim baCert()        As Byte
     Dim uCertInfo       As UcsKeyInfo
+    Dim lNameType       As Long
+    Dim lNameSize       As Long
+    Dim sName           As String
+    Dim cAlpnPrefs      As Collection
+    Dim lAlpnPref       As Long
     
     On Error GoTo EH
     Set cCipherPrefs = New Collection
@@ -2055,11 +2114,45 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                 Do While lPos < lEnd
                     lPos = pvReadLong(baInput, lPos, lExtType, Size:=2)
                     #If ImplUseDebugLog Then
-'                        DebugLog MODULE_NAME, FUNC_NAME, "lExtType=" & pvTlsGetExtensionType(lExtType)
+'                        DebugLog MODULE_NAME, FUNC_NAME, "ClientHello " & pvTlsGetExtensionType(lExtType)
                     #End If
                     lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lExtSize)
                         lExtEnd = lPos + lExtSize
                         Select Case lExtType
+                        Case TLS_EXTENSION_TYPE_SERVER_NAME
+                            lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lBlockSize)
+                                lBlockEnd = lPos + lBlockSize
+                                Do While lPos < lBlockEnd
+                                    lPos = pvReadLong(baInput, lPos, lNameType)
+                                    lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lNameSize)
+                                        If lNameType = TLS_SERVER_NAME_TYPE_HOSTNAME Then
+                                            lPos = pvReadString(baInput, lPos, .RemoteHostName, lNameSize)
+                                        Else
+                                            lPos = lPos + lNameSize '--- skip
+                                        End If
+                                    lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
+                                Loop
+                            lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
+                        Case TLS_EXTENSION_TYPE_ALPN
+                            Set cAlpnPrefs = New Collection
+                            For Each vElem In Split(.AlpnProtocols, "|")
+                                cAlpnPrefs.Add cAlpnPrefs.Count, "#" & vElem
+                            Next
+                            lAlpnPref = 1000
+                            lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lBlockSize)
+                                lBlockEnd = lPos + lBlockSize
+                                Do While lPos < lBlockEnd
+                                    lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, BlockSize:=lNameSize)
+                                        lPos = pvReadString(baInput, lPos, sName, lNameSize)
+                                        If SearchCollection(cAlpnPrefs, "#" & sName, RetVal:=vElem) Then
+                                            If vElem < lAlpnPref Then
+                                                .AlpnNegotiated = sName
+                                                lAlpnPref = vElem
+                                            End If
+                                        End If
+                                    lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
+                                Loop
+                            lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
                         Case TLS_EXTENSION_TYPE_KEY_SHARE
                             .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13
                             If lExtSize < 4 Then
@@ -3159,6 +3252,13 @@ Private Function pvReadArray(baBuffer() As Byte, ByVal lPos As Long, baDest() As
         Erase baDest
     End If
     pvReadArray = lPos + lSize
+End Function
+
+Private Function pvReadString(baBuffer() As Byte, ByVal lPos As Long, sValue As String, ByVal lSize As Long) As Long
+    Dim baTemp()        As Byte
+    
+    pvReadString = pvReadArray(baBuffer, lPos, baTemp(), lSize)
+    sValue = StrConv(baTemp, vbUnicode)
 End Function
 
 '= arrays helpers ========================================================
