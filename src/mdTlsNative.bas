@@ -361,7 +361,6 @@ Public Type UcsTlsContext
     LastError           As String
     LastErrSource       As String
     LastAlertCode       As UcsTlsAlertDescriptionsEnum
-    AlpnNeedSend        As Boolean
     AlpnNegotiated      As String
     SniRequested        As String
     '--- handshake
@@ -505,10 +504,7 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
     Dim sApiSource      As String
     Dim uConnInfo       As SecPkgContext_ConnectionInfo
     Dim uCipherInfo     As SecPkgContext_CipherInfo
-    Dim baBuffer()      As Byte
-    Dim lPos            As Long
-    Dim sProtocol       As String
-    Dim vElem           As Variant
+    Dim baAlpnBuffer()  As Byte
     Dim uAppProtocol    As SecPkgContext_ApplicationProtocol
     
     On Error GoTo EH
@@ -573,9 +569,11 @@ RetryCredentials:
         If .hTlsContext = 0 Then
             pvInitSecDesc .InDesc, 3, .InBuffers
             pvInitSecDesc .OutDesc, 3, .OutBuffers
-            .AlpnNeedSend = LenB(.AlpnProtocols) <> 0
             If .IsServer Then
                 pvTlsParseHandshakeClientHello uCtx, baInput, 0
+            End If
+            If LenB(.AlpnProtocols) <> 0 Then
+                pvTlsBuildAlpnBuffer baAlpnBuffer, 0, .AlpnProtocols
             End If
         End If
         Do
@@ -585,20 +583,8 @@ RetryCredentials:
             Else
                 lPtr = 0
             End If
-            If .AlpnNeedSend Then
-                .AlpnNeedSend = False
-                lPos = pvWriteReserved(baBuffer, 0, 4)
-                lPos = pvWriteBuffer(baBuffer, lPos, VarPtr(SecApplicationProtocolNegotiationExt_ALPN), 4)
-                lPos = pvWriteReserved(baBuffer, lPos, 2)
-                For Each vElem In Split(.AlpnProtocols, "|")
-                    lIdx = Len(vElem)
-                    lPos = pvWriteBuffer(baBuffer, lPos, VarPtr(lIdx), 1)
-                    sProtocol = StrConv(vElem, vbFromUnicode)
-                    lPos = pvWriteBuffer(baBuffer, lPos, StrPtr(sProtocol), Len(vElem))
-                Next
-                pvWriteBuffer baBuffer, 8, VarPtr(lPos - 10), 2
-                pvWriteBuffer baBuffer, 0, VarPtr(lPos - 4), 4
-                pvInitSecBuffer .InBuffers(IIf(lPtr <> 0, 1, 0)), SECBUFFER_APPLICATION_PROTOCOLS, VarPtr(baBuffer(0)), lPos
+            If pvArraySize(baAlpnBuffer) > 0 Then
+                pvInitSecBuffer .InBuffers(IIf(lPtr <> 0, 1, 0)), SECBUFFER_APPLICATION_PROTOCOLS, VarPtr(baAlpnBuffer(0)), UBound(baAlpnBuffer) + 1
                 lPtr = VarPtr(.InDesc)
             End If
             If .IsServer Then
@@ -641,6 +627,7 @@ RetryCredentials:
                     End With
                     pvInitSecBuffer .InBuffers(lIdx), SECBUFFER_EMPTY
                 Next
+                Erase baAlpnBuffer
                 For lIdx = 0 To UBound(.OutBuffers)
                     With .OutBuffers(lIdx)
                         If .cbBuffer > 0 Then
@@ -1103,6 +1090,26 @@ Private Function pvTlsGetAlgName(ByVal lAlgId As Long) As String
     End Select
 End Function
 #End If
+
+Private Function pvTlsBuildAlpnBuffer(baOutput() As Byte, ByVal lPos As Long, sAlpnProtocols As String) As Long
+    Dim vElem           As Variant
+    Dim sProtocol       As String
+    Dim lSize           As Long
+    
+    lPos = pvWriteReserved(baOutput, 0, 4)
+    lPos = pvWriteBuffer(baOutput, lPos, VarPtr(SecApplicationProtocolNegotiationExt_ALPN), 4)
+    lPos = pvWriteReserved(baOutput, lPos, 2)
+    For Each vElem In Split(sAlpnProtocols, "|")
+        vElem = Left$(vElem, 255)
+        lSize = Len(vElem)
+        lPos = pvWriteBuffer(baOutput, lPos, VarPtr(lSize), 1)
+        sProtocol = StrConv(vElem, vbFromUnicode)
+        lPos = pvWriteBuffer(baOutput, lPos, StrPtr(sProtocol), Len(vElem))
+    Next
+    pvWriteBuffer baOutput, 8, VarPtr(lPos - 10), 2
+    pvWriteBuffer baOutput, 0, VarPtr(lPos - 4), 4
+    pvTlsBuildAlpnBuffer = lPos
+End Function
 
 Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput() As Byte, ByVal lPos As Long) As Long
     Const TLS_CONTENT_TYPE_HANDSHAKE                As Long = 22
