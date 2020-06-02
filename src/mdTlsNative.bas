@@ -363,6 +363,7 @@ Public Type UcsTlsContext
     LastAlertCode       As UcsTlsAlertDescriptionsEnum
     AlpnNeedSend        As Boolean
     AlpnNegotiated      As String
+    SniRequested        As String
     '--- handshake
     LocalCertificates   As Collection
     LocalPrivateKey     As Collection
@@ -573,6 +574,9 @@ RetryCredentials:
             pvInitSecDesc .InDesc, 3, .InBuffers
             pvInitSecDesc .OutDesc, 3, .OutBuffers
             .AlpnNeedSend = LenB(.AlpnProtocols) <> 0
+            If .IsServer Then
+                pvTlsParseHandshakeClientHello uCtx, baInput, 0
+            End If
         End If
         Do
             If .RecvPos > 0 Then
@@ -689,7 +693,8 @@ RetryCredentials:
                                 pvTlsGetAlgName(uConnInfo.aiCipher) & " cipher with " & _
                                 pvTlsGetAlgName(uConnInfo.aiHash) & " hash and " & _
                                 pvTlsGetAlgName(uConnInfo.aiExch) & " key-exchange" & _
-                                IIf(LenB(.AlpnNegotiated) <> 0, " over " & .AlpnNegotiated & " from ALPN", vbNullString)
+                                IIf(LenB(.AlpnNegotiated) <> 0, " over " & .AlpnNegotiated & " (ALPN)", vbNullString) & _
+                                IIf(LenB(.SniRequested) <> 0, " for " & .SniRequested & " (SNI)", vbNullString)
                         End If
                     #End If
                     .State = ucsTlsStatePostHandshake
@@ -1099,6 +1104,63 @@ Private Function pvTlsGetAlgName(ByVal lAlgId As Long) As String
 End Function
 #End If
 
+Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput() As Byte, ByVal lPos As Long) As Long
+    Const TLS_CONTENT_TYPE_HANDSHAKE                As Long = 22
+    Const TLS_HANDSHAKE_TYPE_CLIENT_HELLO           As Long = 1
+    Dim lValue          As Long
+    Dim lSize           As Long
+    Dim lEnd            As Long
+    Dim baTemp()        As Byte
+    Dim lExtType        As Long
+    Dim lExtSize        As Long
+    Dim lNamePos        As Long
+    Dim lNameType       As Long
+    Dim lNameSize       As Long
+    
+    lPos = pvReadLong(baInput, lPos, lValue)            '--- content type
+    If lValue <> TLS_CONTENT_TYPE_HANDSHAKE Then
+        GoTo QH
+    End If
+    lPos = pvReadLong(baInput, lPos, lValue, Size:=2)   '--- protocol version
+    lPos = lPos + 2                                     '--- skip handshake message size
+    lPos = pvReadLong(baInput, lPos, lValue)            '--- handshake type
+    If lValue <> TLS_HANDSHAKE_TYPE_CLIENT_HELLO Then
+        GoTo QH
+    End If
+    lPos = lPos + 3                                     '--- skip size of client hello
+    lPos = lPos + 2                                     '--- skip Client Version
+    lPos = lPos + 32                                    '--- skip Client Random
+    lPos = pvReadLong(baInput, lPos, lSize, Size:=1)    '--- skip Session ID
+    lPos = lPos + lSize
+    lPos = pvReadLong(baInput, lPos, lSize, Size:=2)    '--- skip Cipher Suites
+    lPos = lPos + lSize
+    lPos = pvReadLong(baInput, lPos, lSize, Size:=1)    '--- skip Compression Methods
+    lPos = lPos + lSize
+    lPos = pvReadLong(baInput, lPos, lSize, Size:=2)    '--- size of Extensions
+    lEnd = lPos + lSize
+    Do While lPos < lEnd And lPos <= UBound(baInput)
+        lPos = pvReadLong(baInput, lPos, lExtType, Size:=2)
+        lPos = pvReadLong(baInput, lPos, lExtSize, Size:=2)
+        Select Case lExtType
+        Case 0 '--- Extension -- Server Name
+            lNamePos = pvReadLong(baInput, lPos, lValue, Size:=2)
+            Do While lNamePos < lPos + lValue
+                lNamePos = pvReadLong(baInput, lNamePos, lNameType, Size:=1)
+                lNamePos = pvReadLong(baInput, lNamePos, lNameSize, Size:=2)
+                If lNameType = 0 Then '--- FQDN
+                    lNamePos = pvReadArray(baInput, lNamePos, baTemp, lNameSize)
+                    uCtx.SniRequested = StrConv(baTemp, vbUnicode)
+                Else
+                    lNamePos = lNamePos + lNameSize
+                End If
+            Loop
+        End Select
+        lPos = lPos + lExtSize
+    Loop
+QH:
+    pvTlsParseHandshakeClientHello = lPos
+End Function
+
 Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collection, hMemStore As Long) As Boolean
     Const FUNC_NAME     As String = "pvTlsImportToCertStore"
     Const DEF_KEY_NAME  As String = "VbAsyncSocketKey"
@@ -1345,6 +1407,10 @@ Private Property Get pvArraySize(baArray() As Byte) As Long
     End If
 End Property
 
+Private Function pvWriteReserved(baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Long
+    pvWriteReserved = pvWriteBuffer(baBuffer, lPos, 0, lSize)
+End Function
+
 Private Function pvWriteBuffer(baBuffer() As Byte, ByVal lPos As Long, ByVal lPtr As Long, ByVal lSize As Long) As Long
     Const FUNC_NAME     As String = "pvWriteBuffer"
     Dim lBufPtr         As Long
@@ -1363,8 +1429,42 @@ Private Function pvWriteBuffer(baBuffer() As Byte, ByVal lPos As Long, ByVal lPt
     pvWriteBuffer = lPos + lSize
 End Function
 
-Private Function pvWriteReserved(baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Long
-    pvWriteReserved = pvWriteBuffer(baBuffer, lPos, 0, lSize)
+Private Function pvReadLong(baBuffer() As Byte, ByVal lPos As Long, lValue As Long, Optional ByVal Size As Long = 1) As Long
+    Static baTemp(0 To 3) As Byte
+    
+    If lPos + Size <= pvArraySize(baBuffer) Then
+        If Size <= 1 Then
+            lValue = baBuffer(lPos)
+        Else
+            baTemp(Size - 1) = baBuffer(lPos + 0)
+            baTemp(Size - 2) = baBuffer(lPos + 1)
+            If Size >= 3 Then baTemp(Size - 3) = baBuffer(lPos + 2)
+            If Size >= 4 Then baTemp(Size - 4) = baBuffer(lPos + 3)
+            Call CopyMemory(lValue, baTemp(0), Size)
+        End If
+    Else
+        lValue = 0
+    End If
+    pvReadLong = lPos + Size
+End Function
+
+Private Function pvReadArray(baBuffer() As Byte, ByVal lPos As Long, baDest() As Byte, ByVal lSize As Long) As Long
+    Const FUNC_NAME     As String = "pvReadArray"
+    
+    If lSize < 0 Then
+        lSize = pvArraySize(baBuffer) - lPos
+    End If
+    If lSize > 0 Then
+        pvArrayAllocate baDest, lSize, FUNC_NAME & ".baDest"
+        If lPos + lSize <= pvArraySize(baBuffer) Then
+            Call CopyMemory(baDest(0), baBuffer(lPos), lSize)
+        ElseIf lPos < pvArraySize(baBuffer) Then
+            Call CopyMemory(baDest(0), baBuffer(lPos), pvArraySize(baBuffer) - lPos)
+        End If
+    Else
+        Erase baDest
+    End If
+    pvReadArray = lPos + lSize
 End Function
 
 '= Schannel buffers helpers ==============================================

@@ -394,6 +394,7 @@ Public Type UcsTlsContext
     LastAlertCode       As UcsTlsAlertDescriptionsEnum
     BlocksStack         As Collection
     AlpnNegotiated      As String
+    SniRequested        As String
     '--- handshake
     LocalSessionID()    As Byte
     LocalExchRandom()   As Byte
@@ -2126,7 +2127,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                                     lPos = pvReadLong(baInput, lPos, lNameType)
                                     lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lNameSize)
                                         If lNameType = TLS_SERVER_NAME_TYPE_HOSTNAME Then
-                                            lPos = pvReadString(baInput, lPos, .RemoteHostName, lNameSize)
+                                            lPos = pvReadString(baInput, lPos, .SniRequested, lNameSize)
                                         Else
                                             lPos = lPos + lNameSize '--- skip
                                         End If

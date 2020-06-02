@@ -520,6 +520,10 @@ Public Property Get AlpnNegotiated() As String
     AlpnNegotiated = m_uCtx.AlpnNegotiated
 End Property
 
+Public Property Get SniRequested() As String
+    SniRequested = m_uCtx.SniRequested
+End Property
+
 Friend Property Get frRootStore() As Long
     If Not m_oRootCa Is Nothing Then
         frRootStore = m_oRootCa.frRootStore
