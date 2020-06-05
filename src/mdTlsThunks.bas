@@ -315,10 +315,12 @@ Private m_uData                     As UcsCryptoThunkData
 Public g_oRequestSocket             As cTlsSocket
 
 Private Enum UcsTlsLocalFeaturesEnum '--- bitmask
-    ucsTlsSupportTls12 = 2 ^ 0
-    ucsTlsSupportTls13 = 2 ^ 1
-    ucsTlsIgnoreServerCertificateErrors = 2 ^ 2
-    ucsTlsSupportAll = ucsTlsSupportTls12 Or ucsTlsSupportTls13
+    ucsTlsSupportTls10 = 2 ^ 0
+    ucsTlsSupportTls11 = 2 ^ 1
+    ucsTlsSupportTls12 = 2 ^ 2
+    ucsTlsSupportTls13 = 2 ^ 3
+    ucsTlsIgnoreServerCertificateErrors = 2 ^ 4
+    ucsTlsSupportAll = ucsTlsSupportTls10 Or ucsTlsSupportTls11 Or ucsTlsSupportTls12 Or ucsTlsSupportTls13
 End Enum
 
 Private Enum UcsTlsStatesEnum '--- sync w/ STR_VL_STATE

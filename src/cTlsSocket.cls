@@ -47,10 +47,12 @@ Event AfterNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum)
 Event OnClientCertificate(Issuers As Object, Confirmed As Boolean)
 
 Public Enum UcsTlsLocalFeaturesEnum '--- bitmask
-    ucsTlsSupportTls12 = 2 ^ 0
-    ucsTlsSupportTls13 = 2 ^ 1
-    ucsTlsIgnoreServerCertificateErrors = 2 ^ 2
-    ucsTlsSupportAll = ucsTlsSupportTls12 Or ucsTlsSupportTls13
+    ucsTlsSupportTls10 = 2 ^ 0
+    ucsTlsSupportTls11 = 2 ^ 1
+    ucsTlsSupportTls12 = 2 ^ 2
+    ucsTlsSupportTls13 = 2 ^ 3
+    ucsTlsIgnoreServerCertificateErrors = 2 ^ 4
+    ucsTlsSupportAll = ucsTlsSupportTls10 Or ucsTlsSupportTls11 Or ucsTlsSupportTls12 Or ucsTlsSupportTls13
 End Enum
 
 '=========================================================================
