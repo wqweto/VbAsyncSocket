@@ -27,6 +27,10 @@ Private Const UNISP_NAME                                As String = "Microsoft U
 Private Const SECPKG_CRED_INBOUND                       As Long = 1
 Private Const SECPKG_CRED_OUTBOUND                      As Long = 2
 Private Const SCHANNEL_CRED_VERSION                     As Long = 4
+Private Const SP_PROT_TLS1_0                            As Long = &H40 Or &H80
+Private Const SP_PROT_TLS1_1                            As Long = &H100 Or &H200
+Private Const SP_PROT_TLS1_2                            As Long = &H400 Or &H800
+Private Const SP_PROT_TLS1_3                            As Long = &H1000 Or &H2000
 Private Const SCH_CRED_MANUAL_CRED_VALIDATION           As Long = 8
 Private Const SCH_CRED_NO_DEFAULT_CREDS                 As Long = &H10
 '-- for InitializeSecurityContext
@@ -538,6 +542,10 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
 RetryCredentials:
         If .hTlsCredentials = 0 Then
             uCred.dwVersion = SCHANNEL_CRED_VERSION
+            uCred.grbitEnabledProtocols = IIf((.LocalFeatures And ucsTlsSupportTls10) <> 0, SP_PROT_TLS1_0, 0) Or _
+                IIf((.LocalFeatures And ucsTlsSupportTls11) <> 0, SP_PROT_TLS1_1, 0) Or _
+                IIf((.LocalFeatures And ucsTlsSupportTls12) <> 0, SP_PROT_TLS1_2, 0) Or _
+                IIf((.LocalFeatures And ucsTlsSupportTls13) <> 0, SP_PROT_TLS1_3, 0)
             uCred.dwFlags = uCred.dwFlags Or SCH_CRED_MANUAL_CRED_VALIDATION    ' Prevent Schannel from validating the received server certificate chain.
             uCred.dwFlags = uCred.dwFlags Or SCH_CRED_NO_DEFAULT_CREDS          ' Prevent Schannel from attempting to automatically supply a certificate chain for client authentication.
             If pvCollectionCount(.LocalCertificates) > 0 Then
@@ -720,6 +728,9 @@ RetryCredentials:
                         Replace(Replace(ERR_UNEXPECTED_RESULT, "%1", sApiSource), "%2", "&H" & Hex$(hResult)), AlertCode:=.LastAlertCode
                     GoTo QH
                 End Select
+                If .RecvPos = 0 Then
+                    Exit Do
+                End If
             End If
         Loop
     End With
@@ -737,6 +748,7 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
     Dim hResult         As Long
     Dim lIdx            As Long
     Dim lPtr            As Long
+    Dim baEmpty()       As Byte
     
     On Error GoTo EH
     With uCtx
@@ -799,7 +811,10 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
                 '--- do nothing
             Case SEC_I_RENEGOTIATE
                 .State = ucsTlsStateHandshakeStart
-                TlsHandshake uCtx, .RecvBuffer, .RecvPos, .SendBuffer, .SendPos
+                '--- .RecvBuffer is populated already
+                If Not TlsHandshake(uCtx, baEmpty, 0, .SendBuffer, .SendPos) Then
+                    GoTo QH
+                End If
                 Exit Do
             Case SEC_I_CONTEXT_EXPIRED
                 .State = ucsTlsStateShutdown
@@ -1043,6 +1058,8 @@ Private Function pvTlsGetAlgName(ByVal lAlgId As Long) As String
         pvTlsGetAlgName = "TLS1_1_CLIENT"
     Case &H800&
         pvTlsGetAlgName = "TLS1_2_CLIENT"
+    Case &H2000&
+        pvTlsGetAlgName = "TLS1_3_CLIENT"
     Case &H10&
         pvTlsGetAlgName = "SSL3_SERVER"
     Case &H40&
@@ -1051,6 +1068,8 @@ Private Function pvTlsGetAlgName(ByVal lAlgId As Long) As String
         pvTlsGetAlgName = "TLS1_1_SERVER"
     Case &H400&
         pvTlsGetAlgName = "TLS1_2_SERVER"
+    Case &H1000
+        pvTlsGetAlgName = "TLS1_3_SERVER"
     Case &H6602&
         pvTlsGetAlgName = "RC2"
     Case &H6801&
