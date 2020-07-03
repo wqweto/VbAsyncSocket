@@ -1769,7 +1769,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                 '--- post-process ucsTlsStateExpectExtensions
                 If .State = ucsTlsStateExpectServerFinished And .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
                     If pvTlsCipherSuiteUseRsaCertificate(.CipherSuite) Then
-                        If Not SearchCollection(.RemoteCertificates, 1, baCert) Then
+                        If Not SearchCollection(.RemoteCertificates, 1, RetVal:=baCert) Then
                             sError = ERR_NO_SERVER_CERTIFICATE
                             eAlertCode = uscTlsAlertCertificateUnknown
                             GoTo QH
@@ -2938,7 +2938,7 @@ Private Sub pvTlsSignatureSign(cPrivKey As Collection, ByVal lSignatureType As L
     #If ImplUseDebugLog Then
         DebugLog MODULE_NAME, FUNC_NAME, "Signing with " & pvTlsSignatureTypeName(lSignatureType) & " signature"
     #End If
-    If Not SearchCollection(cPrivKey, 1, baTemp) Then
+    If Not SearchCollection(cPrivKey, 1, RetVal:=baTemp) Then
         Err.Raise vbObjectError, FUNC_NAME, ERR_NO_PRIVATE_KEY
     End If
     If Not pvAsn1DecodePrivateKey(baTemp, uKeyInfo) Then
@@ -3887,7 +3887,6 @@ Private Function pvAsn1EncodeEcdsaSignature(baRetVal() As Byte, baPlainSig() As 
             lPos = pvWriteBuffer(baRetVal, lPos, VarPtr(baPlainSig(lPartSize + lStart)), lPartSize - lStart)
         lPos = pvWriteEndOfBlock(baRetVal, lPos, cStack)
     lPos = pvWriteEndOfBlock(baRetVal, lPos, cStack)
-    pvAsn1EncodeEcdsaSignature = baRetVal
     '--- success
     pvAsn1EncodeEcdsaSignature = True
 End Function
