@@ -1,10 +1,6 @@
 VERSION 1.0 CLASS
 BEGIN
   MultiUse = -1  'True
-  Persistable = 0  'NotPersistable
-  DataBindingBehavior = 0  'vbNone
-  DataSourceBehavior  = 0  'vbNone
-  MTSTransactionMode  = 0  'NotAnMTSObject
 END
 Attribute VB_Name = "cTlsSocket"
 Attribute VB_GlobalNameSpace = False
@@ -942,7 +938,7 @@ Public Function FromTextArray(baText() As Byte, Optional ByVal CodePage As UcsAs
     FromTextArray = m_oSocket.FromTextArray(baText, CodePage)
 End Function
 
-Public Function ToTextArray(sText As String, Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As Byte()
+Public Function ToTextArray(sText As String, Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As Variant ' Byte()
     ToTextArray = m_oSocket.ToTextArray(sText, CodePage)
 End Function
 
@@ -2422,7 +2418,7 @@ Private Property Get TimerEx() As Double
     TimerEx = cValue / cFreq
 End Property
 
-Private Function ReadBinaryFile(sFile As String) As Byte()
+Private Function ReadBinaryFile(sFile As String) As Variant ' Byte()
     Const FUNC_NAME     As String = "ReadBinaryFile"
     Dim baBuffer()      As Byte
     Dim nFile           As Integer

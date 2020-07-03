@@ -35,6 +35,5 @@ FDIVCheck=0
 UnroundedFP=0
 StartMode=0
 Unattended=0
-Retained=0
 ThreadPerObject=0
 MaxNumberOfThreads=1

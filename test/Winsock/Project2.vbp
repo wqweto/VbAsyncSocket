@@ -1,11 +1,12 @@
 Type=Exe
 Form=Form2.frm
-Reference=*\G{00020430-0000-0000-C000-000000000046}#2.0#0#..\..\..\..\..\Windows\SysWOW64\stdole2.tlb#OLE Automation
-Object={248DD890-BB45-11CF-9ABC-0080C7E7B78D}#1.0#0; MSWINSCK.OCX
+Reference=*\G{00020430-0000-0000-C000-000000000046}#2.0#0#..\..\..\..\..\WINDOWS\system32\stdole2.tlb#OLE Automation
+Object={248DD890-BB45-11CF-9ABC-0080C7E7B78D}#1.0#0; mswinsck.ocx
 UserControl=..\..\contrib\ctxWinsock.ctl
 Class=cAsyncSocket; ..\..\src\cAsyncSocket.cls
 Class=cTlsSocket; ..\..\src\cTlsSocket.cls
 Module=mdTlsNative; ..\..\src\mdTlsNative.bas
+Module=mdVb5Comp; ..\mdVb5Comp.bas
 IconForm="Form2"
 Startup="Form2"
 HelpFile=""
@@ -31,6 +32,8 @@ FDIVCheck=0
 UnroundedFP=0
 StartMode=0
 Unattended=0
-Retained=0
 ThreadPerObject=0
 MaxNumberOfThreads=1
+
+[MS Transaction Server]
+AutoRefresh=1

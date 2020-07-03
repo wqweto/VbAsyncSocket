@@ -1,13 +1,13 @@
 VERSION 5.00
 Begin VB.Form Form1 
    Caption         =   "Form1"
-   ClientHeight    =   4968
-   ClientLeft      =   108
-   ClientTop       =   456
-   ClientWidth     =   5448
+   ClientHeight    =   4980
+   ClientLeft      =   105
+   ClientTop       =   450
+   ClientWidth     =   5445
    LinkTopic       =   "Form1"
-   ScaleHeight     =   4968
-   ScaleWidth      =   5448
+   ScaleHeight     =   4980
+   ScaleWidth      =   5445
    StartUpPosition =   3  'Windows Default
    Begin VB.CheckBox chkUseHttps 
       Caption         =   "Use HTTPS"
@@ -535,7 +535,7 @@ Private Function pvParseUrl(sUrl As String, uParsed As UcsParsedUrl, Optional De
     End With
 End Function
 
-Private Function pvArrayByte(ParamArray A() As Variant) As Byte()
+Private Function pvArrayByte(ParamArray A() As Variant) As Variant ' Byte()
     Dim baRetVal()      As Byte
     Dim lIdx            As Long
     

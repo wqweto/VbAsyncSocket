@@ -70,7 +70,7 @@ Public Function FromUtf8Array(baText() As Byte) As String
     End If
 End Function
 
-Public Function ToUtf8Array(sText As String) As Byte()
+Public Function ToUtf8Array(sText As String) As Variant ' Byte()
     Dim baRetVal()      As Byte
     Dim lSize           As Long
     

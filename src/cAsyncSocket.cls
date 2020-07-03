@@ -1,10 +1,6 @@
 VERSION 1.0 CLASS
 BEGIN
   MultiUse = -1  'True
-  Persistable = 0  'NotPersistable
-  DataBindingBehavior = 0  'vbNone
-  DataSourceBehavior  = 0  'vbNone
-  MTSTransactionMode  = 0  'NotAnMTSObject
 END
 Attribute VB_Name = "cAsyncSocket"
 Attribute VB_GlobalNameSpace = False
@@ -927,7 +923,7 @@ EH:
     PrintError FUNC_NAME
 End Function
 
-Public Function ToTextArray(sText As String, Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As Byte()
+Public Function ToTextArray(sText As String, Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As Variant ' Byte()
     Const FUNC_NAME     As String = "ToTextArray"
     Dim baRetVal()      As Byte
     Dim lSize           As Long
@@ -1744,8 +1740,8 @@ Private Function InitAsyncSelectNotifyThunk(ByVal hWnd As Long, pObj As Object, 
         Debug.Assert pvThunkIdeOwner(aParams(7))
         If aParams(7) <> 0 Then
             aParams(8) = GetProcAddress(GetModuleHandle("user32"), "GetWindowLongA")
-            aParams(9) = GetProcAddress(GetModuleHandle("vba6"), "EbMode")
-            aParams(10) = GetProcAddress(GetModuleHandle("vba6"), "EbIsResetting")
+            aParams(9) = GetProcAddress(GetModuleHandle("vba5"), "EbMode")
+            aParams(10) = GetProcAddress(GetModuleHandle("vba5"), "EbIsResetting")
         End If
         pvThunkGlobalData("InitAsyncSelectNotifyThunk" & App.ThreadID) = hThunk
     End If

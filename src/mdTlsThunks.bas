@@ -386,15 +386,15 @@ Public Type UcsTlsContext
     '--- config
     IsServer            As Boolean
     RemoteHostName      As String
-    LocalFeatures       As UcsTlsLocalFeaturesEnum
+    LocalFeatures       As Long ' UcsTlsLocalFeaturesEnum
     OnClientCertificate As Long
     AlpnProtocols       As String
     '--- state
-    State               As UcsTlsStatesEnum
+    State               As Long ' UcsTlsStatesEnum
     LastErrNumber       As Long
     LastError           As String
     LastErrSource       As String
-    LastAlertCode       As UcsTlsAlertDescriptionsEnum
+    LastAlertCode       As Long ' UcsTlsAlertDescriptionsEnum
     BlocksStack         As Collection
     AlpnNegotiated      As String
     SniRequested        As String
@@ -417,15 +417,15 @@ Public Type UcsTlsContext
     '--- crypto settings
     ProtocolVersion     As Long
     ExchGroup           As Long
-    ExchAlgo            As UcsTlsCryptoAlgorithmsEnum
+    ExchAlgo            As Long ' UcsTlsCryptoAlgorithmsEnum
     CipherSuite         As Long
-    AeadAlgo            As UcsTlsCryptoAlgorithmsEnum
+    AeadAlgo            As Long ' UcsTlsCryptoAlgorithmsEnum
     MacSize             As Long '--- always 0 (not used w/ AEAD ciphers)
     KeySize             As Long
     IvSize              As Long
     IvDynamicSize       As Long '--- only for AES in TLS 1.2
     TagSize             As Long
-    DigestAlgo          As UcsTlsCryptoAlgorithmsEnum
+    DigestAlgo          As Long ' UcsTlsCryptoAlgorithmsEnum
     DigestSize          As Long
     '--- bulk secrets
     HandshakeMessages() As Byte '--- ToDo: reduce to HandshakeHash only
@@ -1601,6 +1601,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
     Dim lExtType        As Long
     Dim lExtSize        As Long
     Dim lStringSize     As Long
+    Dim vItem           As Variant
     
     On Error GoTo EH
     With uCtx
@@ -1694,11 +1695,12 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                     lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lCertSize)
                         lPos = pvReadArray(baInput, lPos, baSignature, lCertSize)
                     lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
-                    If Not SearchCollection(.RemoteCertificates, 1, RetVal:=baCert) Then
+                    If Not SearchCollection(.RemoteCertificates, 1, RetVal:=vItem) Then
                         sError = ERR_NO_SERVER_CERTIFICATE
                         eAlertCode = uscTlsAlertHandshakeFailure
                         GoTo QH
                     End If
+                    baCert = vItem
                     pvTlsArrayHash baHandshakeHash, .DigestAlgo, .HandshakeMessages, 0
                     lVerifyPos = pvWriteString(baVerifyData, 0, Space$(64) & "TLS 1.3, server CertificateVerify" & Chr$(0))
                     lVerifyPos = pvWriteArray(baVerifyData, lVerifyPos, baHandshakeHash)
@@ -1736,11 +1738,12 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                         lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lSignatureSize)
                             lPos = pvReadArray(baInput, lPos, baSignature, lSignatureSize)
                         lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
-                        If Not SearchCollection(.RemoteCertificates, 1, RetVal:=baCert) Then
+                        If Not SearchCollection(.RemoteCertificates, 1, RetVal:=vItem) Then
                             sError = ERR_NO_SERVER_CERTIFICATE
                             eAlertCode = uscTlsAlertHandshakeFailure
                             GoTo QH
                         End If
+                        baCert = vItem
                         lVerifyPos = pvWriteArray(baVerifyData, 0, .LocalExchRandom)
                         lVerifyPos = pvWriteArray(baVerifyData, lVerifyPos, .RemoteExchRandom)
                         lVerifyPos = pvWriteBuffer(baVerifyData, lVerifyPos, VarPtr(baInput(lSignPos)), lSignSize)
@@ -1769,11 +1772,12 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                 '--- post-process ucsTlsStateExpectExtensions
                 If .State = ucsTlsStateExpectServerFinished And .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
                     If pvTlsCipherSuiteUseRsaCertificate(.CipherSuite) Then
-                        If Not SearchCollection(.RemoteCertificates, 1, RetVal:=baCert) Then
+                        If Not SearchCollection(.RemoteCertificates, 1, RetVal:=vItem) Then
                             sError = ERR_NO_SERVER_CERTIFICATE
                             eAlertCode = uscTlsAlertCertificateUnknown
                             GoTo QH
                         End If
+                        baCert = vItem
                         pvTlsSetupExchRsaCertificate uCtx, baCert
                     End If
                     .SendPos = pvTlsBuildClientLegacyKeyExchange(uCtx, .SendBuffer, .SendPos)
@@ -2066,7 +2070,8 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
     Next
     lCipherPref = 1000
     With uCtx
-        If SearchCollection(.LocalCertificates, 1, RetVal:=baCert) Then
+        If SearchCollection(.LocalCertificates, 1, RetVal:=vElem) Then
+            baCert = vElem
             If Not pvAsn1DecodeCertificate(baCert, uCertInfo) Then
                 sError = ERR_UNSUPPORTED_CERTIFICATE
                 eAlertCode = uscTlsAlertHandshakeFailure
@@ -2249,6 +2254,7 @@ Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, ba
     Dim lSigPos         As Long
     Dim oCallback       As Object
     Dim bConfirmed      As Boolean
+    Dim vItem           As Variant
     
     On Error GoTo EH
     With uCtx
@@ -2303,7 +2309,8 @@ Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, ba
             lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
         End If
         Do
-            If SearchCollection(.LocalPrivateKey, 1, RetVal:=baCert) Then
+            If SearchCollection(.LocalPrivateKey, 1, RetVal:=vItem) Then
+                baCert = vItem
                 If Not pvAsn1DecodePrivateKey(baCert, uCertInfo) Then
                     sError = ERR_UNSUPPORTED_PRIVATE_KEY
                     eAlertCode = uscTlsAlertHandshakeFailure
@@ -2934,13 +2941,15 @@ Private Sub pvTlsSignatureSign(cPrivKey As Collection, ByVal lSignatureType As L
     Dim baEnc()         As Byte
     Dim baVerifyHash()  As Byte
     Dim baTemp()        As Byte
-        
+    Dim vItem           As Variant
+    
     #If ImplUseDebugLog Then
         DebugLog MODULE_NAME, FUNC_NAME, "Signing with " & pvTlsSignatureTypeName(lSignatureType) & " signature"
     #End If
-    If Not SearchCollection(cPrivKey, 1, RetVal:=baTemp) Then
+    If Not SearchCollection(cPrivKey, 1, RetVal:=vItem) Then
         Err.Raise vbObjectError, FUNC_NAME, ERR_NO_PRIVATE_KEY
     End If
+    baTemp = vItem
     If Not pvAsn1DecodePrivateKey(baTemp, uKeyInfo) Then
         Err.Raise vbObjectError, FUNC_NAME, ERR_UNSUPPORTED_PRIVATE_KEY
     End If
@@ -4639,7 +4648,7 @@ Public Function SearchCollection(ByVal oCol As Collection, Index As Variant, Opt
 QH:
 End Function
 
-Public Function FromBase64Array(sText As String) As Byte()
+Public Function FromBase64Array(sText As String) As Variant ' Byte()
     Const FUNC_NAME     As String = "FromBase64Array"
     Dim baRetVal()      As Byte
     Dim lSize           As Long

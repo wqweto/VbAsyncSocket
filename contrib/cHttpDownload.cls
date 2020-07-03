@@ -1,10 +1,6 @@
 VERSION 1.0 CLASS
 BEGIN
   MultiUse = -1  'True
-  Persistable = 0  'NotPersistable
-  DataBindingBehavior = 0  'vbNone
-  DataSourceBehavior  = 0  'vbNone
-  MTSTransactionMode  = 0  'NotAnMTSObject
 END
 Attribute VB_Name = "cHttpDownload"
 Attribute VB_GlobalNameSpace = False
@@ -499,7 +495,7 @@ End Function
 Private Function DispCallByVtbl(pUnk As IUnknown, ByVal lIndex As Long, ParamArray A() As Variant) As Variant
     Const CC_STDCALL    As Long = 4
     Dim lIdx            As Long
-    Dim vParam()        As Variant
+    Dim vParam          As Variant
     Dim vType(0 To 63)  As Integer
     Dim vPtr(0 To 63)   As Long
     Dim hResult         As Long

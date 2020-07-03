@@ -86,7 +86,7 @@ Public Function ToHex(baText() As Byte, Optional Delimiter As String = "-") As S
     End If
 End Function
 
-Public Function FromHex(sText As String) As Byte()
+Public Function FromHex(sText As String) As Variant ' Byte()
     Dim baRetVal()      As Byte
     Dim lIdx            As Long
     
@@ -111,7 +111,7 @@ Public Function FromHex(sText As String) As Byte()
 QH:
 End Function
 
-Public Function ToUtf8Array(sText As String) As Byte()
+Public Function ToUtf8Array(sText As String) As Variant ' Byte()
     Dim baRetVal()      As Byte
     Dim lSize           As Long
     

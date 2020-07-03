@@ -358,15 +358,15 @@ Public Type UcsTlsContext
     '--- config
     IsServer            As Boolean
     RemoteHostName      As String
-    LocalFeatures       As UcsTlsLocalFeaturesEnum
+    LocalFeatures       As Long ' UcsTlsLocalFeaturesEnum
     OnClientCertificate As Long
     AlpnProtocols       As String
     '--- state
-    State               As UcsTlsStatesEnum
+    State               As Long ' UcsTlsStatesEnum
     LastErrNumber       As Long
     LastError           As String
     LastErrSource       As String
-    LastAlertCode       As UcsTlsAlertDescriptionsEnum
+    LastAlertCode       As Long ' UcsTlsAlertDescriptionsEnum
     AlpnNegotiated      As String
     SniRequested        As String
     '--- handshake
@@ -1605,7 +1605,7 @@ Private Function pvSetTrue(bValue As Boolean) As Boolean
     pvSetTrue = True
 End Function
 
-Public Function FromBase64Array(sText As String) As Byte()
+Public Function FromBase64Array(sText As String) As Variant ' Byte()
     With VBA.CreateObject("MSXML2.DOMDocument").createElement("dummy")
         .DataType = "bin.base64"
         .Text = sText
