@@ -1251,7 +1251,7 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
         If Not m_oSocket.ReceiveArray(baRecv) Then
             Exit Do
         End If
-        If Not TlsIsReady(m_uCtx) Then
+        Do While Not TlsIsReady(m_uCtx) And pvArraySize(baRecv) > 0
             bResult = TlsHandshake(m_uCtx, baRecv, -1, m_baSendBuffer, m_lSendPos)
             If Not pvOnSend() Then
                 GoTo QH
@@ -1294,8 +1294,11 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
                     RaiseEvent AfterNotify(ucsSfdWrite)
                 End If
             End If
-            baRecv = vbNullString
-        End If
+            bResult = m_oSocket.ReceiveArray(baRecv)
+            If Not bResult Then
+                Exit Do
+            End If
+        Loop
         bResult = TlsReceive(m_uCtx, baRecv, -1, m_baRecvBuffer, m_lRecvPos)
         If Not bResult Then
             Exit Do
