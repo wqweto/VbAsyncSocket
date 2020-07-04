@@ -185,3 +185,19 @@ Public Sub DebugLog(sModule As String, sFunction As String, sText As String, Opt
         eType = vbLogEventTypeWarning, "[WARN]", _
         True, "[INFO]") & " " & sText & " [" & sModule & "." & sFunction & "]"
 End Sub
+
+Private Function Join(ByVal SourceArray As Variant, Optional Delimiter As String = " ") As String
+    Dim sTemp           As String
+    Dim lIdx            As Integer
+    
+    If Not IsArray(SourceArray) Then Exit Function
+    If UBound(SourceArray) = -1 Then Exit Function
+    For lIdx = 0 To UBound(SourceArray)
+        If lIdx = UBound(SourceArray) Then
+            sTemp = sTemp & SourceArray(lIdx)
+        Else
+            sTemp = sTemp & SourceArray(lIdx) & Delimiter
+        End If
+    Next
+    Join = sTemp
+End Function

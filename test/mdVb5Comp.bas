@@ -1,113 +1,96 @@
 Attribute VB_Name = "mdVb5Comp"
 Option Explicit
 
-Public Function Replace(ByVal TextToReplace As String, ByVal OldChr As String, ByVal NewChr As String) As String
-    Replace = Join(Split(TextToReplace, OldChr), NewChr)
+Private Function Replace(ByVal Source As String, ByVal Find As String, ByVal ReplaceStr As String) As String
+    Find = preg_replace("[.*+?^${}()/|[\]\\]", Find, "\$&")
+    Replace = preg_replace(Find, Source, ReplaceStr)
 End Function
 
-Public Function Split(ByVal TextToSplit As String, Optional Delimiter As String = " ") As Variant
-    Dim tempStr As String, tempArr() As String
-    Dim X As Long
+Private Function preg_replace(sPattern As String, sText As String, Optional Replace As String) As String
+    With CreateObject("VBScript.RegExp")
+        .Global = True
+        .Pattern = sPattern
+        preg_replace = .Replace(sText, Replace)
+    End With
+End Function
+
+Private Function Split(ByVal TextToSplit As String, Optional Delimiter As String = " ") As Variant
+    Dim sTemp           As String
+    Dim aRetVal()       As String
+    Dim lPos            As Long
     
-    ReDim tempArr(-1 To -1) As String
+    ReDim aRetVal(-1 To -1) As String
     If TextToSplit <> "" Then
         If Delimiter <> "" Then
             Do
-                X = InStr(TextToSplit, Delimiter)
-                If X <> 0 Then
-                    tempStr = Left(TextToSplit, X - 1)
-                    TextToSplit = Right(TextToSplit, Len(TextToSplit) - X + 1 - Len(Delimiter))
-                    If UBound(tempArr) < 0 Then
-                        ReDim tempArr(0 To 0) As String
+                lPos = InStr(TextToSplit, Delimiter)
+                If lPos <> 0 Then
+                    sTemp = Left$(TextToSplit, lPos - 1)
+                    TextToSplit = Right$(TextToSplit, Len(TextToSplit) - lPos + 1 - Len(Delimiter))
+                    If UBound(aRetVal) < 0 Then
+                        ReDim aRetVal(0 To 0) As String
                     Else
-                        ReDim Preserve tempArr(UBound(tempArr) + 1) As String
+                        ReDim Preserve aRetVal(UBound(aRetVal) + 1) As String
                     End If
-                    tempArr(UBound(tempArr)) = tempStr
-                    
+                    aRetVal(UBound(aRetVal)) = sTemp
                 End If
-            Loop While X <> 0
+            Loop While lPos <> 0
         End If
         If TextToSplit <> "" Then
-            If UBound(tempArr) < 0 Then
-                ReDim tempArr(0 To 0) As String
+            If UBound(aRetVal) < 0 Then
+                ReDim aRetVal(0 To 0) As String
             Else
-                ReDim Preserve tempArr(UBound(tempArr) + 1) As String
+                ReDim Preserve aRetVal(UBound(aRetVal) + 1) As String
             End If
-            tempArr(UBound(tempArr)) = TextToSplit
+            aRetVal(UBound(aRetVal)) = TextToSplit
         End If
     End If
-    Split = tempArr()
+    Split = aRetVal()
 End Function
 
-Public Function Join(ByVal SourceArray As Variant, Optional Delimiter As String = " ") As String
-    Dim tempStr As String
-    Dim A As Integer
+Private Function Join(ByVal SourceArray As Variant, Optional Delimiter As String = " ") As String
+    Dim sTemp           As String
+    Dim lIdx            As Integer
     
     If Not IsArray(SourceArray) Then Exit Function
     If UBound(SourceArray) = -1 Then Exit Function
-    For A = 0 To UBound(SourceArray)
-        If A = UBound(SourceArray) Then
-            tempStr = tempStr & SourceArray(A)
+    For lIdx = 0 To UBound(SourceArray)
+        If lIdx = UBound(SourceArray) Then
+            sTemp = sTemp & SourceArray(lIdx)
         Else
-            tempStr = tempStr & SourceArray(A) & Delimiter
+            sTemp = sTemp & SourceArray(lIdx) & Delimiter
         End If
     Next
-    
-    Join = tempStr
+    Join = sTemp
 End Function
 
-
-Public Function InStrRev(ByVal StringCheck As String, _
-   StringMatch As String, Optional Start As Long = -1, _
-   Optional Compare As VbCompareMethod = vbBinaryCompare) _
-   As Long
-
-'********************************************
-'PURPOSE: Implements InStrRev functionality in
-'VB5, whereby you can begin searching for
-'a character sequence within a string from the
-'end rather than the beginning
-
-'PARAMETERS:  StringCheck: String expression being searched.
-
-'             StringMatch: String expression being searched for
-
-'             Start (Optional) starting position for each
-'             search. If omitted, search begins at the last
-'             character position. Starting position is calculated
-'             from the beginning of StringCheck
-
-'             Compare (Optional) kind of comparison to use;
-'             defaults to vbBinaryCompare
-'             Search begins at end of string
-
-'EXAMPLE:     debug.print(InstrRev("www.freevbcode.com", ".")
-'             outputs 15, wherease inStr returs 4
-
-'NOTE:        For VB6 and above, use the built-in InStrRev
-'             Function, not this
-'**************************************************************
-If Len(StringMatch) > Len(StringCheck) Then Exit Function
-If Start < -1 Or Start = 0 Or Start > Len(StringCheck) _
-      Then Exit Function
-
-Dim lStartPoint As Long
-Dim lEndPoint As Long
-Dim lSearchLength As Long
-Dim lCtr As Long
-Dim sWkg As String
-
-lSearchLength = Len(StringMatch)
-lStartPoint = IIf(Start = -1, Len(StringCheck), Start)
-lEndPoint = 1
-
-For lCtr = lStartPoint To lEndPoint Step -1
-    sWkg = Mid(StringCheck, lCtr, lSearchLength)
-    If StrComp(sWkg, StringMatch, Compare) = 0 Then
-        InStrRev = lCtr
+Private Function InStrRev( _
+            ByVal StringCheck As String, _
+            StringMatch As String, _
+            Optional Start As Long = -1, _
+            Optional Compare As VbCompareMethod = vbBinaryCompare) As Long
+    Dim lStartPoint     As Long
+    Dim lEndPoint       As Long
+    Dim lSearchLength   As Long
+    Dim lCtr            As Long
+    Dim sWkg            As String
+    
+    If Len(StringMatch) > Len(StringCheck) Then
         Exit Function
     End If
-Next
-        
+    If Start < -1 Or Start = 0 Or Start > Len(StringCheck) Then
+        Exit Function
+    End If
+    
+    
+    lSearchLength = Len(StringMatch)
+    lStartPoint = IIf(Start = -1, Len(StringCheck), Start)
+    lEndPoint = 1
+    For lCtr = lStartPoint To lEndPoint Step -1
+        sWkg = Mid$(StringCheck, lCtr, lSearchLength)
+        If StrComp(sWkg, StringMatch, Compare) = 0 Then
+            InStrRev = lCtr
+            Exit Function
+        End If
+    Next
 End Function
-

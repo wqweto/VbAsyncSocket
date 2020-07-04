@@ -1,13 +1,13 @@
 VERSION 5.00
 Begin VB.Form Form2 
    Caption         =   "Form2"
-   ClientHeight    =   5592
-   ClientLeft      =   108
-   ClientTop       =   456
-   ClientWidth     =   11256
+   ClientHeight    =   5595
+   ClientLeft      =   105
+   ClientTop       =   450
+   ClientWidth     =   11265
    LinkTopic       =   "Form2"
-   ScaleHeight     =   5592
-   ScaleWidth      =   11256
+   ScaleHeight     =   5595
+   ScaleWidth      =   11265
    StartUpPosition =   3  'Windows Default
    Begin VB.CommandButton Command1 
       Caption         =   "Download"
@@ -20,8 +20,8 @@ Begin VB.Form Form2
    End
    Begin VB.TextBox txtResult 
       BeginProperty Font 
-         Name            =   "Consolas"
-         Size            =   10.2
+         Name            =   "Arial"
+         Size            =   10.5
          Charset         =   204
          Weight          =   400
          Underline       =   0   'False
@@ -487,3 +487,50 @@ Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsy
         End If
     End With
 End Sub
+
+Private Function Replace(ByVal Source As String, ByVal Find As String, ByVal ReplaceStr As String) As String
+    Find = preg_replace("[.*+?^${}()/|[\]\\]", Find, "\$&")
+    Replace = preg_replace(Find, Source, ReplaceStr)
+End Function
+
+Private Function preg_replace(sPattern As String, sText As String, Optional Replace As String) As String
+    With CreateObject("VBScript.RegExp")
+        .Global = True
+        .Pattern = sPattern
+        preg_replace = .Replace(sText, Replace)
+    End With
+End Function
+
+Private Function Split(ByVal TextToSplit As String, Optional Delimiter As String = " ") As Variant
+    Dim sTemp           As String
+    Dim aRetVal()       As String
+    Dim lPos            As Long
+    
+    ReDim aRetVal(-1 To -1) As String
+    If TextToSplit <> "" Then
+        If Delimiter <> "" Then
+            Do
+                lPos = InStr(TextToSplit, Delimiter)
+                If lPos <> 0 Then
+                    sTemp = Left$(TextToSplit, lPos - 1)
+                    TextToSplit = Right$(TextToSplit, Len(TextToSplit) - lPos + 1 - Len(Delimiter))
+                    If UBound(aRetVal) < 0 Then
+                        ReDim aRetVal(0 To 0) As String
+                    Else
+                        ReDim Preserve aRetVal(UBound(aRetVal) + 1) As String
+                    End If
+                    aRetVal(UBound(aRetVal)) = sTemp
+                End If
+            Loop While lPos <> 0
+        End If
+        If TextToSplit <> "" Then
+            If UBound(aRetVal) < 0 Then
+                ReDim aRetVal(0 To 0) As String
+            Else
+                ReDim Preserve aRetVal(UBound(aRetVal) + 1) As String
+            End If
+            aRetVal(UBound(aRetVal)) = TextToSplit
+        End If
+    End If
+    Split = aRetVal()
+End Function

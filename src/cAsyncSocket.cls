@@ -1826,7 +1826,7 @@ Private Function pvThunkAllocate(sText As String, Optional ByVal Size As Long) A
         Next
     End If
     '--- base64 decode loop
-    baInput = StrConv(Replace(Replace(sText, vbCr, vbNullString), vbLf, vbNullString), vbFromUnicode)
+    baInput = StrConv(preg_replace("[\r\n]", sText, vbNullString), vbFromUnicode)
     lPtr = pvThunkAllocate
     For lIdx = 0 To UBound(baInput) - 3 Step 4
         lChar = Map(baInput(lIdx + 0)) Or Map(&H100 + baInput(lIdx + 1)) Or Map(&H200 + baInput(lIdx + 2)) Or Map(&H300 + baInput(lIdx + 3))
@@ -1846,6 +1846,14 @@ End Property
 Private Property Let pvThunkGlobalData(sKey As String, ByVal lValue As Long)
     Call SetEnvironmentVariable("_MST_GLOBAL" & GetCurrentProcessId() & "_" & sKey, lValue)
 End Property
+
+Private Function preg_replace(sPattern As String, sText As String, Optional Replace As String) As String
+    With CreateObject("VBScript.RegExp")
+        .Global = True
+        .Pattern = sPattern
+        preg_replace = .Replace(sText, Replace)
+    End With
+End Function
 #End If
 
 '=========================================================================
