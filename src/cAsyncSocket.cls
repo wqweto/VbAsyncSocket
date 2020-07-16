@@ -209,7 +209,7 @@ Private Declare Function ws_gethostname Lib "ws2_32" Alias "gethostname" (ByVal 
     Private Declare Function CallWindowProc Lib "user32" Alias "CallWindowProcA" (ByVal lpPrevWndFunc As Long, ByVal hWnd As Long, ByVal Msg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
     Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleA" (ByVal lpModuleName As String) As Long
     Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
-    Private Declare Function GetProcAddressByOrdinal Lib "kernel32" Alias "GetProcAddress" (ByVal hModule As Long, ByVal lpProcOrdinal As Long) As Long
+    Private Declare Function GetProcByOrdinal Lib "kernel32" Alias "GetProcAddress" (ByVal hModule As Long, ByVal lpProcOrdinal As Long) As Long
     Private Declare Function DefSubclassProc Lib "comctl32" Alias "#413" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
     Private Declare Function GetWindowThreadProcessId Lib "user32" (ByVal hWnd As Long, lpdwProcessId As Long) As Long
     Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableA" (ByVal lpName As String, ByVal lpBuffer As String, ByVal nSize As Long) As Long
@@ -792,6 +792,7 @@ Public Function SendArray( _
     Dim uAddr           As SOCKADDR_IN
     Dim lBytes          As Long
     Dim lResult         As Long
+    Dim lPtr            As Long
     
     On Error GoTo EH
     If LenB(HostAddress) <> 0 Then
@@ -800,10 +801,13 @@ Public Function SendArray( _
         End If
     End If
     Do
+        If lBytes <= UBound(Buffer) Then
+            lPtr = VarPtr(Buffer(lBytes))
+        End If
         If uAddr.sin_family <> 0 Then
-            lResult = ws_sendto(m_hSocket, Buffer(lBytes), UBound(Buffer) + 1 - lBytes, Flags, uAddr, LenB(uAddr))
+            lResult = ws_sendto(m_hSocket, ByVal lPtr, UBound(Buffer) + 1 - lBytes, Flags, uAddr, LenB(uAddr))
         Else
-            lResult = ws_send(m_hSocket, Buffer(lBytes), UBound(Buffer) + 1 - lBytes, Flags)
+            lResult = ws_send(m_hSocket, ByVal lPtr, UBound(Buffer) + 1 - lBytes, Flags)
         End If
         If lResult < 0 Then
             m_lLastError = Err.LastDllError
@@ -941,7 +945,9 @@ Public Function ToTextArray(sText As String, Optional ByVal CodePage As UcsAsync
         If lSize > 0 Then
             ReDim Preserve baRetVal(0 To lSize - 1) As Byte
         Else
-            baRetVal = vbNullString
+            lSize = WideCharToMultiByte(CodePage, 0, StrPtr(sText), Len(sText), ByVal 0, 0, 0, 0)
+            ReDim baRetVal(0 To lSize - 1) As Byte
+            lSize = WideCharToMultiByte(CodePage, 0, StrPtr(sText), Len(sText), baRetVal(0), UBound(baRetVal) + 1, 0, 0)
         End If
     Else
         baRetVal = vbNullString
@@ -1152,7 +1158,7 @@ Public Function SyncReceiveText( _
             Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As String
     Const FUNC_NAME     As String = "SyncReceiveText"
     Dim baText()        As Byte
-    Dim dblTimer        As Double
+    Dim dblTimerEx      As Double
     Dim lElapsed        As Long
     Dim baBuffer()      As Byte
     Dim bResult         As Boolean
@@ -1162,10 +1168,10 @@ Public Function SyncReceiveText( _
         Timeout = Znl(SockOpt(ucsSsoReceiveTimeout), DEF_TIMEOUT)
     End If
     baText = vbNullString
-    dblTimer = TimerEx
+    dblTimerEx = TimerEx
     Do
         If Timeout > 0 Then
-            lElapsed = Int((TimerEx - dblTimer) * 1000)
+            lElapsed = Int((TimerEx - dblTimerEx) * 1000)
             If lElapsed >= Timeout Then
                 m_lLastError = ERR_TIMEOUT
                 GoTo QH
@@ -1198,7 +1204,7 @@ Public Function SyncReceiveArray( _
             Optional ByVal Flags As Long = 0) As Boolean
     Const FUNC_NAME     As String = "SyncReceiveArray"
     Dim lAvailable      As Long
-    Dim dblTimer        As Double
+    Dim dblTimerEx      As Double
     Dim lResult         As Long
     Dim uAddr           As SOCKADDR_IN
     Dim lBytes          As Long
@@ -1219,7 +1225,7 @@ Public Function SyncReceiveArray( _
         lAvailable = 4096
     End If
     ReDim Buffer(0 To lAvailable - 1) As Byte
-    dblTimer = TimerEx
+    dblTimerEx = TimerEx
     Do
         If HostAddress <> STR_CHR1 Then
             lResult = ws_recvfrom(m_hSocket, Buffer(lBytes), lAvailable - lBytes, Flags, uAddr, LenB(uAddr))
@@ -1241,7 +1247,7 @@ Public Function SyncReceiveArray( _
             End If
         End If
         If Timeout > 0 Then
-            lElapsed = Int((TimerEx - dblTimer) * 1000)
+            lElapsed = Int((TimerEx - dblTimerEx) * 1000)
             If lElapsed >= Timeout Then
                 m_lLastError = ERR_TIMEOUT
                 GoTo QH
@@ -1735,9 +1741,9 @@ Private Function InitAsyncSelectNotifyThunk(ByVal hWnd As Long, pObj As Object, 
     If hThunk = 0 Then
         hThunk = pvThunkAllocate(STR_THUNK, THUNK_SIZE)
         Call DefSubclassProc(0, 0, 0, 0)                                            '--- load comctl32
-        aParams(2) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 410)      '--- 410 = SetWindowSubclass ordinal
-        aParams(3) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 412)      '--- 412 = RemoveWindowSubclass ordinal
-        aParams(4) = GetProcAddressByOrdinal(GetModuleHandle("comctl32"), 413)      '--- 413 = DefSubclassProc ordinal
+        aParams(2) = GetProcByOrdinal(GetModuleHandle("comctl32"), 410)      '--- 410 = SetWindowSubclass ordinal
+        aParams(3) = GetProcByOrdinal(GetModuleHandle("comctl32"), 412)      '--- 412 = RemoveWindowSubclass ordinal
+        aParams(4) = GetProcByOrdinal(GetModuleHandle("comctl32"), 413)      '--- 413 = DefSubclassProc ordinal
         aParams(5) = GetProcAddress(GetModuleHandle("user32"), "SetTimer")
         aParams(6) = GetProcAddress(GetModuleHandle("user32"), "KillTimer")
         '--- for IDE protection
