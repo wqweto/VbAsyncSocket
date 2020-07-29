@@ -284,11 +284,13 @@ Private Const ERR_UNSUPPORTED_CERTIFICATE               As String = "Unsupported
 Private Const ERR_UNSUPPORTED_PUBLIC_KEY                As String = "Unsupported public key OID (%1)"
 Private Const ERR_UNSUPPORTED_PRIVATE_KEY               As String = "Unsupported private key"
 Private Const ERR_UNSUPPORTED_CURVE_SIZE                As String = "Unsupported curve size (%1)"
+Private Const ERR_UNSUPPORTED_CURVE_TYPE                As String = "Unsupported curve type (%1)"
 Private Const ERR_UNSUPPORTED_PROTOCOL                  As String = "Invalid protocol version"
 Private Const ERR_ENCRYPTION_FAILED                     As String = "Encryption failed"
 Private Const ERR_SIGNATURE_FAILED                      As String = "Certificate signature failed (%1)"
 Private Const ERR_DECRYPTION_FAILED                     As String = "Decryption failed"
 Private Const ERR_SERVER_HANDSHAKE_FAILED               As String = "Handshake verification failed"
+Private Const ERR_HELLO_RETRY_FAILED                    As String = "HelloRetryRequest failed"
 Private Const ERR_NEGOTIATE_SIGNATURE_FAILED            As String = "Negotiate signature type failed"
 Private Const ERR_CALL_FAILED                           As String = "Call failed (%1)"
 Private Const ERR_RECORD_TOO_BIG                        As String = "Record size too big"
@@ -1504,6 +1506,9 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
                 bResult = False
                 pvArrayXor baRemoteIV, .RemoteTrafficIV, .RemoteTrafficSeqNo
                 If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
+                    If lRecordType <> TLS_CONTENT_TYPE_APPDATA Then
+                        GoTo UnexpectedRecordType
+                    End If
                     bResult = pvTlsAeadDecrypt(.AeadAlgo, baRemoteIV, .RemoteTrafficKey, baInput, lRecordPos, LNG_AAD_SIZE, baInput, lPos, lRecordSize)
                 ElseIf .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
                     If .IvDynamicSize > 0 Then '--- AES in TLS 1.2
@@ -1540,9 +1545,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
             Select Case lRecordType
             Case TLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC
                 If lPos + 1 <> lEnd Then
-                    sError = ERR_RECORD_TOO_BIG
-                    eAlertCode = uscTlsAlertDecodeError
-                    GoTo QH
+                    GoTo UnexpectedRecordSize
                 End If
                 If .State = ucsTlsStatePostHandshake Then
                     GoTo UnexpectedRecordType
@@ -1554,9 +1557,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
                 End If
             Case TLS_CONTENT_TYPE_ALERT
                 If lPos + 2 <> lEnd Then
-                    sError = ERR_RECORD_TOO_BIG
-                    eAlertCode = uscTlsAlertDecodeError
-                    GoTo QH
+                    GoTo UnexpectedRecordSize
                 End If
                 Select Case baInput(lPos)
                 Case TLS_ALERT_LEVEL_FATAL
@@ -1598,10 +1599,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
                 End If
                 .DecrPos = pvWriteBuffer(.DecrBuffer, .DecrPos, VarPtr(baInput(lPos)), lEnd - lPos)
             Case Else
-UnexpectedRecordType:
-                sError = Replace(ERR_UNEXPECTED_RECORD_TYPE, "%1", lRecordType)
-                eAlertCode = uscTlsAlertUnexpectedMessage
-                GoTo QH
+                GoTo UnexpectedRecordType
             End Select
             '--- note: skip AEAD's authentication tag or zero padding
             lPos = lRecordPos + lRecordSize + 5
@@ -1611,6 +1609,14 @@ UnexpectedRecordType:
     pvTlsParseRecord = lPos
 QH:
     Exit Function
+UnexpectedRecordType:
+    sError = Replace(ERR_UNEXPECTED_RECORD_TYPE, "%1", lRecordType)
+    eAlertCode = uscTlsAlertUnexpectedMessage
+    GoTo QH
+UnexpectedRecordSize:
+    sError = ERR_RECORD_TOO_BIG
+    eAlertCode = uscTlsAlertUnexpectedMessage
+    GoTo QH
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
     eAlertCode = uscTlsAlertInternalError
@@ -1737,9 +1743,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                         lPos = pvReadArray(baInput, lPos, baSignature, lCertSize)
                     lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
                     If Not SearchCollection(.RemoteCertificates, 1, RetVal:=baCert) Then
-                        sError = ERR_NO_SERVER_CERTIFICATE
-                        eAlertCode = uscTlsAlertHandshakeFailure
-                        GoTo QH
+                        GoTo NoServerCertificate
                     End If
                     pvTlsArrayHash baHandshakeHash, .DigestAlgo, .HandshakeMessages, 0
                     lVerifyPos = pvWriteString(baVerifyData, 0, Space$(64) & "TLS 1.3, server CertificateVerify" & Chr$(0))
@@ -1753,9 +1757,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                     pvTlsHkdfExpandLabel baTemp, .DigestAlgo, .RemoteTrafficSecret, "finished", baEmpty, .DigestSize
                     pvTlsHkdfExtract baVerifyData, .DigestAlgo, baTemp, baHandshakeHash
                     If StrConv(baVerifyData, vbUnicode) <> StrConv(baMessage, vbUnicode) Then
-                        sError = ERR_SERVER_HANDSHAKE_FAILED
-                        eAlertCode = uscTlsAlertHandshakeFailure
-                        GoTo QH
+                        GoTo ServerHandshakeFailed
                     End If
                     .State = ucsTlsStatePostHandshake
                 Case TLS_HANDSHAKE_TYPE_SERVER_KEY_EXCHANGE
@@ -1763,7 +1765,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                         lSignPos = lPos
                         lPos = pvReadLong(baInput, lPos, lCurveType)
                         If lCurveType <> 3 Then '--- 3 = named_curve
-                            sError = ERR_SERVER_HANDSHAKE_FAILED
+                            sError = Replace(ERR_UNSUPPORTED_CURVE_TYPE, "%1", lCurveType)
                             eAlertCode = uscTlsAlertHandshakeFailure
                             GoTo QH
                         End If
@@ -1779,9 +1781,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                             lPos = pvReadArray(baInput, lPos, baSignature, lSignatureSize)
                         lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
                         If Not SearchCollection(.RemoteCertificates, 1, RetVal:=baCert) Then
-                            sError = ERR_NO_SERVER_CERTIFICATE
-                            eAlertCode = uscTlsAlertHandshakeFailure
-                            GoTo QH
+                            GoTo NoServerCertificate
                         End If
                         lVerifyPos = pvWriteArray(baVerifyData, 0, .LocalExchRandom)
                         lVerifyPos = pvWriteArray(baVerifyData, lVerifyPos, .RemoteExchRandom)
@@ -1812,9 +1812,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                 If .State = ucsTlsStateExpectServerFinished And .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
                     If pvTlsCipherSuiteUseRsaCertificate(.CipherSuite) Then
                         If Not SearchCollection(.RemoteCertificates, 1, RetVal:=baCert) Then
-                            sError = ERR_NO_SERVER_CERTIFICATE
-                            eAlertCode = uscTlsAlertCertificateUnknown
-                            GoTo QH
+                            GoTo NoServerCertificate
                         End If
                         pvTlsSetupExchRsaCertificate uCtx, baCert
                     End If
@@ -1835,9 +1833,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                         pvTlsArrayHash baHandshakeHash, .DigestAlgo, .HandshakeMessages, 0
                         pvTlsKdfLegacyPrf baVerifyData, .DigestAlgo, .MasterSecret, "server finished", baHandshakeHash, 12
                         If StrConv(baVerifyData, vbUnicode) <> StrConv(baMessage, vbUnicode) Then
-                            sError = ERR_SERVER_HANDSHAKE_FAILED
-                            eAlertCode = uscTlsAlertHandshakeFailure
-                            GoTo QH
+                            GoTo ServerHandshakeFailed
                         End If
                         .State = ucsTlsStatePostHandshake
                         '--- not used past handshake
@@ -1856,9 +1852,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                     End If
                     If .ExchGroup = 0 Or .CipherSuite = 0 Then
                         If .HelloRetryRequest Then
-                            sError = ERR_SERVER_HANDSHAKE_FAILED
-                            eAlertCode = uscTlsAlertHandshakeFailure
-                            GoTo QH
+                            GoTo HelloRetryFailed
                         End If
                         .HelloRetryRequest = True
                         If .ExchGroup <> 0 Then
@@ -1866,9 +1860,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                         Else
                             .HelloRetryExchGroup = pvCollectionFirst(.RemoteSupportedGroups, Array("#" & TLS_GROUP_X25519, "#" & TLS_GROUP_SECP256R1, "#" & TLS_GROUP_SECP384R1))
                             If .HelloRetryExchGroup = 0 Then
-                                sError = ERR_SERVER_HANDSHAKE_FAILED
-                                eAlertCode = uscTlsAlertHandshakeFailure
-                                GoTo QH
+                                GoTo HelloRetryFailed
                             End If
                         End If
                         .HelloRetryCipherSuite = IIf(.CipherSuite <> 0, .CipherSuite, TLS_CS_AES_128_GCM_SHA256)
@@ -1894,9 +1886,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                     pvTlsHkdfExpandLabel baTemp, .DigestAlgo, .RemoteTrafficSecret, "finished", baEmpty, .DigestSize
                     pvTlsHkdfExtract baVerifyData, .DigestAlgo, baTemp, baHandshakeHash
                     If StrConv(baVerifyData, vbUnicode) <> StrConv(baMessage, vbUnicode) Then
-                        sError = ERR_SERVER_HANDSHAKE_FAILED
-                        eAlertCode = uscTlsAlertHandshakeFailure
-                        GoTo QH
+                        GoTo ServerHandshakeFailed
                     End If
                     .State = ucsTlsStatePostHandshake
                 Case Else
@@ -1956,10 +1946,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                     '--- not used past handshake
                     Erase .HandshakeMessages
                 Case Else
-UnexpectedMessageType:
-                    sError = Replace(Replace(ERR_UNEXPECTED_MSG_TYPE, "%1", pvTlsGetStateAsText(.State)), "%2", pvTlsGetHandshakeType(lMessageType))
-                    eAlertCode = uscTlsAlertUnexpectedMessage
-                    GoTo QH
+                    GoTo UnexpectedMessageType
                 End Select
             Case Else
                 sError = Replace(ERR_INVALID_STATE_HANDSHAKE, "%1", pvTlsGetStateAsText(.State))
@@ -1973,6 +1960,22 @@ UnexpectedMessageType:
     pvTlsParseHandshake = True
 QH:
     Exit Function
+UnexpectedMessageType:
+    sError = Replace(Replace(ERR_UNEXPECTED_MSG_TYPE, "%1", pvTlsGetStateAsText(uCtx.State)), "%2", pvTlsGetHandshakeType(lMessageType))
+    eAlertCode = uscTlsAlertUnexpectedMessage
+    GoTo QH
+ServerHandshakeFailed:
+    sError = ERR_SERVER_HANDSHAKE_FAILED
+    eAlertCode = IIf(pvArraySize(baVerifyData) <> pvArraySize(baMessage), uscTlsAlertDecodeError, uscTlsAlertDecryptError)
+    GoTo QH
+HelloRetryFailed:
+    sError = ERR_HELLO_RETRY_FAILED
+    eAlertCode = uscTlsAlertHandshakeFailure
+    GoTo QH
+NoServerCertificate:
+    sError = ERR_NO_SERVER_CERTIFICATE
+    eAlertCode = uscTlsAlertCertificateUnknown
+    GoTo QH
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
     eAlertCode = uscTlsAlertInternalError
@@ -2118,8 +2121,8 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
     Dim cCipherPrefs    As Collection
     Dim vElem           As Variant
     Dim lIdx            As Long
-    Dim baCert()        As Byte
-    Dim uCertInfo       As UcsKeyInfo
+    Dim baPrivKey()     As Byte
+    Dim uKeyInfo        As UcsKeyInfo
     Dim lNameType       As Long
     Dim lNameSize       As Long
     Dim sName           As String
@@ -2134,8 +2137,8 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
     Next
     lCipherPref = 1000
     With uCtx
-        If SearchCollection(.LocalCertificates, 1, RetVal:=baCert) Then
-            If Not pvAsn1DecodeCertificate(baCert, uCertInfo) Then
+        If SearchCollection(.LocalPrivateKey, 1, RetVal:=baPrivKey) Then
+            If Not pvAsn1DecodePrivateKey(baPrivKey, uKeyInfo) Then
                 sError = ERR_UNSUPPORTED_CERTIFICATE
                 eAlertCode = uscTlsAlertHandshakeFailure
                 GoTo QH
@@ -2267,9 +2270,11 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                                             End If
                                             lPos = pvReadArray(baInput, lPos, .RemoteExchPublic, lBlockSize)
                                             pvTlsSetupExchEccGroup uCtx, lExchGroup
-                                            lPos = lBlockEnd
                                         End If
                                     lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
+                                    If lExchGroup <> 0 Then
+                                        lPos = lBlockEnd
+                                    End If
                                 Loop
                             lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
                         Case TLS_EXTENSION_TYPE_SIGNATURE_ALGORITHMS
@@ -2286,7 +2291,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                                 End If
                                 Do While lPos < lExtEnd
                                     lPos = pvReadLong(baInput, lPos, lSignatureType, Size:=2)
-                                    If pvTlsMatchSignatureType(uCtx, lSignatureType, uCertInfo) Then
+                                    If pvTlsMatchSignatureType(uCtx, lSignatureType, uKeyInfo) Then
                                         .LocalSignatureType = lSignatureType
                                         lPos = lExtEnd
                                     End If
@@ -2363,10 +2368,10 @@ Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, ba
     Dim lBlockEnd       As Long
     Dim lExtType        As Long
     Dim lExtSize        As Long
-    Dim uCertInfo       As UcsKeyInfo
+    Dim uKeyInfo        As UcsKeyInfo
     Dim baDName()       As Byte
     Dim lDnSize         As Long
-    Dim baCert()        As Byte
+    Dim baPrivKey()     As Byte
     Dim baSignatureTypes() As Byte
     Dim lSigPos         As Long
     Dim oCallback       As Object
@@ -2425,8 +2430,8 @@ Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, ba
             lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
         End If
         Do
-            If SearchCollection(.LocalPrivateKey, 1, RetVal:=baCert) Then
-                If Not pvAsn1DecodePrivateKey(baCert, uCertInfo) Then
+            If SearchCollection(.LocalPrivateKey, 1, RetVal:=baPrivKey) Then
+                If Not pvAsn1DecodePrivateKey(baPrivKey, uKeyInfo) Then
                     sError = ERR_UNSUPPORTED_PRIVATE_KEY
                     eAlertCode = uscTlsAlertHandshakeFailure
                     GoTo QH
@@ -2436,7 +2441,7 @@ Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, ba
             lSigPos = 0
             Do While lSigPos < pvArraySize(baSignatureTypes)
                 lSigPos = pvReadLong(baSignatureTypes, lSigPos, lSignatureType, Size:=2)
-                If pvTlsMatchSignatureType(uCtx, lSignatureType, uCertInfo) Then
+                If pvTlsMatchSignatureType(uCtx, lSignatureType, uKeyInfo) Then
                     .CertRequestSignatureType = lSignatureType
                     Exit Do
                 End If
@@ -2457,44 +2462,44 @@ EH:
     eAlertCode = uscTlsAlertInternalError
 End Function
 
-Private Function pvTlsMatchSignatureType(uCtx As UcsTlsContext, ByVal lSignatureType As Long, uCertInfo As UcsKeyInfo) As Boolean
+Private Function pvTlsMatchSignatureType(uCtx As UcsTlsContext, ByVal lSignatureType As Long, uKeyInfo As UcsKeyInfo) As Boolean
     Dim lHashSize       As Long
     
     lHashSize = pvTlsSignatureHashSize(lSignatureType)
     Select Case lSignatureType
     Case TLS_SIGNATURE_RSA_PKCS1_SHA1
         If (uCtx.LocalFeatures And ucsTlsSupportTls12) <> 0 Then
-            If uCertInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoSignaturePkcsSha1) Then
+            If uKeyInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoSignaturePkcsSha1) Then
                 pvTlsMatchSignatureType = True
             End If
         End If
     Case TLS_SIGNATURE_RSA_PKCS1_SHA256, TLS_SIGNATURE_RSA_PKCS1_SHA384, TLS_SIGNATURE_RSA_PKCS1_SHA512
         If (uCtx.LocalFeatures And ucsTlsSupportTls12) <> 0 Then
-            If uCertInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoSignaturePkcsSha2) Then
+            If uKeyInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoSignaturePkcsSha2) Then
                 pvTlsMatchSignatureType = True
             End If
         End If
     Case TLS_SIGNATURE_RSA_PSS_RSAE_SHA256, TLS_SIGNATURE_RSA_PSS_RSAE_SHA384, TLS_SIGNATURE_RSA_PSS_RSAE_SHA512
         '--- PSS w/ SHA512 fails on short key lengths (min PSS size is 2 + lHashSize + lSaltSize w/ lSaltSize=lHashSize)
-        If (uCertInfo.BitLen + 7) \ 8 > 2 + 2 * lHashSize Then
-            If uCertInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoSignaturePss) Then
+        If (uKeyInfo.BitLen + 7) \ 8 > 2 + 2 * lHashSize Then
+            If uKeyInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoSignaturePss) Then
                 pvTlsMatchSignatureType = True
             End If
         End If
     Case TLS_SIGNATURE_RSA_PSS_PSS_SHA256, TLS_SIGNATURE_RSA_PSS_PSS_SHA384, TLS_SIGNATURE_RSA_PSS_PSS_SHA512
-        If (uCertInfo.BitLen + 7) \ 8 > 2 + 2 * lHashSize Then
-            If uCertInfo.AlgoObjId = szOID_RSA_SSA_PSS And pvCryptoIsSupported(ucsTlsAlgoSignaturePss) Then
+        If (uKeyInfo.BitLen + 7) \ 8 > 2 + 2 * lHashSize Then
+            If uKeyInfo.AlgoObjId = szOID_RSA_SSA_PSS And pvCryptoIsSupported(ucsTlsAlgoSignaturePss) Then
                 pvTlsMatchSignatureType = True
             End If
         End If
     Case TLS_SIGNATURE_ECDSA_SECP256R1_SHA256, TLS_SIGNATURE_ECDSA_SECP384R1_SHA384, TLS_SIGNATURE_ECDSA_SECP521R1_SHA512
-        If uCertInfo.AlgoObjId = szOID_ECC_PUBLIC_KEY Then
+        If uKeyInfo.AlgoObjId = szOID_ECC_PUBLIC_KEY Then
             pvTlsMatchSignatureType = True
-        ElseIf uCertInfo.AlgoObjId = szOID_ECC_CURVE_P256 And lSignatureType = TLS_SIGNATURE_ECDSA_SECP256R1_SHA256 Then
+        ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P256 And lSignatureType = TLS_SIGNATURE_ECDSA_SECP256R1_SHA256 Then
             pvTlsMatchSignatureType = True
-        ElseIf uCertInfo.AlgoObjId = szOID_ECC_CURVE_P384 And lSignatureType = TLS_SIGNATURE_ECDSA_SECP384R1_SHA384 Then
+        ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P384 And lSignatureType = TLS_SIGNATURE_ECDSA_SECP384R1_SHA384 Then
             pvTlsMatchSignatureType = True
-        ElseIf uCertInfo.AlgoObjId = szOID_ECC_CURVE_P521 And lSignatureType = TLS_SIGNATURE_ECDSA_SECP521R1_SHA512 And pvCryptoIsSupported(ucsTlsAlgoExchSecp521r1) Then
+        ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P521 And lSignatureType = TLS_SIGNATURE_ECDSA_SECP521R1_SHA512 And pvCryptoIsSupported(ucsTlsAlgoExchSecp521r1) Then
             pvTlsMatchSignatureType = True
         End If
     End Select
