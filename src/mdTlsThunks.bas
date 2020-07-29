@@ -1350,11 +1350,18 @@ Private Function pvTlsBuildApplicationData(uCtx As UcsTlsContext, baOutput() As 
 End Function
 
 Private Function pvTlsBuildAlert(uCtx As UcsTlsContext, baOutput() As Byte, ByVal lPos As Long, ByVal eAlertDesc As UcsTlsAlertDescriptionsEnum, ByVal lAlertLevel As Long) As Long
+    Dim baHandshakeHash() As Byte
     Dim baTemp()        As Byte
     
     With uCtx
-        '--- for TLS 1.3 -> tunnel alert through application data encryption
+        If .State = ucsTlsStateExpectClientFinished And .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
+            '--- alerts must be protected with application data traffic secrets (not handshake)
+            .State = ucsTlsStatePostHandshake
+            pvTlsArrayHash baHandshakeHash, .DigestAlgo, .HandshakeMessages, 0
+            pvTlsDeriveApplicationSecrets uCtx, baHandshakeHash
+        End If
         If .State = ucsTlsStatePostHandshake And .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
+            '--- for TLS 1.3 -> tunnel alert through application data traffic protection
             pvArrayByte baTemp, lAlertLevel, eAlertDesc
             pvTlsBuildAlert = pvTlsBuildApplicationData(uCtx, baOutput, lPos, baTemp, 0, UBound(baTemp) + 1, TLS_CONTENT_TYPE_ALERT)
             GoTo QH
@@ -1475,7 +1482,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
     
     On Error GoTo EH
     With uCtx
-    Do While lPos + 6 <= lSize
+    Do While lPos + 5 <= lSize
         lRecordPos = lPos
         lPos = pvReadLong(baInput, lPos, lRecordType)
         lPos = pvReadLong(baInput, lPos, lRecordProtocol, Size:=2)
@@ -1586,6 +1593,9 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
                     End If
                 End If
             Case TLS_CONTENT_TYPE_APPDATA
+                If .State <> ucsTlsStatePostHandshake Then
+                    GoTo UnexpectedRecordType
+                End If
                 .DecrPos = pvWriteBuffer(.DecrBuffer, .DecrPos, VarPtr(baInput(lPos)), lEnd - lPos)
             Case Else
 UnexpectedRecordType:
@@ -2226,6 +2236,11 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                                 GoTo QH
                             End If
                             lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lBlockSize)
+                                If lPos + lBlockSize <> lExtEnd Or lBlockSize = 0 Then
+                                    sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionType(lExtType))
+                                    eAlertCode = uscTlsAlertDecodeError
+                                    GoTo QH
+                                End If
                                 lBlockEnd = lPos + lBlockSize
                                 Do While lPos < lBlockEnd
                                     lPos = pvReadLong(baInput, lPos, lExchGroup, Size:=2)
