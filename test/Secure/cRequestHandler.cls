@@ -30,6 +30,7 @@ Private WithEvents m_oSocket    As cTlsSocket
 Attribute m_oSocket.VB_VarHelpID = -1
 Private m_sKey                  As String
 Private m_lParentWeakRef        As Long
+Private m_sRequest              As String
 
 '=========================================================================
 ' Error handling
@@ -70,7 +71,11 @@ Private Function HandleRequest(sText As String) As Boolean
     Dim sRetVal         As String
     
     On Error GoTo EH
-    vSplit = Split(sText, vbCrLf)
+    m_sRequest = m_sRequest & sText
+    If InStr(m_sRequest, vbCrLf) = 0 Then
+        Exit Function
+    End If
+    vSplit = Split(m_sRequest, vbCrLf)
     vSplit = Split(vSplit(0), " ")
     #If ImplUseDebugLog Then
         DebugLog MODULE_NAME, FUNC_NAME, "Path=" & vSplit(1)
