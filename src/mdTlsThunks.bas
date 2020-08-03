@@ -219,6 +219,7 @@ Private Const TLS_EXTENSION_TYPE_COOKIE                 As Long = 44
 'Private Const TLS_EXTENSION_TYPE_PSK_KEY_EXCHANGE_MODES As Long = 45
 Private Const TLS_EXTENSION_TYPE_CERTIFICATE_AUTHORITIES As Long = 47
 Private Const TLS_EXTENSION_TYPE_POST_HANDSHAKE_AUTH    As Long = 49
+Private Const TLS_EXTENSION_TYPE_SIGNATURE_ALGORITHMS_CERT As Long = 50
 Private Const TLS_EXTENSION_TYPE_KEY_SHARE              As Long = 51
 Private Const TLS_EXTENSION_TYPE_RENEGOTIATION_INFO     As Long = &HFF01
 Private Const TLS_CS_AES_128_GCM_SHA256                 As Long = &H1301
@@ -1221,7 +1222,7 @@ Private Function pvTlsBuildServerHello(uCtx As UcsTlsContext, baOutput() As Byte
                         lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
                     End If
                     '--- Extension - Supported Versions
-                    If SearchCollection(.RemoteExtensions, "#" & TLS_EXTENSION_TYPE_SUPPORTED_VERSIONS) Then
+                    If SearchCollection(.RemoteExtensions, "#" & TLS_EXTENSION_TYPE_SUPPORTED_VERSIONS) Or .HelloRetryRequest Then
                         lPos = pvWriteLong(baOutput, lPos, TLS_EXTENSION_TYPE_SUPPORTED_VERSIONS, Size:=2)
                         lPos = pvWriteBeginOfBlock(baOutput, lPos, .BlocksStack, Size:=2)
                             lPos = pvWriteLong(baOutput, lPos, TLS_PROTOCOL_VERSION_TLS13, Size:=2)
@@ -1240,7 +1241,7 @@ Private Function pvTlsBuildServerHello(uCtx As UcsTlsContext, baOutput() As Byte
             lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
             pvWriteBuffer .HandshakeMessages, pvArraySize(.HandshakeMessages), VarPtr(baOutput(lMessagePos)), lPos - lMessagePos
         lPos = pvWriteEndOfRecord(baOutput, lPos, uCtx)
-        If .HelloRetryRequest Then
+        If .HelloRetryRequest Or .HelloRetryCipherSuite = 0 Then
             '--- Legacy Change Cipher Spec
             pvArrayByte baTemp, TLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC, TLS_RECORD_VERSION \ &H100, TLS_RECORD_VERSION, 0, 1, 1
             lPos = pvWriteArray(baOutput, lPos, baTemp)
@@ -1261,9 +1262,6 @@ Private Function pvTlsBuildServerHandshakeFinished(uCtx As UcsTlsContext, baOutp
     Dim baEmpty()       As Byte
     
     With uCtx
-        '--- Legacy Change Cipher Spec
-        pvArrayByte baTemp, TLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC, TLS_RECORD_VERSION \ &H100, TLS_RECORD_VERSION, 0, 1, 1
-        lPos = pvWriteArray(baOutput, lPos, baTemp)
         '--- Record Header
         lPos = pvWriteBeginOfRecord(baOutput, lPos, TLS_CONTENT_TYPE_APPDATA, uCtx)
             '--- Server Encrypted Extensions
@@ -1673,7 +1671,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                         GoTo QH
                     End If
                     If .HelloRetryRequest Then
-                        '--- after HelloRetryRequest -> replace HandshakeMessages w/ 'synthetic handshake message'
+                        '--- on HelloRetryRequest replace HandshakeMessages w/ 'synthetic handshake message'
                         pvTlsArrayHash baHandshakeHash, .DigestAlgo, .HandshakeMessages, 0
                         Erase .HandshakeMessages
                         lVerifyPos = pvWriteLong(.HandshakeMessages, 0, TLS_HANDSHAKE_TYPE_MESSAGE_HASH)
@@ -1864,8 +1862,8 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                             End If
                         End If
                         .HelloRetryCipherSuite = IIf(.CipherSuite <> 0, .CipherSuite, TLS_CS_AES_128_GCM_SHA256)
-                        .SendPos = pvTlsBuildServerHello(uCtx, .SendBuffer, .SendPos)
                     Else
+                        .HelloRetryRequest = False
                         .State = ucsTlsStateExpectClientFinished
                     End If
                 Case Else
@@ -1873,8 +1871,16 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                 End Select
                 pvWriteBuffer .HandshakeMessages, pvArraySize(.HandshakeMessages), VarPtr(baInput(lMessagePos)), lMessageSize + 4
                 '--- post-process ucsTlsStateExpectClientHello
+                If .HelloRetryRequest Then
+                    '--- on HelloRetryRequest replace HandshakeMessages w/ 'synthetic handshake message'
+                    pvTlsArrayHash baHandshakeHash, .DigestAlgo, .HandshakeMessages, 0
+                    Erase .HandshakeMessages
+                    lVerifyPos = pvWriteLong(.HandshakeMessages, 0, TLS_HANDSHAKE_TYPE_MESSAGE_HASH)
+                    lVerifyPos = pvWriteLong(.HandshakeMessages, lVerifyPos, .DigestSize, Size:=3)
+                    lVerifyPos = pvWriteArray(.HandshakeMessages, lVerifyPos, baHandshakeHash)
+                End If
+                .SendPos = pvTlsBuildServerHello(uCtx, .SendBuffer, .SendPos)
                 If .State = ucsTlsStateExpectClientFinished Then
-                    .SendPos = pvTlsBuildServerHello(uCtx, .SendBuffer, .SendPos)
                     pvTlsDeriveHandshakeSecrets uCtx
                     .SendPos = pvTlsBuildServerHandshakeFinished(uCtx, .SendBuffer, .SendPos)
                 End If
@@ -2239,11 +2245,6 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                                 GoTo QH
                             End If
                             lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lBlockSize)
-                                If lPos + lBlockSize <> lExtEnd Or lBlockSize = 0 Then
-                                    sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionType(lExtType))
-                                    eAlertCode = uscTlsAlertDecodeError
-                                    GoTo QH
-                                End If
                                 lBlockEnd = lPos + lBlockSize
                                 Do While lPos < lBlockEnd
                                     lPos = pvReadLong(baInput, lPos, lExchGroup, Size:=2)
@@ -2335,6 +2336,8 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                                 GoTo QH
                             End If
                             .ProtocolVersion = lProtocolVersion
+                        Case TLS_EXTENSION_TYPE_SIGNATURE_ALGORITHMS_CERT
+                            lPos = lPos + lExtSize
                         Case Else
                             If .HelloRetryRequest Then
                                 sError = Replace(ERR_UNEXPECTED_EXTENSION_TYPE, "%1", pvTlsGetExtensionType(lExtType))
