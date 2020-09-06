@@ -1,5 +1,4 @@
 VERSION 5.00
-Object = "{248DD890-BB45-11CF-9ABC-0080C7E7B78D}#1.0#0"; "MSWINSCK.OCX"
 Begin VB.Form Form1 
    Caption         =   "Form1"
    ClientHeight    =   2952
@@ -54,21 +53,6 @@ Begin VB.Form Form1
       Top             =   252
       _ExtentX        =   677
       _ExtentY        =   677
-   End
-   Begin MSWinsockLib.Winsock ctxWinsock1 
-      Left            =   2100
-      Top             =   252
-      _ExtentX        =   593
-      _ExtentY        =   593
-      _Version        =   393216
-   End
-   Begin MSWinsockLib.Winsock ctxServer1 
-      Index           =   0
-      Left            =   2100
-      Top             =   840
-      _ExtentX        =   593
-      _ExtentY        =   593
-      _Version        =   393216
    End
 End
 Attribute VB_Name = "Form1"

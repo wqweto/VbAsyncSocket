@@ -1,5 +1,4 @@
 VERSION 5.00
-Object = "{248DD890-BB45-11CF-9ABC-0080C7E7B78D}#1.0#0"; "MSWINSCK.OCX"
 Begin VB.Form Form2 
    Caption         =   "Form2"
    ClientHeight    =   2952
@@ -38,8 +37,8 @@ Begin VB.Form Form2
       Index           =   0
       Left            =   2604
       Top             =   840
-      _ExtentX        =   677
-      _ExtentY        =   677
+      _extentx        =   677
+      _extenty        =   677
    End
    Begin VB.CommandButton Command1 
       Caption         =   "HTTP request"
@@ -52,23 +51,8 @@ Begin VB.Form Form2
    Begin WinsockNative.ctxWinsock ctxWinsock 
       Left            =   2604
       Top             =   252
-      _ExtentX        =   677
-      _ExtentY        =   677
-   End
-   Begin MSWinsockLib.Winsock ctxWinsock1 
-      Left            =   2100
-      Top             =   252
-      _ExtentX        =   593
-      _ExtentY        =   593
-      _Version        =   393216
-   End
-   Begin MSWinsockLib.Winsock ctxServer1 
-      Index           =   0
-      Left            =   2100
-      Top             =   840
-      _ExtentX        =   593
-      _ExtentY        =   593
-      _Version        =   393216
+      _extentx        =   677
+      _extenty        =   677
    End
 End
 Attribute VB_Name = "Form2"
