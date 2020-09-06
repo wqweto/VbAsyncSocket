@@ -770,7 +770,7 @@ Public Function TlsGetLastError(uCtx As UcsTlsContext, Optional LastErrNumber As
     LastErrSource = uCtx.LastErrSource
     TlsGetLastError = uCtx.LastError
     If uCtx.LastAlertCode <> -1 Then
-        TlsGetLastError = IIf(LenB(TlsGetLastError) <> 0, TlsGetLastError & ". ", vbNullString) & Replace(STR_FORMAT_ALERT, "%1", TlsGetLastAlert(uCtx))
+        TlsGetLastError = IIf(LenB(TlsGetLastError) <> 0, TlsGetLastError & ". ", vbNullString) & Replace(STR_FORMAT_ALERT, "%1", pvTlsGetLastAlert(uCtx))
         '--- warnings
         Select Case uCtx.LastAlertCode
         Case uscTlsAlertCloseNotify, uscTlsAlertUserCanceled, uscTlsAlertNoRenegotiation
@@ -779,7 +779,7 @@ Public Function TlsGetLastError(uCtx As UcsTlsContext, Optional LastErrNumber As
     End If
 End Function
 
-Private Function TlsGetLastAlert(uCtx As UcsTlsContext, Optional AlertCode As UcsTlsAlertDescriptionsEnum) As String
+Private Function pvTlsGetLastAlert(uCtx As UcsTlsContext, Optional AlertCode As UcsTlsAlertDescriptionsEnum) As String
     Static vTexts       As Variant
     
     AlertCode = uCtx.LastAlertCode
@@ -788,10 +788,10 @@ Private Function TlsGetLastAlert(uCtx As UcsTlsContext, Optional AlertCode As Uc
             vTexts = SplitOrReindex(STR_VL_ALERTS, "|")
         End If
         If AlertCode <= UBound(vTexts) Then
-            TlsGetLastAlert = vTexts(AlertCode)
+            pvTlsGetLastAlert = vTexts(AlertCode)
         End If
-        If LenB(TlsGetLastAlert) = 0 Then
-            TlsGetLastAlert = Replace(STR_UNKNOWN, "%1", AlertCode)
+        If LenB(pvTlsGetLastAlert) = 0 Then
+            pvTlsGetLastAlert = Replace(STR_UNKNOWN, "%1", AlertCode)
         End If
     End If
 End Function
@@ -826,8 +826,7 @@ Private Function pvTlsGetHandshakeType(ByVal lType As Long) As String
     End If
 End Function
 
-#If ImplUseDebugLog Then
-Public Function pvTlsGetExtensionType(ByVal lType As Long) As String
+Private Function pvTlsGetExtensionType(ByVal lType As Long) As String
     Static vTexts       As Variant
     
     If IsEmpty(vTexts) Then
@@ -844,7 +843,6 @@ Public Function pvTlsGetExtensionType(ByVal lType As Long) As String
         pvTlsGetExtensionType = pvTlsGetExtensionType & " (" & lType & ")"
     End If
 End Function
-#End If
 
 Private Function pvTlsBuildClientHello(uCtx As UcsTlsContext, baOutput() As Byte, ByVal lPos As Long) As Long
     Dim lMessagePos     As Long
@@ -1565,7 +1563,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
                 Case TLS_ALERT_LEVEL_WARNING
                     .LastAlertCode = baInput(lPos + 1)
                     #If ImplUseDebugLog Then
-                        DebugLog MODULE_NAME, FUNC_NAME, TlsGetLastAlert(uCtx) & " (TLS_ALERT_LEVEL_WARNING)"
+                        DebugLog MODULE_NAME, FUNC_NAME, pvTlsGetLastAlert(uCtx) & " (TLS_ALERT_LEVEL_WARNING)"
                     #End If
                     If .LastAlertCode = uscTlsAlertCloseNotify Then
                         pvTlsSetLastError uCtx, AlertCode:=uscTlsAlertCloseNotify
