@@ -213,7 +213,9 @@ Property Let RemoteHost(sValue As String)
 End Property
 
 Property Get RemotePort() As Long
-    If Not m_oSocket Is Nothing Then
+    If Not m_oRequestSocket Is Nothing Then
+        m_oRequestSocket.GetPeerName vbNullString, RemotePort
+    ElseIf Not m_oSocket Is Nothing Then
         m_oSocket.GetPeerName vbNullString, RemotePort
     Else
         RemotePort = m_lRemotePort
