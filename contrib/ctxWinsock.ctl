@@ -171,8 +171,8 @@ End Sub
 '=========================================================================
 
 Property Get LocalPort() As Long
-    If Not m_oSocket Is Nothing Then
-        m_oSocket.GetSockName vbNullString, LocalPort
+    If Not pvSocket Is Nothing Then
+        pvSocket.GetSockName vbNullString, LocalPort
     Else
         LocalPort = m_lLocalPort
     End If
@@ -213,8 +213,8 @@ Property Let RemoteHost(sValue As String)
 End Property
 
 Property Get RemotePort() As Long
-    If Not m_oSocket Is Nothing Then
-        m_oSocket.GetPeerName vbNullString, RemotePort
+    If Not pvSocket Is Nothing Then
+        pvSocket.GetPeerName vbNullString, RemotePort
     Else
         RemotePort = m_lRemotePort
     End If
