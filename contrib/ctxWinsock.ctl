@@ -171,7 +171,7 @@ End Sub
 '=========================================================================
 
 Property Get LocalPort() As Long
-    If Not pvSocket Is Nothing Then
+    If pvHasSocket Then
         pvSocket.GetSockName vbNullString, LocalPort
     Else
         LocalPort = m_lLocalPort
@@ -180,7 +180,7 @@ End Property
 
 Property Let LocalPort(ByVal lValue As Long)
     If m_lLocalPort <> lValue Then
-        Set m_oSocket = Nothing
+        Close_
         pvState = sckClosed
         m_lLocalPort = lValue
         PropertyChanged
@@ -193,7 +193,7 @@ End Property
 
 Property Let Protocol(ByVal eValue As UcsProtocolConstants)
     If m_eProtocol <> eValue Then
-        Set m_oSocket = Nothing
+        Close_
         pvState = sckClosed
         m_eProtocol = eValue
         PropertyChanged
@@ -213,7 +213,7 @@ Property Let RemoteHost(sValue As String)
 End Property
 
 Property Get RemotePort() As Long
-    If Not pvSocket Is Nothing Then
+    If pvHasSocket Then
         pvSocket.GetPeerName vbNullString, RemotePort
     Else
         RemotePort = m_lRemotePort
@@ -267,6 +267,22 @@ Property Get RemoteHostIP() As String
     pvSocket.GetPeerName RemoteHostIP, 0
 End Property
 
+Property Get SockOpt(ByVal OptionName As UcsAsyncSocketOptionNameEnum, Optional ByVal Level As UcsAsyncSocketOptionLevelEnum = ucsSolSocket) As Long
+    SockOpt = pvSocket.Socket.SockOpt(OptionName, Level)
+End Property
+
+Property Let SockOpt(ByVal OptionName As UcsAsyncSocketOptionNameEnum, Optional ByVal Level As UcsAsyncSocketOptionLevelEnum = ucsSolSocket, ByVal Value As Long)
+    pvSocket.Socket.SockOpt(OptionName, Level) = Value
+End Property
+
+'= private ===============================================================
+
+Private Property Get pvHasSocket() As Boolean
+    If Not m_oRequestSocket Is Nothing Or Not m_oSocket Is Nothing Then
+        pvHasSocket = True
+    End If
+End Property
+
 Private Property Get pvSocket() As cTlsSocket
     Const FUNC_NAME     As String = "pvSocket [get]"
     
@@ -294,7 +310,7 @@ Public Sub Accept(ByVal requestID As Long)
     Dim hDuplicate      As Long
     
     On Error GoTo EH
-    Set m_oSocket = Nothing
+    Close_
     If Not g_oRequestSocket Is Nothing Then
         If g_oRequestSocket.SocketHandle = requestID Then
             Set m_oSocket = g_oRequestSocket
@@ -323,12 +339,14 @@ Public Sub Close_()
     Const FUNC_NAME     As String = "Close_"
     
     On Error GoTo EH
-    If Not m_oSocket Is Nothing Then
-        pvState = sckClosing
-        m_oSocket.Close_
-        Set m_oSocket = Nothing
+    If State <> sckClosed Then
+        If Not m_oSocket Is Nothing Then
+            pvState = sckClosing
+            m_oSocket.Close_
+            Set m_oSocket = Nothing
+        End If
+        pvState = sckClosed
     End If
-    pvState = sckClosed
     Exit Sub
 EH:
     PrintError FUNC_NAME
