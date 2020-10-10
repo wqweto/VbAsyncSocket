@@ -747,11 +747,11 @@ Public Function ReceiveArray( _
             If lSize = SOCKET_ERROR Then
                 m_lLastError = Err.LastDllError
                 GoTo QH
-            ElseIf lSize = 0 Then
-                If lPos = 0 Then
+            ElseIf lSize = 0 Or SockOpt(ucsSsoType) = ucsSckDatagram Then
+                If lPos + lSize = 0 Then
                     Buffer = vbNullString
                 Else
-                    ReDim Preserve Buffer(0 To lPos - 1) As Byte
+                    ReDim Preserve Buffer(0 To lPos + lSize - 1) As Byte
                 End If
                 Exit Do
             End If
