@@ -166,6 +166,7 @@ Private Declare Function SetWindowLong Lib "user32" Alias "SetWindowLongA" (ByVa
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
 Private Declare Function GetCurrentProcessId Lib "kernel32" () As Long
 Private Declare Function LoadLibrary Lib "kernel32" Alias "LoadLibraryA" (ByVal lpLibFileName As String) As Long
+Private Declare Function GetAdaptersInfo Lib "iphlpapi" (AdapterInfo As Any, OutBufLen As Long) As Long
 Private Declare Function WSAStartup Lib "ws2_32" (ByVal wVersionRequired As Long, lpWSAData As Any) As Long
 Private Declare Function WSACleanup Lib "ws2_32" () As Long
 Private Declare Function WSAAsyncGetHostByName Lib "ws2_32" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal strHostName As String, buf As Any, ByVal BufLen As Long) As Long
@@ -236,6 +237,34 @@ Private Type APIMSG
     lParam              As Long
     lTime               As Long
     pt                  As APIPOINT
+End Type
+
+Private Type IP_ADDR_STRING
+    Next                As Long
+    IpAddress(0 To 15)  As Byte
+    IpMask(0 To 15)     As Byte
+    Context             As Long
+End Type
+
+Private Type IP_ADAPTER_INFO
+    Next                As Long
+    ComboIndex          As Long
+    AdapterName         As String * 260
+    Description         As String * 132
+    AddressLength       As Long
+    Address(0 To 7)     As Byte
+    Index               As Long
+    Type                As Long
+    DhcpEnabled         As Long
+    CurrentIpAddress    As Long
+    IpAddressList       As IP_ADDR_STRING
+    GatewayList         As IP_ADDR_STRING
+    DhcpServer          As IP_ADDR_STRING
+    HaveWins            As Byte
+    PrimaryWinsServer   As IP_ADDR_STRING
+    SecondaryWinsServer As IP_ADDR_STRING
+    LeaseObtained       As Long
+    LeaseExpires        As Long
 End Type
 
 '=========================================================================
@@ -488,7 +517,7 @@ EH:
     PrintError FUNC_NAME
 End Function
 
-Public Function GetLocalHost(HostName As String, HostAddress As String) As Boolean
+Public Function GetLocalHost(HostName As String, HostAddress As String, Optional AdaptersInfo As Variant) As Boolean
     Const FUNC_NAME     As String = "GetLocalHost"
     Dim sBuffer         As String
     Dim uAddr           As SOCKADDR_IN
@@ -502,6 +531,7 @@ Public Function GetLocalHost(HostName As String, HostAddress As String) As Boole
     HostName = Left$(sBuffer, InStr(sBuffer, Chr$(0)) - 1)
     pvToSockAddr HostName, 0, uAddr
     pvFromSockAddr uAddr, HostAddress, 0
+    AdaptersInfo = pvGetAdaptersInfo
     '--- success
     m_lLastError = 0
     GetLocalHost = True
@@ -1123,6 +1153,42 @@ Private Sub pvClose()
         m_hSocket = INVALID_SOCKET
         Set m_pCleanup = Nothing
     End If
+End Sub
+
+Private Function pvGetAdaptersInfo() As Variant
+    Dim baBuffer()      As Byte
+    Dim lSize           As Long
+    Dim lPtr            As Long
+    Dim uInfo           As IP_ADAPTER_INFO
+    Dim vRetVal         As Variant
+    
+    vRetVal = Array()
+    Call GetAdaptersInfo(ByVal 0, lSize)
+    ReDim baBuffer(0 To lSize - 1) As Byte
+    If GetAdaptersInfo(baBuffer(0), lSize) = 0 Then
+        lPtr = VarPtr(baBuffer(0))
+        Do While lPtr <> 0
+            Call CopyMemory(uInfo, ByVal lPtr, Len(uInfo))
+            pvGetAddrList VarPtr(uInfo.IpAddressList), vRetVal
+            lPtr = uInfo.Next
+        Loop
+    End If
+    pvGetAdaptersInfo = vRetVal
+End Function
+
+Private Sub pvGetAddrList(ByVal lPtr As Long, vOutput As Variant)
+    Dim uString         As IP_ADDR_STRING
+    Dim sAddr           As String
+    
+    Do While lPtr <> 0
+        Call CopyMemory(uString, ByVal lPtr, Len(uString))
+        sAddr = pvToString(VarPtr(uString.IpAddress(0)))
+        If sAddr <> "0.0.0.0" Then
+            ReDim Preserve vOutput(UBound(vOutput) + 1)
+            vOutput(UBound(vOutput)) = Array(sAddr, pvToString(VarPtr(uString.IpMask(0))))
+        End If
+        lPtr = uString.Next
+    Loop
 End Sub
 
 '= sync ==================================================================
