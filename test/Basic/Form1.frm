@@ -722,14 +722,20 @@ QH:
 End Sub
 
 Private Sub Command11_Click()
+    Const FUNC_NAME     As String = "Command11_Click"
+    
+    On Error GoTo EH
     Set m_oHttpDownload = New cHttpDownload
     m_oHttpDownload.DownloadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://dl.unicontsoft.com/upload/pix/ss_vbyoga_flex_container.gif", Environ$("TMP") & "\aaa.gif"
 '    m_oHttpDownload.DownloadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://dl.unicontsoft.com/upload/aaa.zip", Environ$("TMP") & "\aaa.zip"
+    Exit Sub
+EH:
+    MsgBox Err.Description, vbCritical, FUNC_NAME
 End Sub
 
 Private Sub m_oHttpDownload_OperationStart()
     m_dblStartTimerEx = TimerEx
-    If chkRateLimit.Value = vbChecked And Val(txtBandwidth.Text) > 0 Then
+    If chkRateLimit.Value = vbChecked And Val(txtBandwidth.Text) > 0 And TypeOf m_oHttpDownload.Socket Is cTlsSocket Then
         Set m_oRateLimiter = New cRateLimiter
         m_oRateLimiter.Init m_oHttpDownload.Socket, Val(txtBandwidth.Text) * 1024
     Else

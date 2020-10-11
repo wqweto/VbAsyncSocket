@@ -25,6 +25,8 @@ Option Explicit
 DefObj A-Z
 Private Const MODULE_NAME As String = "cHttpDownload"
 
+#Const ImplUseTls = (USE_TLS <> 0)
+
 '=========================================================================
 ' Events
 '=========================================================================
@@ -63,8 +65,13 @@ Private Const ERR_HTTP_ONLY         As String = "Http protocol supported only"
 Private Const ERR_INVALID_REDIRECT  As String = "Invalid redirect to %1"
 Private Const ERR_INVALID_RESPONSE  As String = "Server returned %1"
 
+#If ImplUseTls Then
 Private WithEvents m_oSocket    As cTlsSocket
 Attribute m_oSocket.VB_VarHelpID = -1
+#Else
+Private WithEvents m_oSocket    As cAsyncSocket
+Attribute m_oSocket.VB_VarHelpID = -1
+#End If
 Private m_uRemote               As UcsParsedUrl
 Private m_sLocalFileName        As String
 Private m_lStreamFlags          As Long
@@ -129,7 +136,11 @@ Property Set CallbackWeakRef(oValue As Object)
     m_lCallbackPtr = ObjPtr(oValue)
 End Property
 
+#If ImplUseTls Then
 Property Get Socket() As cTlsSocket
+#Else
+Property Get Socket() As cAsyncSocket
+#End If
     Set Socket = m_oSocket
 End Property
 
@@ -180,12 +191,10 @@ Private Sub pvInit(URL As String, LocalFileName As Variant, ByVal StreamFlags As
         On Error GoTo 0
         Err.Raise vbObjectError, , ERR_INVALID_URL
     End If
-    Select Case LCase$(m_uRemote.Protocol)
-    Case "http", "https"
-    Case Else
+    If Not pvIsProtocolSupported(m_uRemote.Protocol) Then
         On Error GoTo 0
         Err.Raise vbObjectError, , ERR_HTTP_ONLY
-    End Select
+    End If
     If IsObject(LocalFileName) Then
         m_sLocalFileName = "[stream]"
         Set m_pFileStream = LocalFileName
@@ -211,12 +220,20 @@ Private Sub pvInit(URL As String, LocalFileName As Variant, ByVal StreamFlags As
         m_dblContentLength = 0
     End If
     m_baFileBuffer = vbNullString
-    Set m_oSocket = New cTlsSocket
+    #If ImplUseTls Then
+        Set m_oSocket = New cTlsSocket
+    #Else
+        Set m_oSocket = New cAsyncSocket
+    #End If
     If Not m_oSocket.Create(SocketType:=ucsSckStream) Then
         On Error GoTo 0
         Err.Raise vbObjectError, , m_oSocket.GetErrorDescription(m_oSocket.LastError)
     End If
+    #If ImplUseTls Then
     If Not m_oSocket.Connect(m_uRemote.Host, m_uRemote.Port, UseTls:=pvIsProtocolSecure(m_uRemote.Protocol)) Then
+    #Else
+    If Not m_oSocket.Connect(m_uRemote.Host, m_uRemote.Port) Then
+    #End If
         On Error GoTo 0
         Err.Raise vbObjectError, , m_oSocket.GetErrorDescription(m_oSocket.LastError)
     End If
@@ -242,6 +259,7 @@ Private Function pvRecvHeaders(baBuffer() As Byte) As Boolean
         vSplit = Split(Left$(sHeaders, lPos), vbCrLf)
         Select Case CLng(Val(Mid$(vSplit(0), 10, 3)))
         Case 200 To 299
+TryDownload:
             m_dblContentLength = -1
             For Each vElem In vSplit
                 If Left$(LCase$(vElem), Len(HDR_CONTENT_LENGTH)) = HDR_CONTENT_LENGTH Then
@@ -263,19 +281,25 @@ Private Function pvRecvHeaders(baBuffer() As Byte) As Boolean
                     Exit For
                 End If
             Next
-            Select Case LCase$(uRedirect.Protocol)
-            Case "http", "https"
-            Case Else
-                pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_HTTP_ONLY
-                GoTo QH
-            End Select
+            If Not pvIsProtocolSupported(uRedirect.Protocol) Then
+                #If UseTls Then
+                    pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_HTTP_ONLY
+                    GoTo QH
+                #Else
+                    GoTo TryDownload
+                #End If
+            End If
             m_uRemote = uRedirect
             m_oSocket.Close_
             If Not m_oSocket.Create(SocketType:=ucsSckStream) Then
                 pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.Create"
                 GoTo QH
             End If
+            #If ImplUseTls Then
             If Not m_oSocket.Connect(m_uRemote.Host, m_uRemote.Port, UseTls:=pvIsProtocolSecure(m_uRemote.Protocol)) Then
+            #Else
+            If Not m_oSocket.Connect(m_uRemote.Host, m_uRemote.Port) Then
+            #End If
                 pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.Connect"
                 GoTo QH
             End If
@@ -480,6 +504,14 @@ Private Function pvParseUrl(sUrl As String, uParsed As UcsParsedUrl, Optional De
     End With
 End Function
 
+Private Function pvIsProtocolSupported(sProtocol As String) As Boolean
+    #If ImplUseTls Then
+        pvIsProtocolSupported = (LCase$(sProtocol) = "http" Or LCase$(sProtocol) = "https")
+    #Else
+        pvIsProtocolSupported = (LCase$(sProtocol) = "http")
+    #End If
+End Function
+
 Private Function pvIsProtocolSecure(sProtocol As String) As Boolean
     pvIsProtocolSecure = (LCase$(sProtocol) = "https")
 End Function
@@ -647,11 +679,19 @@ Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsy
     Const FUNC_NAME     As String = "m_oSocket_OnError"
     
     On Error GoTo EH
-    With m_oSocket.LastError
-        If .Number <> 0 Then
-            pvSetError .Number, .Source, .Description
-        End If
-    End With
+    #If ImplUseTls Then
+        With m_oSocket.LastError
+            If .Number <> 0 Then
+                pvSetError .Number, .Source, .Description
+            End If
+        End With
+    #Else
+        With m_oSocket
+            If .LastError <> 0 Then
+                pvSetError .LastError, , .GetErrorDescription(.LastError)
+            End If
+        End With
+    #End If
     Exit Sub
 EH:
     PrintError FUNC_NAME
