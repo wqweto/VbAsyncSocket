@@ -26,4 +26,6 @@ Private Sub Socket_OnClose()
     Callback.ClientOnClose Me
 End Sub
 
-
+Private Sub Socket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
+    Callback.ClientOnError Me, ErrorCode, EventMask
+End Sub

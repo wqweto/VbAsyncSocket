@@ -72,6 +72,10 @@ Private Sub Serversck_OnAccept()
 QH:
 End Sub
 
+Private Sub Serversck_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
+    Debug.Print "Critical error: " & Serversck.LastError.Description & " [Serversck_OnError]", Timer
+End Sub
+
 Public Sub ClientOnReceive(Client As cClientRequest)
     Dim Svdata() As Byte
     If Not Client.Socket.ReceiveArray(Svdata) Then
@@ -86,3 +90,8 @@ Public Sub ClientOnClose(Client As cClientRequest)
     Debug.Print Client.ID, "Disconnected"
 End Sub
 
+Public Sub ClientOnError(Client As cClientRequest, ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
+    With Client.Socket.LastError
+        Debug.Print Client.ID, "Critical error: " & .Description & " in " & .Source & " [ClientOnError]", Timer
+    End With
+End Sub
