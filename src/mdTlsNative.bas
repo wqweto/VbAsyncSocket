@@ -85,6 +85,8 @@ Private Const CERT_STORE_ADD_USE_EXISTING               As Long = 2
 '--- for CryptAcquireContext
 Private Const MS_DEF_PROV                               As String = "Microsoft Base Cryptographic Provider v1.0"
 Private Const PROV_RSA_FULL                             As Long = 1
+Private Const MS_ENH_RSA_AES_PROV                       As String = "Microsoft Enhanced RSA and AES Cryptographic Provider"
+Private Const PROV_RSA_AES                              As Long = 24
 Private Const CRYPT_NEWKEYSET                           As Long = &H8
 Private Const CRYPT_MACHINE_KEYSET                      As Long = &H20
 Private Const AT_KEYEXCHANGE                            As Long = 1
@@ -557,10 +559,10 @@ RetryCredentials:
                         End If
                         aCred(uCred.cCreds) = CertDuplicateCertificateContext(pCertContext)
                         uCred.cCreds = uCred.cCreds + 1
-                        If Not .IsServer Then
+'                        If Not .IsServer Then
                             Call CertFreeCertificateContext(pCertContext)
                             Exit Do
-                        End If
+'                        End If
                     Loop
                     Call CertCloseStore(hMemStore, 0)
                     uCred.paCred = VarPtr(aCred(0))
@@ -1207,6 +1209,7 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
     Dim lBlobSize       As Long
     Dim sKeyName        As String
     Dim sProvName       As String
+    Dim lProvType       As Long
     Dim hNProv          As Long
     Dim hNKey           As Long
     Dim uDesc           As ApiSecBufferDesc
@@ -1239,12 +1242,22 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
         Call CopyMemory(uPublicKeyInfo, ByVal lPtr, Len(uPublicKeyInfo))
         Select Case pvToString(uPublicKeyInfo.Algorithm.pszObjId)
         Case szOID_RSA_RSA
-            sProvName = MS_DEF_PROV
-            If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), PROV_RSA_FULL, CRYPT_MACHINE_KEYSET) = 0 Then
-                If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), PROV_RSA_FULL, CRYPT_NEWKEYSET Or CRYPT_MACHINE_KEYSET) = 0 Then
-                    hResult = Err.LastDllError
-                    sApiSource = "CryptAcquireContext"
-                    GoTo QH
+            sProvName = MS_ENH_RSA_AES_PROV
+            lProvType = PROV_RSA_AES
+            If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, CRYPT_MACHINE_KEYSET) = 0 Then
+                If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, CRYPT_NEWKEYSET Or CRYPT_MACHINE_KEYSET) = 0 Then
+                    '--- do nothing
+                End If
+            End If
+            If hProv = 0 Then
+                sProvName = MS_DEF_PROV
+                lProvType = PROV_RSA_FULL
+                If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, CRYPT_MACHINE_KEYSET) = 0 Then
+                    If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, CRYPT_NEWKEYSET Or CRYPT_MACHINE_KEYSET) = 0 Then
+                        hResult = Err.LastDllError
+                        sApiSource = "CryptAcquireContext"
+                        GoTo QH
+                    End If
                 End If
             End If
             If CryptImportKey(hProv, uPrivKeyInfo.KeyBlob(0), UBound(uPrivKeyInfo.KeyBlob) + 1, 0, 0, hKey) = 0 Then
@@ -1254,7 +1267,7 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
             End If
             uProvInfo.pwszContainerName = StrPtr(sKeyName)
             uProvInfo.pwszProvName = StrPtr(sProvName)
-            uProvInfo.dwProvType = PROV_RSA_FULL
+            uProvInfo.dwProvType = lProvType
             uProvInfo.dwFlags = CRYPT_MACHINE_KEYSET
             uProvInfo.dwKeySpec = AT_KEYEXCHANGE
         Case szOID_ECC_PUBLIC_KEY
@@ -1367,6 +1380,10 @@ Private Function pvAsn1DecodePrivateKey(baPrivKey() As Byte, uRetVal As UcsKeyIn
             GoTo QH
         End If
         uRetVal.AlgoObjId = pvToString(uPrivKey.Algorithm.pszObjId)
+        GoTo DecodeRsa
+    ElseIf CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, PKCS_RSA_PRIVATE_KEY, baPrivKey(0), UBound(baPrivKey) + 1, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lKeyPtr, lKeySize) <> 0 Then
+        uRetVal.AlgoObjId = szOID_RSA_RSA
+DecodeRsa:
         pvArrayAllocate uRetVal.KeyBlob, lKeySize, FUNC_NAME & ".uRetVal.KeyBlob"
         Call CopyMemory(uRetVal.KeyBlob(0), ByVal lKeyPtr, lKeySize)
         Debug.Assert UBound(uRetVal.KeyBlob) >= 16

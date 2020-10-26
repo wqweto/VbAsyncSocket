@@ -1616,6 +1616,7 @@ Private Function pvPkiPemImportCertificates(ByVal vPemFiles As Variant, cCerts A
     For Each vElem In vPemFiles
         sPemText = StrConv(CStr(ReadBinaryFile(CStr(vElem))), vbUnicode)
         pvPkiPemGetTextPortions sPemText, "PRIVATE KEY", cPrivKey
+        pvPkiPemGetTextPortions sPemText, "RSA PRIVATE KEY", cPrivKey
         pvPkiPemGetTextPortions sPemText, "EC PRIVATE KEY", cPrivKey
         pvPkiPemGetTextPortions sPemText, "CERTIFICATE", cCerts
     Next

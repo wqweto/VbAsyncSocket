@@ -3814,6 +3814,10 @@ Private Function pvAsn1DecodePrivateKey(baPrivKey() As Byte, uRetVal As UcsKeyIn
             GoTo QH
         End If
         uRetVal.AlgoObjId = pvToString(uPrivKey.Algorithm.pszObjId)
+        GoTo DecodeRsa
+    ElseIf CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, PKCS_RSA_PRIVATE_KEY, baPrivKey(0), UBound(baPrivKey) + 1, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lKeyPtr, lKeySize) <> 0 Then
+        uRetVal.AlgoObjId = szOID_RSA_RSA
+DecodeRsa:
         pvArrayAllocate uRetVal.KeyBlob, lKeySize, FUNC_NAME & ".uRetVal.KeyBlob"
         Call CopyMemory(uRetVal.KeyBlob(0), ByVal lKeyPtr, lKeySize)
         Debug.Assert UBound(uRetVal.KeyBlob) >= 16
