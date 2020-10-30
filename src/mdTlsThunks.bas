@@ -40,6 +40,7 @@ Private Const MODULE_NAME As String = "mdTlsThunks"
 #Const ImplUseLibSodium = (ASYNCSOCKET_USE_LIBSODIUM <> 0)
 #Const ImplUseShared = (ASYNCSOCKET_USE_SHARED <> 0)
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
+#Const ImplCaptureTraffic = False
 
 '=========================================================================
 ' API
@@ -219,7 +220,7 @@ Private Const TLS_EXTENSION_TYPE_COOKIE                 As Long = 44
 'Private Const TLS_EXTENSION_TYPE_PSK_KEY_EXCHANGE_MODES As Long = 45
 Private Const TLS_EXTENSION_TYPE_CERTIFICATE_AUTHORITIES As Long = 47
 Private Const TLS_EXTENSION_TYPE_POST_HANDSHAKE_AUTH    As Long = 49
-Private Const TLS_EXTENSION_TYPE_SIGNATURE_ALGORITHMS_CERT As Long = 50
+'Private Const TLS_EXTENSION_TYPE_SIGNATURE_ALGORITHMS_CERT As Long = 50
 Private Const TLS_EXTENSION_TYPE_KEY_SHARE              As Long = 51
 Private Const TLS_EXTENSION_TYPE_RENEGOTIATION_INFO     As Long = &HFF01
 Private Const TLS_CS_AES_128_GCM_SHA256                 As Long = &H1301
@@ -465,6 +466,9 @@ Public Type UcsTlsContext
     MessBuffer()        As Byte
     MessPos             As Long
     MessSize            As Long
+#If ImplCaptureTraffic Then
+    TrafficDump         As Collection
+#End If
 End Type
 
 Private Type UcsKeyInfo
@@ -567,6 +571,9 @@ Public Function TlsInitClient( _
         .OnClientCertificate = ObjPtr(OnClientCertificate)
         .AlpnProtocols = AlpnProtocols
         pvTlsArrayRandom .LocalExchRandom, TLS_HELLO_RANDOM_SIZE
+        #If ImplCaptureTraffic Then
+            Set .TrafficDump = New Collection
+        #End If
     End With
     uCtx = uEmpty
     '--- success
@@ -600,6 +607,9 @@ Public Function TlsInitServer( _
         Set .LocalPrivateKey = PrivateKey
         .AlpnProtocols = AlpnProtocols
         pvTlsArrayRandom .LocalExchRandom, TLS_HELLO_RANDOM_SIZE
+        #If ImplCaptureTraffic Then
+            Set .TrafficDump = New Collection
+        #End If
     End With
     uCtx = uEmpty
     '--- success
@@ -620,6 +630,11 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
     
     On Error GoTo EH
     With uCtx
+        #If ImplCaptureTraffic Then
+            If lSize <> 0 Then
+                .TrafficDump.Add FUNC_NAME & ".baInput:" & vbCrLf & DesignDumpArray(baInput, 0, lSize)
+            End If
+        #End If
         If .State = ucsTlsStateClosed Then
             pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_CONNECTION_CLOSED
             Exit Function
@@ -644,6 +659,11 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
 QH:
         '--- swap-out
         pvArraySwap baOutput, lOutputPos, .SendBuffer, .SendPos
+        #If ImplCaptureTraffic Then
+            If lOutputPos <> 0 Then
+                .TrafficDump.Add FUNC_NAME & ".baOutput:" & vbCrLf & DesignDumpArray(baOutput, 0, lOutputPos)
+            End If
+        #End If
     End With
     Exit Function
 EH:
@@ -656,6 +676,11 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
     
     On Error GoTo EH
     With uCtx
+        #If ImplCaptureTraffic Then
+            If lSize <> 0 Then
+                .TrafficDump.Add FUNC_NAME & ".baInput:" & vbCrLf & DesignDumpArray(baInput, 0, lSize)
+            End If
+        #End If
         If lSize < 0 Then
             lSize = pvArraySize(baInput)
         End If
@@ -735,6 +760,11 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
 QH:
         '--- swap-out
         pvArraySwap baOutput, lOutputPos, .SendBuffer, .SendPos
+        #If ImplCaptureTraffic Then
+            If lOutputPos <> 0 Then
+                .TrafficDump.Add FUNC_NAME & ".baOutput:" & vbCrLf & DesignDumpArray(baOutput, 0, lOutputPos)
+            End If
+        #End If
     End With
     Exit Function
 EH:
@@ -1854,12 +1884,28 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                         If .ExchGroup <> 0 Then
                             .HelloRetryExchGroup = .ExchGroup
                         Else
-                            .HelloRetryExchGroup = pvCollectionFirst(.RemoteSupportedGroups, Array("#" & TLS_GROUP_X25519, "#" & TLS_GROUP_SECP256R1, "#" & TLS_GROUP_SECP384R1))
+                            .HelloRetryExchGroup = pvCollectionFirst(.RemoteSupportedGroups, Array( _
+                                    IIf(pvCryptoIsSupported(ucsTlsAlgoExchX25519), "#" & TLS_GROUP_X25519, vbNullString), _
+                                    IIf(pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1), "#" & TLS_GROUP_SECP256R1, vbNullString), _
+                                    IIf(pvCryptoIsSupported(ucsTlsAlgoExchSecp384r1), "#" & TLS_GROUP_SECP384R1, vbNullString)))
                             If .HelloRetryExchGroup = 0 Then
                                 GoTo HelloRetryFailed
                             End If
                         End If
-                        .HelloRetryCipherSuite = IIf(.CipherSuite <> 0, .CipherSuite, TLS_CS_AES_128_GCM_SHA256)
+                        If .CipherSuite <> 0 Then
+                            .HelloRetryCipherSuite = .CipherSuite
+                        Else
+                            Select Case True
+                            Case pvCryptoIsSupported(ucsTlsAlgoAeadAes128)
+                                .HelloRetryCipherSuite = TLS_CS_AES_128_GCM_SHA256
+                            Case pvCryptoIsSupported(ucsTlsAlgoAeadAes256)
+                                .HelloRetryCipherSuite = TLS_CS_AES_256_GCM_SHA384
+                            Case pvCryptoIsSupported(ucsTlsAlgoAeadChacha20Poly1305)
+                                .HelloRetryCipherSuite = TLS_CS_CHACHA20_POLY1305_SHA256
+                            Case Else
+                                GoTo HelloRetryFailed
+                            End Select
+                        End If
                     Else
                         .HelloRetryRequest = False
                         .State = ucsTlsStateExpectClientFinished
@@ -2030,9 +2076,8 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
         End If
         lPos = pvReadLong(baInput, lPos, lLegacyCompress)
         Debug.Assert lLegacyCompress = 0
-        Set .RemoteExtensions = Nothing
+        Set .RemoteExtensions = New Collection
         If lPos < lEnd Then
-            Set .RemoteExtensions = New Collection
             lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lBlockSize)
                 lBlockEnd = lPos + lBlockSize
                 Do While lPos < lBlockEnd
@@ -2188,9 +2233,10 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
         lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
         Debug.Assert lLegacyCompress = 0
         '--- extensions
-        Set .RemoteExtensions = Nothing
-        If lPos < lInputEnd Then
+        If Not .HelloRetryRequest Then
             Set .RemoteExtensions = New Collection
+        End If
+        If lPos < lInputEnd Then
             lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lSize)
                 lEnd = lPos + lSize
                 Do While lPos < lEnd
@@ -2253,8 +2299,16 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                                         Select Case lExchGroup
                                         Case TLS_GROUP_X25519
                                             lKeySize = TLS_X25519_KEY_SIZE
+                                            If Not pvCryptoIsSupported(ucsTlsAlgoExchX25519) Then
+                                                lExchGroup = 0
+                                                lPos = lPos + lBlockSize
+                                            End If
                                         Case TLS_GROUP_SECP256R1
                                             lKeySize = 2 * TLS_SECP256R1_KEY_SIZE + 1
+                                            If Not pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1) Then
+                                                lExchGroup = 0
+                                                lPos = lPos + lBlockSize
+                                            End If
                                         Case TLS_GROUP_SECP384R1
                                             lKeySize = 2 * TLS_SECP384R1_KEY_SIZE + 1
                                         Case Else
@@ -2334,13 +2388,13 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                                 GoTo QH
                             End If
                             .ProtocolVersion = lProtocolVersion
-                        Case TLS_EXTENSION_TYPE_SIGNATURE_ALGORITHMS_CERT
-                            lPos = lPos + lExtSize
                         Case Else
                             If .HelloRetryRequest Then
-                                sError = Replace(ERR_UNEXPECTED_EXTENSION_TYPE, "%1", pvTlsGetExtensionType(lExtType))
-                                eAlertCode = uscTlsAlertIllegalParameter
-                                GoTo QH
+                                If Not SearchCollection(.RemoteExtensions, "#" & lExtType) Then
+                                    sError = Replace(ERR_UNEXPECTED_EXTENSION_TYPE, "%1", pvTlsGetExtensionType(lExtType))
+                                    eAlertCode = uscTlsAlertIllegalParameter
+                                    GoTo QH
+                                End If
                             End If
                             lPos = lPos + lExtSize
                         End Select
@@ -2603,50 +2657,46 @@ Private Function pvTlsPrepareCipherSuitsOrder(ByVal eFilter As UcsTlsLocalFeatur
     
     Set oRetVal = New Collection
     If (eFilter And ucsTlsSupportTls13) <> 0 Then
-        If pvCryptoIsSupported(ucsTlsAlgoExchX25519) Then
-            '--- first if AES preferred over Chacha20
-            If pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes128) Then
-                oRetVal.Add TLS_CS_AES_128_GCM_SHA256
-            End If
-            If pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes256) And pvCryptoIsSupported(ucsTlsAlgoAeadAes256) Then
-                oRetVal.Add TLS_CS_AES_256_GCM_SHA384
-            End If
-            If pvCryptoIsSupported(ucsTlsAlgoAeadChacha20Poly1305) Then
-                oRetVal.Add TLS_CS_CHACHA20_POLY1305_SHA256
-            End If
-            '--- least preferred AES
-            If Not pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes128) Then
-                oRetVal.Add TLS_CS_AES_128_GCM_SHA256
-            End If
-            If Not pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes256) And pvCryptoIsSupported(ucsTlsAlgoAeadAes256) Then
-                oRetVal.Add TLS_CS_AES_256_GCM_SHA384
-            End If
+        '--- first if AES preferred over Chacha20
+        If pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes128) Then
+            oRetVal.Add TLS_CS_AES_128_GCM_SHA256
+        End If
+        If pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes256) And pvCryptoIsSupported(ucsTlsAlgoAeadAes256) Then
+            oRetVal.Add TLS_CS_AES_256_GCM_SHA384
+        End If
+        If pvCryptoIsSupported(ucsTlsAlgoAeadChacha20Poly1305) Then
+            oRetVal.Add TLS_CS_CHACHA20_POLY1305_SHA256
+        End If
+        '--- least preferred AES
+        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes128) Then
+            oRetVal.Add TLS_CS_AES_128_GCM_SHA256
+        End If
+        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes256) And pvCryptoIsSupported(ucsTlsAlgoAeadAes256) Then
+            oRetVal.Add TLS_CS_AES_256_GCM_SHA384
         End If
     End If
     If (eFilter And ucsTlsSupportTls12) <> 0 Then
-        If pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1) Then
-            '--- first if AES preferred over Chacha20
-            If pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes128) Then
-                oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
-                oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
-            End If
-            If pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes256) Then
-                oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
-                oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
-            End If
-            If pvCryptoIsSupported(ucsTlsAlgoAeadChacha20Poly1305) Then
-                oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
-                oRetVal.Add TLS_CS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
-            End If
-            '--- least preferred AES
-            If Not pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes128) Then
-                oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
-                oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
-            End If
-            If Not pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes256) Then
-                oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
-                oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
-            End If
+        '--- first if AES preferred over Chacha20
+        If pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes128) Then
+            oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+            oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        End If
+        If pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes256) Then
+            oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+            oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        End If
+        If pvCryptoIsSupported(ucsTlsAlgoAeadChacha20Poly1305) Then
+            oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+            oRetVal.Add TLS_CS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+        End If
+        '--- least preferred AES
+        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes128) Then
+            oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+            oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        End If
+        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes256) Then
+            oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+            oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
         End If
         '--- no perfect forward secrecy -> least preferred
         If pvCryptoIsSupported(ucsTlsAlgoAeadAes128) Then
