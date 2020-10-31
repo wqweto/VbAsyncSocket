@@ -52,6 +52,7 @@ Public Enum UcsTlsLocalFeaturesEnum '--- bitmask
     ucsTlsSupportTls12 = 2 ^ 2
     ucsTlsSupportTls13 = 2 ^ 3
     ucsTlsIgnoreServerCertificateErrors = 2 ^ 4
+    ucsTlsIgnoreServerCertificateRevocation = 2 ^ 5
     ucsTlsSupportAll = ucsTlsSupportTls10 Or ucsTlsSupportTls11 Or ucsTlsSupportTls12 Or ucsTlsSupportTls13
 End Enum
 
@@ -99,6 +100,7 @@ Private Const CERT_STORE_CREATE_NEW_FLAG                As Long = &H2000
 '--- for CertAddEncodedCertificateToStore
 Private Const CERT_STORE_ADD_USE_EXISTING               As Long = 2
 '--- for CertGetCertificateChain
+Private Const CERT_CHAIN_REVOCATION_CHECK_CHAIN         As Long = &H20000000
 Private Const CERT_TRUST_IS_NOT_TIME_VALID              As Long = &H1
 Private Const CERT_TRUST_IS_NOT_TIME_NESTED             As Long = &H2
 Private Const CERT_TRUST_IS_REVOKED                     As Long = &H4
@@ -660,7 +662,7 @@ Public Function StartTls( _
         m_sRemoteHostName = RemoteHostName
     End If
     If (LocalFeatures And ucsTlsSupportAll) = 0 Then
-        m_eLocalFeatures = LocalFeatures Or ucsTlsSupportAll Or IIf(OsVersion < ucsOsvXp, ucsTlsIgnoreServerCertificateErrors, 0)
+        m_eLocalFeatures = LocalFeatures Or ucsTlsSupportAll Or IIf(OsVersion < ucsOsvXp, ucsTlsIgnoreServerCertificateErrors Or ucsTlsIgnoreServerCertificateRevocation, 0)
     Else
         m_eLocalFeatures = LocalFeatures
     End If
@@ -1782,6 +1784,7 @@ Private Function pvPkiCertChainValidate(sRemoteHostName As String, cCerts As Col
     Dim uChain          As CERT_CHAIN_CONTEXT
     Dim lPtr            As Long
     Dim dwErrorStatus   As Long
+    Dim dwFlags         As Long
     Dim uChainParams    As CERT_CHAIN_PARA
     Dim uInfo           As CERT_INFO
     Dim uExtension      As CERT_EXTENSION
@@ -1873,7 +1876,8 @@ Private Function pvPkiCertChainValidate(sRemoteHostName As String, cCerts As Col
     '--- for the matched server certificate try to build a chain of certificates from the ones in the in-memory certificate store
     '---    and check this chain for revokation, expiry or missing link to a trust anchor
     uChainParams.cbSize = Len(uChainParams)
-    If CertGetCertificateChain(hChainEngine, pCertContext, 0, hCertStore, uChainParams, 0, 0, pChainContext) = 0 Then
+    dwFlags = IIf((m_eLocalFeatures And ucsTlsIgnoreServerCertificateRevocation) <> 0, 0, CERT_CHAIN_REVOCATION_CHECK_CHAIN)
+    If CertGetCertificateChain(hChainEngine, pCertContext, 0, hCertStore, uChainParams, dwFlags, 0, pChainContext) = 0 Then
         hResult = Err.LastDllError
         sApiSource = "CertGetCertificateChain"
         GoTo QH
