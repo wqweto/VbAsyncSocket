@@ -13,12 +13,12 @@ Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency A
 
 Private m_oRedimStats               As Object
 
-Public Function DesignDumpArray(baData() As Byte, Optional ByVal lPos As Long, Optional ByVal lSize As Long = -1) As String
-    If lSize < 0 Then
-        lSize = UBound(baData) + 1 - lPos
+Public Function DesignDumpArray(baData() As Byte, Optional ByVal Pos As Long, Optional ByVal Size As Long = -1) As String
+    If Size < 0 Then
+        Size = UBound(baData) + 1 - Pos
     End If
-    If lSize > 0 Then
-        DesignDumpArray = DesignDumpMemory(VarPtr(baData(lPos)), lSize)
+    If Size > 0 Then
+        DesignDumpArray = DesignDumpMemory(VarPtr(baData(Pos)), Size)
     End If
 End Function
 
