@@ -632,7 +632,7 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
     With uCtx
         #If ImplCaptureTraffic Then
             If lSize <> 0 Then
-                .TrafficDump.Add FUNC_NAME & ".baInput:" & vbCrLf & DesignDumpArray(baInput, 0, lSize)
+                .TrafficDump.Add FUNC_NAME & ".Input" & vbCrLf & DesignDumpArray(baInput, 0, lSize)
             End If
         #End If
         If .State = ucsTlsStateClosed Then
@@ -661,7 +661,7 @@ QH:
         pvArraySwap baOutput, lOutputPos, .SendBuffer, .SendPos
         #If ImplCaptureTraffic Then
             If lOutputPos <> 0 Then
-                .TrafficDump.Add FUNC_NAME & ".baOutput:" & vbCrLf & DesignDumpArray(baOutput, 0, lOutputPos)
+                .TrafficDump.Add FUNC_NAME & ".Output" & vbCrLf & DesignDumpArray(baOutput, 0, lOutputPos)
             End If
         #End If
     End With
@@ -678,7 +678,7 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
     With uCtx
         #If ImplCaptureTraffic Then
             If lSize <> 0 Then
-                .TrafficDump.Add FUNC_NAME & ".baInput:" & vbCrLf & DesignDumpArray(baInput, 0, lSize)
+                .TrafficDump.Add FUNC_NAME & ".Input (undecrypted)" & vbCrLf & DesignDumpArray(baInput, 0, lSize)
             End If
         #End If
         If lSize < 0 Then
@@ -762,7 +762,7 @@ QH:
         pvArraySwap baOutput, lOutputPos, .SendBuffer, .SendPos
         #If ImplCaptureTraffic Then
             If lOutputPos <> 0 Then
-                .TrafficDump.Add FUNC_NAME & ".baOutput:" & vbCrLf & DesignDumpArray(baOutput, 0, lOutputPos)
+                .TrafficDump.Add FUNC_NAME & ".Output (encrypted)" & vbCrLf & DesignDumpArray(baOutput, 0, lOutputPos)
             End If
         #End If
     End With
@@ -1447,6 +1447,11 @@ Private Function pvWriteEndOfRecord(baOutput() As Byte, ByVal lPos As Long, uCtx
                 lMessageSize = lPos - lMessagePos
                 lPos = pvWriteReserved(baOutput, lPos, .TagSize)
             lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
+            #If ImplCaptureTraffic Then
+                If lMessageSize <> 0 Then
+                    .TrafficDump.Add FUNC_NAME & ".Output (unencrypted)" & vbCrLf & DesignDumpArray(baOutput, lMessagePos, lMessageSize)
+                End If
+            #End If
             If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
                 pvTlsAeadEncrypt .AeadAlgo, baLocalIV, .LocalTrafficKey, baOutput, lRecordPos, LNG_AAD_SIZE, baOutput, lMessagePos, lMessageSize
             ElseIf .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
@@ -1554,6 +1559,11 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
                     eAlertCode = uscTlsAlertBadRecordMac
                     GoTo QH
                 End If
+                #If ImplCaptureTraffic Then
+                    If lEnd - lPos <> 0 Then
+                        .TrafficDump.Add FUNC_NAME & ".Input (decrypted)" & vbCrLf & DesignDumpArray(baInput, lPos, lEnd - lPos)
+                    End If
+                #End If
                 .RemoteTrafficSeqNo = UnsignedAdd(.RemoteTrafficSeqNo, 1)
                 If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
                     '--- trim zero padding at the end of decrypted record
