@@ -73,7 +73,6 @@ Private Const szOID_ECC_CURVE_P521                      As String = "1.3.132.0.3
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Sub FillMemory Lib "kernel32" Alias "RtlFillMemory" (Destination As Any, ByVal Length As Long, ByVal Fill As Byte)
-Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
 Private Declare Function VirtualAlloc Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As Long
 Private Declare Function VirtualProtect Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flNewProtect As Long, ByRef lpflOldProtect As Long) As Long
@@ -81,6 +80,8 @@ Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleA"
 Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
 Private Declare Function lstrlen Lib "kernel32" Alias "lstrlenA" (ByVal lpString As Long) As Long
 Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
+'--- msvbvm60
+Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
 '--- advapi32
 Private Declare Function CryptAcquireContext Lib "advapi32" Alias "CryptAcquireContextW" (phProv As Long, ByVal pszContainer As Long, ByVal pszProvider As Long, ByVal dwProvType As Long, ByVal dwFlags As Long) As Long
@@ -318,7 +319,7 @@ Private m_baBuffer()                As Byte
 Private m_lBuffIdx                  As Long
 Private m_uData                     As UcsCryptoThunkData
 Private m_baHelloRetryRandom()      As Byte
-Public g_oRequestSocket             As cTlsSocket
+Public g_oRequestSocket             As Object
 
 Private Enum UcsTlsLocalFeaturesEnum '--- bitmask
     ucsTlsSupportTls10 = 2 ^ 0

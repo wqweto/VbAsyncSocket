@@ -110,15 +110,18 @@ Private Const NCRYPTBUFFER_PKCS_KEY_NAME                As Long = 45
 Private Const NCRYPT_OVERWRITE_KEY_FLAG                 As Long = &H80
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
-Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
 Private Declare Function VirtualProtect Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flNewProtect As Long, ByRef lpflOldProtect As Long) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
 Private Declare Function lstrlen Lib "kernel32" Alias "lstrlenA" (ByVal lpString As Long) As Long
 Private Declare Function lstrlenW Lib "kernel32" (ByVal lpString As Long) As Long
 Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
-Private Declare Function GetFileVersionInfo Lib "Version" Alias "GetFileVersionInfoA" (ByVal lptstrFilename As String, ByVal dwHandle As Long, ByVal dwLen As Long, lpData As Any) As Long
-Private Declare Function VerQueryValue Lib "Version" Alias "VerQueryValueA" (pBlock As Any, ByVal lpSubBlock As String, lplpBuffer As Any, puLen As Long) As Long
+Private Declare Function FormatMessage Lib "kernel32" Alias "FormatMessageA" (ByVal dwFlags As Long, ByVal lpSource As Long, ByVal dwMessageId As Long, ByVal dwLanguageId As Long, ByVal lpBuffer As String, ByVal nSize As Long, Args As Any) As Long
+'--- msvbvm60
+Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
+'--- version
+Private Declare Function GetFileVersionInfo Lib "version" Alias "GetFileVersionInfoA" (ByVal lptstrFilename As String, ByVal dwHandle As Long, ByVal dwLen As Long, lpData As Any) As Long
+Private Declare Function VerQueryValue Lib "version" Alias "VerQueryValueA" (pBlock As Any, ByVal lpSubBlock As String, lplpBuffer As Any, puLen As Long) As Long
 '--- security
 Private Declare Function AcquireCredentialsHandle Lib "security" Alias "AcquireCredentialsHandleA" (ByVal pszPrincipal As Long, ByVal pszPackage As String, ByVal fCredentialUse As Long, ByVal pvLogonId As Long, pAuthData As Any, ByVal pGetKeyFn As Long, ByVal pvGetKeyArgument As Long, phCredential As Currency, ByVal ptsExpiry As Long) As Long
 Private Declare Function FreeCredentialsHandle Lib "security" (phContext As Currency) As Long
@@ -397,7 +400,7 @@ Private Type UcsKeyInfo
     BitLen              As Long
 End Type
 
-Public g_oRequestSocket             As cTlsSocket
+Public g_oRequestSocket             As Object
 
 '=========================================================================
 ' Properties
@@ -1011,9 +1014,7 @@ Private Sub pvTlsSetLastError( _
         .LastErrSource = ErrSource
         .LastAlertCode = AlertCode
         If ErrNumber <> 0 And LenB(ErrDescription) = 0 Then
-            With New cAsyncSocket
-                uCtx.LastError = .GetErrorDescription(ErrNumber)
-            End With
+            uCtx.LastError = GetSystemMessage(ErrNumber)
             If LenB(.LastError) = 0 Then
                 .LastError = "Error &H" & Hex$(ErrNumber)
             End If
@@ -1675,4 +1676,19 @@ Private Property Get RealOsVersion() As UcsOsVersionEnum
     End If
     RealOsVersion = lVersion
 End Property
+
+Private Function GetSystemMessage(ByVal lLastDllError As Long) As String
+    Const FORMAT_MESSAGE_FROM_SYSTEM    As Long = &H1000
+    Const FORMAT_MESSAGE_IGNORE_INSERTS As Long = &H200
+    Dim lSize               As Long
+   
+    GetSystemMessage = Space$(2000)
+    lSize = FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM Or FORMAT_MESSAGE_IGNORE_INSERTS, 0, lLastDllError, 0, GetSystemMessage, Len(GetSystemMessage), 0)
+    If lSize > 2 Then
+        If Mid$(GetSystemMessage, lSize - 1, 2) = vbCrLf Then
+            lSize = lSize - 2
+        End If
+    End If
+    GetSystemMessage = Left$(GetSystemMessage, lSize)
+End Function
 #End If
