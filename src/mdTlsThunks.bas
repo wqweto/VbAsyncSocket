@@ -180,6 +180,7 @@ Private Const LNG_AES128_KEYSZ                          As Long = 16
 Private Const LNG_AES256_KEYSZ                          As Long = 32
 Private Const LNG_AESGCM_IVSZ                           As Long = 12
 Private Const LNG_AESGCM_TAGSZ                          As Long = 16
+Private Const LNG_AESCBC_IVSZ                           As Long = 16
 Private Const LNG_LIBSODIUM_SHA512_CONTEXTSZ            As Long = 64 + 16 + 128
 Private Const LNG_OUT_OF_MEMORY                         As Long = 8
 Private Const LNG_AAD_SIZE                              As Long = 5     '--- size of additional authenticated data for TLS 1.3
@@ -233,6 +234,10 @@ Private Const TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256  As Long = &HC02F&
 Private Const TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384  As Long = &HC030&
 Private Const TLS_CS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 As Long = &HCCA8&
 Private Const TLS_CS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 As Long = &HCCA9&
+Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256 As Long = &HC023&
+Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384 As Long = &HC024&
+Private Const TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA256  As Long = &HC027&
+Private Const TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA384  As Long = &HC028&
 Private Const TLS_CS_RSA_WITH_AES_128_GCM_SHA256        As Long = &H9C
 Private Const TLS_CS_RSA_WITH_AES_256_GCM_SHA384        As Long = &H9D
 Private Const TLS_GROUP_SECP256R1                       As Long = 23
@@ -261,6 +266,7 @@ Private Const TLS_CHACHA20POLY1305_IV_SIZE              As Long = 12
 Private Const TLS_CHACHA20POLY1305_TAG_SIZE             As Long = 16
 Private Const TLS_AES128_KEY_SIZE                       As Long = 16
 Private Const TLS_AES256_KEY_SIZE                       As Long = 32
+Private Const TLS_AESCBC_IV_SIZE                        As Long = 16
 Private Const TLS_AESGCM_IV_SIZE                        As Long = 12
 Private Const TLS_AESGCM_TAG_SIZE                       As Long = 16
 Private Const TLS_COMPRESS_NULL                         As Long = 0
@@ -293,6 +299,7 @@ Private Const ERR_ENCRYPTION_FAILED                     As String = "Encryption 
 Private Const ERR_SIGNATURE_FAILED                      As String = "Certificate signature failed (%1)"
 Private Const ERR_DECRYPTION_FAILED                     As String = "Decryption failed"
 Private Const ERR_SERVER_HANDSHAKE_FAILED               As String = "Handshake verification failed"
+Private Const ERR_RECORD_MAC_FAILED                     As String = "MAC verification failed"
 Private Const ERR_HELLO_RETRY_FAILED                    As String = "HelloRetryRequest failed"
 Private Const ERR_NEGOTIATE_SIGNATURE_FAILED            As String = "Negotiate signature type failed"
 Private Const ERR_CALL_FAILED                           As String = "Call failed (%1)"
@@ -351,10 +358,12 @@ Private Enum UcsTlsCryptoAlgorithmsEnum
     ucsTlsAlgoExchSecp384r1 = 3
     ucsTlsAlgoExchSecp521r1 = 4
     ucsTlsAlgoExchCertificate = 5
-    '--- authenticated encryption w/ additional data
-    ucsTlsAlgoAeadChacha20Poly1305 = 11
-    ucsTlsAlgoAeadAes128 = 12
-    ucsTlsAlgoAeadAes256 = 13
+    '--- ciphers
+    ucsTlsAlgoBulkChacha20Poly1305 = 11 '--- next 3 are authenticated encryption w/ additional data
+    ucsTlsAlgoBulkAesGcm128 = 12
+    ucsTlsAlgoBulkAesGcm256 = 13
+    ucsTlsAlgoBulkAesCbc128 = 14        '--- next 2 are legacy non-AEAD
+    ucsTlsAlgoBulkAesCbc256 = 15
     '--- hash
     ucsTlsAlgoDigestSha256 = 21
     ucsTlsAlgoDigestSha384 = 22
@@ -426,11 +435,11 @@ Public Type UcsTlsContext
     ExchGroup           As Long
     ExchAlgo            As UcsTlsCryptoAlgorithmsEnum
     CipherSuite         As Long
-    AeadAlgo            As UcsTlsCryptoAlgorithmsEnum
-    MacSize             As Long '--- always 0 (not used w/ AEAD ciphers)
+    BulkAlgo            As UcsTlsCryptoAlgorithmsEnum
+    MacSize             As Long '--- not used w/ AEAD ciphers
     KeySize             As Long
     IvSize              As Long
-    IvDynamicSize       As Long '--- only for AES in TLS 1.2
+    IvExplicitSize      As Long '--- only for AES in TLS 1.2
     TagSize             As Long
     DigestAlgo          As UcsTlsCryptoAlgorithmsEnum
     DigestSize          As Long
@@ -438,6 +447,8 @@ Public Type UcsTlsContext
     HandshakeMessages() As Byte '--- ToDo: reduce to HandshakeHash only
     HandshakeSecret()   As Byte
     MasterSecret()      As Byte
+    LocalMacKey()       As Byte
+    RemoteMacKey()      As Byte
     RemoteTrafficSecret() As Byte
     RemoteTrafficKey()  As Byte
     RemoteTrafficIV()   As Byte
@@ -508,6 +519,8 @@ Private Enum UcsThunkPfnIndexEnum
     ucsPfnChacha20Poly1305Decrypt
     ucsPfnAesGcmEncrypt
     ucsPfnAesGcmDecrypt
+    ucsPfnAesCbcEncrypt
+    ucsPfnAesCbcDecrypt
     ucsPfnRsaModExp
     [_ucsPfnMax]
 End Enum
@@ -1417,8 +1430,8 @@ Private Function pvWriteBeginOfRecord(baOutput() As Byte, ByVal lPos As Long, By
         lPos = pvWriteBeginOfBlock(baOutput, lPos, .BlocksStack, Size:=2)
             If pvArraySize(.LocalTrafficKey) > 0 Then
                 pvArrayXor baLocalIV, .LocalTrafficIV, .LocalTrafficSeqNo
-                If .IvDynamicSize > 0 Then '--- AES in TLS 1.2
-                    lPos = pvWriteBuffer(baOutput, lPos, VarPtr(baLocalIV(.IvSize - .IvDynamicSize)), .IvDynamicSize)
+                If .IvExplicitSize > 0 Then '--- AES in TLS 1.2
+                    lPos = pvWriteBuffer(baOutput, lPos, VarPtr(baLocalIV(.IvSize - .IvExplicitSize)), .IvExplicitSize)
                 End If
                 .BlocksStack.Add Array(lRecordPos, lPos, baLocalIV), Before:=1
                 '--- to be continued in end-of-record. . .
@@ -1436,6 +1449,8 @@ Private Function pvWriteEndOfRecord(baOutput() As Byte, ByVal lPos As Long, uCtx
     Dim lMessageSize    As Long
     Dim baAad()         As Byte
     Dim lAadPos         As Long
+    Dim baHmac()        As Byte
+    Dim lPadding        As Long
     
     With uCtx
         If pvArraySize(.LocalTrafficKey) > 0 Then
@@ -1447,6 +1462,24 @@ Private Function pvWriteEndOfRecord(baOutput() As Byte, ByVal lPos As Long, uCtx
                 baLocalIV = vRecordData(2)
                 lMessageSize = lPos - lMessagePos
                 lPos = pvWriteReserved(baOutput, lPos, .TagSize)
+                If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
+                    pvArrayAllocate baAad, LNG_LEGACY_AAD_SIZE, FUNC_NAME & ".baAad"
+                    lAadPos = pvWriteLong(baAad, 0, 0, Size:=4)
+                    lAadPos = pvWriteLong(baAad, lAadPos, .LocalTrafficSeqNo, Size:=4)
+                    lAadPos = pvWriteBuffer(baAad, lAadPos, VarPtr(baOutput(lRecordPos)), 3)
+                    lAadPos = pvWriteLong(baAad, lAadPos, lMessageSize, Size:=2)
+                    Debug.Assert lAadPos = LNG_LEGACY_AAD_SIZE
+                    If .MacSize > 0 Then
+                        lAadPos = pvWriteBuffer(baAad, lAadPos, VarPtr(baOutput(lMessagePos)), lMessageSize)
+                        pvTlsArrayHmac baHmac, .DigestAlgo, .LocalMacKey, baAad, 0, lAadPos
+                        lPos = pvWriteArray(baOutput, lPos, baHmac)
+                        lPadding = .IvSize - (lPos - lMessagePos) Mod .IvSize
+                        Debug.Assert lPadding <= pvArraySize(baHmac)
+                        Call FillMemory(baHmac(0), lPadding, lPadding - 1)
+                        lPos = pvWriteBuffer(baOutput, lPos, VarPtr(baHmac(0)), lPadding)
+                        lMessageSize = lPos - lMessagePos
+                    End If
+                End If
             lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
             #If ImplCaptureTraffic Then
                 If lMessageSize <> 0 Then
@@ -1454,15 +1487,9 @@ Private Function pvWriteEndOfRecord(baOutput() As Byte, ByVal lPos As Long, uCtx
                 End If
             #End If
             If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
-                pvTlsAeadEncrypt .AeadAlgo, baLocalIV, .LocalTrafficKey, baOutput, lRecordPos, LNG_AAD_SIZE, baOutput, lMessagePos, lMessageSize
+                pvTlsBulkEncrypt .BulkAlgo, baLocalIV, .LocalTrafficKey, baOutput, lRecordPos, LNG_AAD_SIZE, baOutput, lMessagePos, lMessageSize
             ElseIf .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
-                pvArrayAllocate baAad, LNG_LEGACY_AAD_SIZE, FUNC_NAME & ".baAad"
-                lAadPos = pvWriteLong(baAad, 0, 0, Size:=4)
-                lAadPos = pvWriteLong(baAad, lAadPos, .LocalTrafficSeqNo, Size:=4)
-                lAadPos = pvWriteBuffer(baAad, lAadPos, VarPtr(baOutput(lRecordPos)), 3)
-                lAadPos = pvWriteLong(baAad, lAadPos, lMessageSize, Size:=2)
-                Debug.Assert lAadPos = LNG_LEGACY_AAD_SIZE
-                pvTlsAeadEncrypt .AeadAlgo, baLocalIV, .LocalTrafficKey, baAad, 0, UBound(baAad) + 1, baOutput, lMessagePos, lMessageSize
+                pvTlsBulkEncrypt .BulkAlgo, baLocalIV, .LocalTrafficKey, baAad, 0, UBound(baAad) + 1, baOutput, lMessagePos, lMessageSize
             End If
             .LocalTrafficSeqNo = UnsignedAdd(.LocalTrafficSeqNo, 1)
         Else
@@ -1513,6 +1540,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
     Dim baAad()         As Byte
     Dim lAadPos         As Long
     Dim bResult         As Boolean
+    Dim baHmac()        As Byte
     
     On Error GoTo EH
     With uCtx
@@ -1541,11 +1569,11 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
                     If lRecordType <> TLS_CONTENT_TYPE_APPDATA Then
                         GoTo UnexpectedRecordType
                     End If
-                    bResult = pvTlsAeadDecrypt(.AeadAlgo, baRemoteIV, .RemoteTrafficKey, baInput, lRecordPos, LNG_AAD_SIZE, baInput, lPos, lRecordSize)
+                    bResult = pvTlsBulkDecrypt(.BulkAlgo, baRemoteIV, .RemoteTrafficKey, baInput, lRecordPos, LNG_AAD_SIZE, baInput, lPos, lRecordSize)
                 ElseIf .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
-                    If .IvDynamicSize > 0 Then '--- AES in TLS 1.2
-                        pvWriteBuffer baRemoteIV, .IvSize - .IvDynamicSize, VarPtr(baInput(lPos)), .IvDynamicSize
-                        lPos = lPos + .IvDynamicSize
+                    If .IvExplicitSize > 0 Then '--- AES in TLS 1.2
+                        pvWriteBuffer baRemoteIV, .IvSize - .IvExplicitSize, VarPtr(baInput(lPos)), .IvExplicitSize
+                        lPos = lPos + .IvExplicitSize
                     End If
                     pvArrayAllocate baAad, LNG_LEGACY_AAD_SIZE, FUNC_NAME & ".baAad"
                     lAadPos = pvWriteLong(baAad, 0, 0, Size:=4)
@@ -1553,12 +1581,11 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
                     lAadPos = pvWriteBuffer(baAad, lAadPos, VarPtr(baInput(lRecordPos)), 3)
                     lAadPos = pvWriteLong(baAad, lAadPos, lEnd - lPos, Size:=2)
                     Debug.Assert lAadPos = LNG_LEGACY_AAD_SIZE
-                    bResult = pvTlsAeadDecrypt(.AeadAlgo, baRemoteIV, .RemoteTrafficKey, baAad, 0, UBound(baAad) + 1, baInput, lPos, lEnd - lPos + .TagSize)
+                    bResult = pvTlsBulkDecrypt(.BulkAlgo, baRemoteIV, .RemoteTrafficKey, baAad, 0, UBound(baAad) + 1, baInput, lPos, lEnd - lPos + .TagSize)
                 End If
                 If Not bResult Then
                     sError = ERR_DECRYPTION_FAILED
                     eAlertCode = uscTlsAlertBadRecordMac
-                    GoTo QH
                 End If
                 #If ImplCaptureTraffic Then
                     If lEnd - lPos <> 0 Then
@@ -1575,6 +1602,19 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, baInput() As Byte, ByVa
                         End If
                     Loop
                     lRecordType = baInput(lEnd)
+                ElseIf .MacSize > 0 Then
+                    lEnd = lEnd - baInput(lEnd - 1) - 1 - .DigestSize
+                    If lEnd <= lPos Then
+                        GoTo RecordMacFailed
+                    End If
+                    '--- calc HMAC and compare
+                    lAadPos = pvWriteLong(baAad, lAadPos - 2, lEnd - lPos, Size:=2)
+                    lAadPos = pvWriteBuffer(baAad, lAadPos, VarPtr(baInput(lPos)), lEnd - lPos)
+                    pvTlsArrayHmac baHmac, .DigestAlgo, .RemoteMacKey, baAad, 0, lAadPos
+                    pvReadArray baInput, lEnd, baRemoteIV, .DigestSize
+                    If StrConv(baHmac, vbUnicode) <> StrConv(baRemoteIV, vbUnicode) Then
+                        GoTo RecordMacFailed
+                    End If
                 End If
             Else
                 lEnd = lPos + lRecordSize
@@ -1653,6 +1693,10 @@ UnexpectedRecordType:
 UnexpectedRecordSize:
     sError = ERR_RECORD_TOO_BIG
     eAlertCode = uscTlsAlertUnexpectedMessage
+    GoTo QH
+RecordMacFailed:
+    sError = ERR_RECORD_MAC_FAILED
+    eAlertCode = uscTlsAlertBadRecordMac
     GoTo QH
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
@@ -1907,11 +1951,11 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                             .HelloRetryCipherSuite = .CipherSuite
                         Else
                             Select Case True
-                            Case pvCryptoIsSupported(ucsTlsAlgoAeadAes128)
+                            Case pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm128)
                                 .HelloRetryCipherSuite = TLS_CS_AES_128_GCM_SHA256
-                            Case pvCryptoIsSupported(ucsTlsAlgoAeadAes256)
+                            Case pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256)
                                 .HelloRetryCipherSuite = TLS_CS_AES_256_GCM_SHA384
-                            Case pvCryptoIsSupported(ucsTlsAlgoAeadChacha20Poly1305)
+                            Case pvCryptoIsSupported(ucsTlsAlgoBulkChacha20Poly1305)
                                 .HelloRetryCipherSuite = TLS_CS_CHACHA20_POLY1305_SHA256
                             Case Else
                                 GoTo HelloRetryFailed
@@ -2629,30 +2673,46 @@ Private Sub pvTlsSetupCipherSuite(uCtx As UcsTlsContext, ByVal lCipherSuite As L
             .CipherSuite = lCipherSuite
             Select Case lCipherSuite
             Case TLS_CS_CHACHA20_POLY1305_SHA256, TLS_CS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256, TLS_CS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
-                .AeadAlgo = ucsTlsAlgoAeadChacha20Poly1305
+                .BulkAlgo = ucsTlsAlgoBulkChacha20Poly1305
                 .KeySize = TLS_CHACHA20_KEY_SIZE
                 .IvSize = TLS_CHACHA20POLY1305_IV_SIZE
                 .TagSize = TLS_CHACHA20POLY1305_TAG_SIZE
                 .DigestAlgo = ucsTlsAlgoDigestSha256
                 .DigestSize = TLS_SHA256_DIGEST_SIZE
             Case TLS_CS_AES_128_GCM_SHA256, TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, TLS_CS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, TLS_CS_RSA_WITH_AES_128_GCM_SHA256
-                .AeadAlgo = ucsTlsAlgoAeadAes128
+                .BulkAlgo = ucsTlsAlgoBulkAesGcm128
                 .KeySize = TLS_AES128_KEY_SIZE
                 .IvSize = TLS_AESGCM_IV_SIZE
                 If lCipherSuite <> TLS_CS_AES_128_GCM_SHA256 Then
-                    .IvDynamicSize = 8 '--- AES in TLS 1.2
+                    .IvExplicitSize = 8 '--- AES in TLS 1.2
                 End If
                 .TagSize = TLS_AESGCM_TAG_SIZE
                 .DigestAlgo = ucsTlsAlgoDigestSha256
                 .DigestSize = TLS_SHA256_DIGEST_SIZE
             Case TLS_CS_AES_256_GCM_SHA384, TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, TLS_CS_RSA_WITH_AES_256_GCM_SHA384
-                .AeadAlgo = ucsTlsAlgoAeadAes256
+                .BulkAlgo = ucsTlsAlgoBulkAesGcm256
                 .KeySize = TLS_AES256_KEY_SIZE
                 .IvSize = TLS_AESGCM_IV_SIZE
                 If lCipherSuite <> TLS_CS_AES_256_GCM_SHA384 Then
-                    .IvDynamicSize = 8 '--- AES in TLS 1.2
+                    .IvExplicitSize = 8 '--- AES in TLS 1.2
                 End If
                 .TagSize = TLS_AESGCM_TAG_SIZE
+                .DigestAlgo = ucsTlsAlgoDigestSha384
+                .DigestSize = TLS_SHA384_DIGEST_SIZE
+            Case TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA256
+                .BulkAlgo = ucsTlsAlgoBulkAesCbc128
+                .KeySize = TLS_AES128_KEY_SIZE
+                .IvSize = TLS_AESCBC_IV_SIZE
+                .IvExplicitSize = .IvSize '--- AES in TLS 1.2
+                .MacSize = TLS_SHA256_DIGEST_SIZE
+                .DigestAlgo = ucsTlsAlgoDigestSha256
+                .DigestSize = TLS_SHA256_DIGEST_SIZE
+            Case TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384, TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA384
+                .BulkAlgo = ucsTlsAlgoBulkAesCbc256
+                .KeySize = TLS_AES256_KEY_SIZE
+                .IvSize = TLS_AESCBC_IV_SIZE
+                .IvExplicitSize = .IvSize '--- AES in TLS 1.2
+                .MacSize = TLS_SHA384_DIGEST_SIZE
                 .DigestAlgo = ucsTlsAlgoDigestSha384
                 .DigestSize = TLS_SHA384_DIGEST_SIZE
             Case Else
@@ -2669,51 +2729,60 @@ Private Function pvTlsPrepareCipherSuitsOrder(ByVal eFilter As UcsTlsLocalFeatur
     Set oRetVal = New Collection
     If (eFilter And ucsTlsSupportTls13) <> 0 Then
         '--- first if AES preferred over Chacha20
-        If pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes128) Then
+        If pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm128) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm128) Then
             oRetVal.Add TLS_CS_AES_128_GCM_SHA256
         End If
-        If pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes256) And pvCryptoIsSupported(ucsTlsAlgoAeadAes256) Then
+        If pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm256) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
             oRetVal.Add TLS_CS_AES_256_GCM_SHA384
         End If
-        If pvCryptoIsSupported(ucsTlsAlgoAeadChacha20Poly1305) Then
+        If pvCryptoIsSupported(ucsTlsAlgoBulkChacha20Poly1305) Then
             oRetVal.Add TLS_CS_CHACHA20_POLY1305_SHA256
         End If
         '--- least preferred AES
-        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes128) Then
+        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm128) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm128) Then
             oRetVal.Add TLS_CS_AES_128_GCM_SHA256
         End If
-        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes256) And pvCryptoIsSupported(ucsTlsAlgoAeadAes256) Then
+        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm256) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
             oRetVal.Add TLS_CS_AES_256_GCM_SHA384
         End If
     End If
     If (eFilter And ucsTlsSupportTls12) <> 0 Then
         '--- first if AES preferred over Chacha20
-        If pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes128) Then
+        If pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm128) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm128) Then
             oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
         End If
-        If pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes256) Then
+        If pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm128) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
             oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
         End If
-        If pvCryptoIsSupported(ucsTlsAlgoAeadChacha20Poly1305) Then
+        If pvCryptoIsSupported(ucsTlsAlgoBulkChacha20Poly1305) Then
             oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
         End If
         '--- least preferred AES
-        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes128) Then
+        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm128) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm128) Then
             oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
         End If
-        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoAeadAes128) And pvCryptoIsSupported(ucsTlsAlgoAeadAes256) Then
+        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm128) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
             oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
         End If
+        '--- legacy AES in CBC mode
+        If pvCryptoIsSupported(ucsTlsAlgoBulkAesCbc128) Then
+            oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256
+            oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA256
+        End If
+        If pvCryptoIsSupported(ucsTlsAlgoBulkAesCbc256) Then
+            oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384
+            oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA384
+        End If
         '--- no perfect forward secrecy -> least preferred
-        If pvCryptoIsSupported(ucsTlsAlgoAeadAes128) Then
+        If pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm128) Then
             oRetVal.Add TLS_CS_RSA_WITH_AES_128_GCM_SHA256
         End If
-        If pvCryptoIsSupported(ucsTlsAlgoAeadAes256) Then
+        If pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
             oRetVal.Add TLS_CS_RSA_WITH_AES_256_GCM_SHA384
         End If
     End If
@@ -2874,7 +2943,6 @@ Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext)
     Dim baRandom()      As Byte
     Dim baExpanded()    As Byte
     Dim lPos            As Long
-    Dim baEmpty()       As Byte
     
     With uCtx
         If pvArraySize(.RemoteExchRandom) = 0 Then
@@ -2894,16 +2962,16 @@ Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext)
         lPos = pvWriteArray(baRandom, 0, .RemoteExchRandom)
         lPos = pvWriteArray(baRandom, lPos, .LocalExchRandom)
         pvTlsKdfLegacyPrf baExpanded, .DigestAlgo, .MasterSecret, "key expansion", baRandom, 2 * (.MacSize + .KeySize + .IvSize)
-        lPos = pvReadArray(baExpanded, 0, baEmpty, .MacSize) '--- LocalMacKey not used w/ AEAD
-        lPos = pvReadArray(baExpanded, lPos, baEmpty, .MacSize) '--- RemoteMacKey not used w/ AEAD
+        lPos = pvReadArray(baExpanded, 0, .LocalMacKey, .MacSize)       '--- not used w/ AEAD
+        lPos = pvReadArray(baExpanded, lPos, .RemoteMacKey, .MacSize)   '--- not used w/ AEAD
         lPos = pvReadArray(baExpanded, lPos, .LocalTrafficKey, .KeySize)
         lPos = pvReadArray(baExpanded, lPos, .RemoteLegacyNextTrafficKey, .KeySize)
-        lPos = pvReadArray(baExpanded, lPos, .LocalTrafficIV, .IvSize - .IvDynamicSize)
-        pvTlsArrayRandom baRandom, .IvDynamicSize
-        pvWriteArray .LocalTrafficIV, .IvSize - .IvDynamicSize, baRandom
-        lPos = pvReadArray(baExpanded, lPos, .RemoteLegacyNextTrafficIV, .IvSize - .IvDynamicSize)
-        pvTlsArrayRandom baRandom, .IvDynamicSize
-        pvWriteArray .RemoteLegacyNextTrafficIV, .IvSize - .IvDynamicSize, baRandom
+        lPos = pvReadArray(baExpanded, lPos, .LocalTrafficIV, .IvSize - .IvExplicitSize)
+        pvTlsArrayRandom baRandom, .IvExplicitSize
+        pvWriteArray .LocalTrafficIV, .IvSize - .IvExplicitSize, baRandom
+        lPos = pvReadArray(baExpanded, lPos, .RemoteLegacyNextTrafficIV, .IvSize - .IvExplicitSize)
+        pvTlsArrayRandom baRandom, .IvExplicitSize
+        pvWriteArray .RemoteLegacyNextTrafficIV, .IvSize - .IvExplicitSize, baRandom
         .LocalTrafficSeqNo = 0
     End With
 End Sub
@@ -2991,40 +3059,48 @@ Private Sub pvTlsArrayHelloRetryRandom(baRetVal() As Byte)
     pvArrayByte baRetVal, &HCF, &H21, &HAD, &H74, &HE5, &H9A, &H61, &H11, &HBE, &H1D, &H8C, &H2, &H1E, &H65, &HB8, &H91, &HC2, &HA2, &H11, &H16, &H7A, &HBB, &H8C, &H5E, &H7, &H9E, &H9, &HE2, &HC8, &HA8, &H33, &H9C
 End Sub
 
-Private Function pvTlsAeadDecrypt(ByVal eAead As UcsTlsCryptoAlgorithmsEnum, baRemoteIV() As Byte, baRemoteKey() As Byte, baAad() As Byte, ByVal lAadPos As Long, ByVal lAdSize As Long, baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
-    Const FUNC_NAME     As String = "pvTlsAeadDecrypt"
+Private Function pvTlsBulkDecrypt(ByVal eBulk As UcsTlsCryptoAlgorithmsEnum, baRemoteIV() As Byte, baRemoteKey() As Byte, baAad() As Byte, ByVal lAadPos As Long, ByVal lAdSize As Long, baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
+    Const FUNC_NAME     As String = "pvTlsBulkDecrypt"
     
-    Select Case eAead
-    Case ucsTlsAlgoAeadChacha20Poly1305
+    Select Case eBulk
+    Case ucsTlsAlgoBulkChacha20Poly1305
         If Not pvCryptoAeadChacha20Poly1305Decrypt(baRemoteIV, baRemoteKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
             GoTo QH
         End If
-    Case ucsTlsAlgoAeadAes128, ucsTlsAlgoAeadAes256
+    Case ucsTlsAlgoBulkAesGcm128, ucsTlsAlgoBulkAesGcm256
         If Not pvCryptoAeadAesGcmDecrypt(baRemoteIV, baRemoteKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
             GoTo QH
         End If
+    Case ucsTlsAlgoBulkAesCbc128, ucsTlsAlgoBulkAesCbc256
+        If Not pvCryptoAeadAesCbcDecrypt(baRemoteIV, baRemoteKey, baBuffer, lPos, lSize) Then
+            GoTo QH
+        End If
     Case Else
-        Err.Raise vbObjectError, FUNC_NAME, "Unsupported AEAD type " & eAead
+        Err.Raise vbObjectError, FUNC_NAME, "Unsupported AEAD type " & eBulk
     End Select
     '--- success
-    pvTlsAeadDecrypt = True
+    pvTlsBulkDecrypt = True
 QH:
 End Function
 
-Private Sub pvTlsAeadEncrypt(ByVal eAead As UcsTlsCryptoAlgorithmsEnum, baLocalIV() As Byte, baLocalKey() As Byte, baAad() As Byte, ByVal lAadPos As Long, ByVal lAdSize As Long, baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long)
-    Const FUNC_NAME     As String = "pvTlsAeadEncrypt"
+Private Sub pvTlsBulkEncrypt(ByVal eBulk As UcsTlsCryptoAlgorithmsEnum, baLocalIV() As Byte, baLocalKey() As Byte, baAad() As Byte, ByVal lAadPos As Long, ByVal lAdSize As Long, baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long)
+    Const FUNC_NAME     As String = "pvTlsBulkEncrypt"
     
-    Select Case eAead
-    Case ucsTlsAlgoAeadChacha20Poly1305
+    Select Case eBulk
+    Case ucsTlsAlgoBulkChacha20Poly1305
         If Not pvCryptoAeadChacha20Poly1305Encrypt(baLocalIV, baLocalKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
             Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoAeadChacha20Poly1305Encrypt")
         End If
-    Case ucsTlsAlgoAeadAes128, ucsTlsAlgoAeadAes256
+    Case ucsTlsAlgoBulkAesGcm128, ucsTlsAlgoBulkAesGcm256
         If Not pvCryptoAeadAesGcmEncrypt(baLocalIV, baLocalKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
             Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoAeadChacha20Poly1305Encrypt")
         End If
+    Case ucsTlsAlgoBulkAesCbc128, ucsTlsAlgoBulkAesCbc256
+        If Not pvCryptoAeadAesCbcEncrypt(baLocalIV, baLocalKey, baBuffer, lPos, lSize) Then
+            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoAeadChacha20Poly1305Encrypt")
+        End If
     Case Else
-        Err.Raise vbObjectError, FUNC_NAME, "Unsupported AEAD type " & eAead
+        Err.Raise vbObjectError, FUNC_NAME, "Unsupported AEAD type " & eBulk
     End Select
 End Sub
 
@@ -3071,6 +3147,14 @@ Private Function pvTlsCipherSuiteName(ByVal lCipherSuite As Long) As String
         pvTlsCipherSuiteName = "ECDHE-RSA-CHACHA20-POLY1305"
     Case TLS_CS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
         pvTlsCipherSuiteName = "ECDHE-ECDSA-CHACHA20-POLY1305"
+    Case TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256
+        pvTlsCipherSuiteName = "ECDHE-ECDSA-AES128-SHA256"
+    Case TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384
+        pvTlsCipherSuiteName = "ECDHE-ECDSA-AES256-SHA384"
+    Case TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA256
+        pvTlsCipherSuiteName = "ECDHE-RSA-AES128-SHA256"
+    Case TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA384
+        pvTlsCipherSuiteName = "ECDHE-RSA-AES256-SHA384"
     Case TLS_CS_RSA_WITH_AES_128_GCM_SHA256
         pvTlsCipherSuiteName = "AES128-GCM-SHA256"
     Case TLS_CS_RSA_WITH_AES_256_GCM_SHA384
@@ -3611,16 +3695,16 @@ Private Function pvCryptoIsSupported(ByVal eAlgo As UcsTlsCryptoAlgorithmsEnum) 
     Select Case eAlgo
     Case ucsTlsAlgoExchSecp521r1
         '--- not supported
-    Case ucsTlsAlgoAeadAes128, ucsTlsAlgoAeadAes256
+    Case ucsTlsAlgoBulkAesGcm128, ucsTlsAlgoBulkAesGcm256
         #If ImplUseLibSodium Then
-            pvCryptoIsSupported = (crypto_aead_aes256gcm_is_available() <> 0 And eAlgo = ucsTlsAlgoAeadAes256)
+            pvCryptoIsSupported = (crypto_aead_aes256gcm_is_available() <> 0 And eAlgo = ucsTlsAlgoBulkAesGcm256)
         #Else
             pvCryptoIsSupported = True
         #End If
-    Case PREF + ucsTlsAlgoAeadAes128, PREF + ucsTlsAlgoAeadAes256
+    Case PREF + ucsTlsAlgoBulkAesGcm128, PREF + ucsTlsAlgoBulkAesGcm256
         '--- signal if AES preferred over Chacha20
         #If ImplUseLibSodium Then
-            pvCryptoIsSupported = (crypto_aead_aes256gcm_is_available() <> 0 And eAlgo = PREF + ucsTlsAlgoAeadAes256)
+            pvCryptoIsSupported = (crypto_aead_aes256gcm_is_available() <> 0 And eAlgo = PREF + ucsTlsAlgoBulkAesGcm256)
         #Else
             pvCryptoIsSupported = True
         #End If
@@ -4164,6 +4248,8 @@ Private Function pvCryptoInit() As Boolean
             Call pvPatchTrampoline(AddressOf pvCallChacha20Poly1305Decrypt)
             Call pvPatchTrampoline(AddressOf pvCallAesGcmEncrypt)
             Call pvPatchTrampoline(AddressOf pvCallAesGcmDecrypt)
+            Call pvPatchTrampoline(AddressOf pvCallAesCbcEncrypt)
+            Call pvPatchTrampoline(AddressOf pvCallAesCbcDecrypt)
             Call pvPatchTrampoline(AddressOf pvCallRsaModExp)
             '--- init thunk's first 4 bytes -> global data in C/C++
             Call CopyMemory(ByVal .Thunk, VarPtr(.Glob(0)), 4)
@@ -4733,6 +4819,37 @@ Private Function pvCryptoAeadAesGcmDecrypt( _
     #End If
 End Function
 
+Private Function pvCryptoAeadAesCbcEncrypt( _
+            baNonce() As Byte, baKey() As Byte, _
+            baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
+    Debug.Assert pvArraySize(baNonce) = LNG_AESCBC_IVSZ
+    Debug.Assert pvArraySize(baKey) = LNG_AES128_KEYSZ Or pvArraySize(baKey) = LNG_AES256_KEYSZ
+    Debug.Assert pvArraySize(baBuffer) >= lPos + lSize
+    Debug.Assert lSize Mod pvArraySize(baNonce) = 0
+    Debug.Assert pvPatchTrampoline(AddressOf pvCallAesCbcEncrypt)
+    Call pvCallAesCbcEncrypt(m_uData.Pfn(ucsPfnAesCbcEncrypt), _
+            baBuffer(lPos), baBuffer(lPos), lSize, _
+            baNonce(0), baKey(0), UBound(baKey) + 1)
+    '--- success
+    pvCryptoAeadAesCbcEncrypt = True
+End Function
+
+Private Function pvCryptoAeadAesCbcDecrypt( _
+            baNonce() As Byte, baKey() As Byte, _
+            baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
+    Debug.Assert pvArraySize(baNonce) = LNG_AESCBC_IVSZ
+    Debug.Assert pvArraySize(baKey) = LNG_AES128_KEYSZ Or pvArraySize(baKey) = LNG_AES256_KEYSZ
+    Debug.Assert pvArraySize(baBuffer) >= lPos + lSize
+    If lSize Mod pvArraySize(baNonce) = 0 Then
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallAesCbcDecrypt)
+        Call pvCallAesCbcDecrypt(m_uData.Pfn(ucsPfnAesCbcDecrypt), _
+                baBuffer(lPos), baBuffer(lPos), lSize, _
+                baNonce(0), baKey(0), UBound(baKey) + 1)
+        '--- success
+        pvCryptoAeadAesCbcDecrypt = True
+    End If
+End Function
+
 Private Sub pvCryptoRandomBytes(ByVal lPtr As Long, ByVal lSize As Long)
     #If ImplUseLibSodium Then
         Call randombytes_buf(lPtr, lSize)
@@ -5085,6 +5202,19 @@ Private Function pvCallAesGcmDecrypt( _
     '                        const uint8_t *npub, const uint8_t *k, const size_t klen)
 End Function
 
+Private Function pvCallAesCbcEncrypt( _
+            ByVal Pfn As Long, pCipherTextPtr As Byte, pPlaintTextPtr As Byte, ByVal lPlaintTextSize As Long, _
+            pNoncePtr As Byte, pKeyPtr As Byte, ByVal lKeySize As Long) As Long
+    ' static void cf_aescbc_encrypt(uint8_t *c, const uint8_t *m, const size_t mlen,
+    '                               const uint8_t *npub, const uint8_t *k, const size_t klen)
+End Function
+
+Private Function pvCallAesCbcDecrypt( _
+            ByVal Pfn As Long, pPlaintTextPtr As Byte, pCipherTextPtr As Byte, ByVal lCipherTextSize As Long, _
+            pNoncePtr As Byte, pKeyPtr As Byte, ByVal lKeySize As Long) As Long
+    ' static void cf_aescbc_decrypt(uint8_t *m, const uint8_t *c, const size_t clen,
+    '                              const uint8_t *npub, const uint8_t *k, const size_t klen)
+End Function
 Private Function pvCallRsaModExp(ByVal Pfn As Long, ByVal lSize As Long, pBasePtr As Byte, pExpPtr As Byte, pModuloPtr As Byte, pResultPtr As Byte) As Long
     ' void rsa_modexp(uint32_t maxbytes, const uint8_t *b, const uint8_t *e, const uint8_t *m, uint8_t *r)
 End Function
