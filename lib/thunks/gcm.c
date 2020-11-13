@@ -262,7 +262,7 @@ x_err:
 #define AESGCM_IV_SIZE  12
 #define AESGCM_TAG_SIZE 16
 
-static void cf_aesgcm_setup(cf_prp *prp, void **prpctx, 
+static void cf_aes_ex_setup(cf_prp *prp, void **prpctx, 
                             cf_aes_ni_context *ctxni, cf_aes_context *ctx, 
                             const uint8_t *k, const size_t klen)
 {
@@ -287,7 +287,7 @@ static void cf_aesgcm_setup(cf_prp *prp, void **prpctx,
 typedef union {
     cf_aes_ni_context ctxni;
     cf_aes_context ctx;
-} cf_aes_context_u;
+} cf_aes_ex_context;
 
 static void cf_aesgcm_encrypt(uint8_t *c, uint8_t *mac, const uint8_t *m, const size_t mlen,
                               const uint8_t *ad, const size_t adlen,
@@ -295,9 +295,9 @@ static void cf_aesgcm_encrypt(uint8_t *c, uint8_t *mac, const uint8_t *m, const 
 {
     cf_prp prp;
     void *prpctx;
-    cf_aes_context_u ctx;
+    cf_aes_ex_context ctx;
 
-    cf_aesgcm_setup(&prp, &prpctx, &ctx.ctxni, &ctx.ctx, k, klen);
+    cf_aes_ex_setup(&prp, &prpctx, &ctx.ctxni, &ctx.ctx, k, klen);
     cf_gcm_encrypt(&prp, prpctx, m, mlen, ad, adlen, npub, AESGCM_IV_SIZE, c, mac, AESGCM_TAG_SIZE);
 }
 
@@ -307,8 +307,34 @@ static int cf_aesgcm_decrypt(uint8_t *m, const uint8_t *c, const size_t clen, co
 {
     cf_prp prp;
     void *prpctx;
-    cf_aes_context_u ctx;
+    cf_aes_ex_context ctx;
 
-    cf_aesgcm_setup(&prp, &prpctx, &ctx.ctxni, &ctx.ctx, k, klen);
+    cf_aes_ex_setup(&prp, &prpctx, &ctx.ctxni, &ctx.ctx, k, klen);
     return cf_gcm_decrypt(&prp, prpctx, c, clen, ad, adlen, npub, AESGCM_IV_SIZE, mac, AESGCM_TAG_SIZE, m);
+}
+
+static void cf_aescbc_encrypt(uint8_t *c, const uint8_t *m, const size_t mlen,
+                              const uint8_t *npub, const uint8_t *k, const size_t klen)
+{
+    cf_prp prp;
+    void *prpctx;
+    cf_aes_ex_context ctx;
+    cf_cbc mode;
+
+    cf_aes_ex_setup(&prp, &prpctx, &ctx.ctxni, &ctx.ctx, k, klen);
+    cf_cbc_init(&mode, &prp, prpctx, npub);
+    cf_cbc_encrypt(&mode, m, c, mlen / CF_MAXBLOCK);
+}
+
+static void cf_aescbc_decrypt(uint8_t *m, const uint8_t *c, const size_t clen,
+                             const uint8_t *npub, const uint8_t *k, const size_t klen)
+{
+    cf_prp prp;
+    void *prpctx;
+    cf_aes_ex_context ctx;
+    cf_cbc mode;
+
+    cf_aes_ex_setup(&prp, &prpctx, &ctx.ctxni, &ctx.ctx, k, klen);
+    cf_cbc_init(&mode, &prp, prpctx, npub);
+    cf_cbc_decrypt(&mode, c, m, clen / CF_MAXBLOCK);
 }

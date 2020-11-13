@@ -6,6 +6,7 @@
 #define IMPL_SHA512_THUNK
 #define IMPL_CHACHA20_THUNK
 #define IMPL_AESGCM_THUNK
+#define IMPL_AESCBC_THUNK
 //#define IMPL_GMPRSA_THUNK
 #define IMPL_SSHRSA_THUNK
 //#define IMPL_TINF_THUNK
@@ -88,7 +89,7 @@ typedef struct {
     uint8_t m_chacha20_sigma[17]; // "expand 32-byte k";
     uint32_t m_negative_1305[17];
 #endif
-#ifdef IMPL_AESGCM_THUNK
+#if defined(IMPL_AESGCM_THUNK) || defined(IMPL_AESCBC_THUNK)
     uint8_t m_S[256];
     uint8_t m_Rcon[11];
     uint8_t m_S_inv[256];
@@ -122,7 +123,7 @@ typedef struct {
 
 static int beginOfThunk(int i) { 
     int a[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }; 
-    int b[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }; 
+    int b[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 }; 
     return a[b[i]];
 }
 
@@ -181,7 +182,7 @@ extern "C" {
     #include "poly1305.c"
     #include "chacha20poly1305.c"
 #endif
-#ifdef IMPL_AESGCM_THUNK
+#if defined(IMPL_AESGCM_THUNK) || defined(IMPL_AESCBC_THUNK)
     #include "aes.c"
     #include "gf128.c"
     #include "modes.c"
@@ -254,6 +255,12 @@ static int endOfThunk() { return 0; }
     typedef int (*cf_aesgcm_decrypt_t)(uint8_t *m, const uint8_t *c, const size_t clen, const uint8_t *mac, const uint8_t *ad, const size_t adlen,
                                        const uint8_t *npub, const uint8_t *k, const size_t klen);
 #endif
+#ifdef IMPL_AESGCM_THUNK
+    typedef void (*cf_aescbc_encrypt_t)(uint8_t *c, const uint8_t *m, const size_t mlen, 
+                                        const uint8_t *npub, const uint8_t *k, size_t klen);
+    typedef int (*cf_aescbc_decrypt_t)(uint8_t *m, const uint8_t *c, const size_t clen, 
+                                       const uint8_t *npub, const uint8_t *k, const size_t klen);
+#endif
 #if defined(IMPL_GMPRSA_THUNK) || defined(IMPL_SSHRSA_THUNK)
     typedef void (*rsa_modexp_t)(uint32_t maxbytes, void *b, void *e, void *m, void *r);
 #endif
@@ -306,7 +313,7 @@ void __cdecl main()
     memcpy(&ctx.m_chacha20_sigma, &g_chacha20_sigma, sizeof g_chacha20_sigma);
     memcpy(&ctx.m_negative_1305, &g_negative_1305, sizeof g_negative_1305);
 #endif
-#ifdef IMPL_AESGCM_THUNK
+#if defined(IMPL_AESGCM_THUNK) || defined(IMPL_AESCBC_THUNK)
     memcpy(&ctx.m_S, &g_S, sizeof g_S);
     memcpy(&ctx.m_Rcon, &g_Rcon, sizeof g_Rcon);
     memcpy(&ctx.m_S_inv, &g_S_inv, sizeof g_S_inv);
@@ -360,6 +367,10 @@ void __cdecl main()
     DECLARE_PFN(cf_aesgcm_encrypt_t, cf_aesgcm_encrypt);
     DECLARE_PFN(cf_aesgcm_decrypt_t, cf_aesgcm_decrypt);
 #endif
+#ifdef IMPL_AESCBC_THUNK
+    DECLARE_PFN(cf_aescbc_encrypt_t, cf_aescbc_encrypt);
+    DECLARE_PFN(cf_aescbc_decrypt_t, cf_aescbc_decrypt);
+#endif
 #ifdef IMPL_GMPRSA_THUNK
     DECLARE_PFN(rsa_modexp_t, gmp_rsa_public_encrypt);
 #endif
@@ -399,19 +410,25 @@ void __cdecl main()
     uint8_t tag[16];
     uint8_t aad[] = "header text";
     uint8_t plaintext[] = "this is a test 1234567890";
-    uint8_t cyphertext[100] = { 0 };
+    uint8_t ciphertext[100] = { 0 };
 #ifdef IMPL_CHACHA20_THUNK
-    pfn_cf_chacha20poly1305_encrypt(key, nonce, aad, sizeof aad, plaintext, sizeof plaintext, cyphertext, tag);
-    pfn_cf_chacha20poly1305_decrypt(key, nonce, aad, sizeof aad, cyphertext, sizeof plaintext, tag, cyphertext);
+    pfn_cf_chacha20poly1305_encrypt(key, nonce, aad, sizeof aad, plaintext, sizeof plaintext, ciphertext, tag);
+    pfn_cf_chacha20poly1305_decrypt(key, nonce, aad, sizeof aad, ciphertext, sizeof plaintext, tag, ciphertext);
 #endif
 #ifdef IMPL_AESGCM_THUNK
-    uint8_t *mac = cyphertext + sizeof plaintext;
-    pfn_cf_aesgcm_encrypt(cyphertext, mac, plaintext, sizeof plaintext, aad, sizeof aad, nonce, key, sizeof key);
-    pfn_cf_aesgcm_decrypt(cyphertext, cyphertext, sizeof plaintext, mac, aad, sizeof aad, nonce, key, sizeof key);
+    uint8_t *mac = ciphertext + sizeof plaintext;
+    pfn_cf_aesgcm_encrypt(ciphertext, mac, plaintext, sizeof plaintext, aad, sizeof aad, nonce, key, sizeof key);
+    pfn_cf_aesgcm_decrypt(ciphertext, ciphertext, sizeof plaintext, mac, aad, sizeof aad, nonce, key, sizeof key);
     const size_t lsize = 100 * 1024 * 1024;
     uint8_t *lbuf = (uint8_t *)malloc(lsize + AESGCM_TAG_SIZE);
     mac = lbuf + lsize;
     pfn_cf_aesgcm_encrypt(lbuf, mac, lbuf, lsize, aad, sizeof aad, nonce, key, sizeof key);
+#endif
+#ifdef IMPL_AESCBC_THUNK
+    uint8_t plaintext_padded[64] = "this is a test 1234567890 this is a test 12345678paddingpadding";
+    uint8_t nonce_padded[16] = { 1, 2, 3, 4 };
+    cf_aescbc_encrypt(ciphertext, plaintext_padded, sizeof plaintext_padded, nonce_padded, key, sizeof key);
+    cf_aescbc_decrypt(ciphertext, ciphertext, sizeof plaintext_padded, nonce_padded, key, sizeof key);
 #endif
 #ifdef IMPL_GMPRSA_THUNK
     {
@@ -483,6 +500,10 @@ void __cdecl main()
 #ifdef IMPL_AESGCM_THUNK
     ((int *)hThunk)[idx++] = ((uint8_t *)cf_aesgcm_encrypt - (uint8_t *)beginOfThunk);
     ((int *)hThunk)[idx++] = ((uint8_t *)cf_aesgcm_decrypt - (uint8_t *)beginOfThunk);
+#endif
+#ifdef IMPL_AESCBC_THUNK
+    ((int *)hThunk)[idx++] = ((uint8_t *)cf_aescbc_encrypt - (uint8_t *)beginOfThunk);
+    ((int *)hThunk)[idx++] = ((uint8_t *)cf_aescbc_decrypt - (uint8_t *)beginOfThunk);
 #endif
 #ifdef IMPL_GMPRSA_THUNK
     ((int *)hThunk)[idx++] = ((uint8_t *)gmp_rsa_public_encrypt - (uint8_t *)beginOfThunk);
