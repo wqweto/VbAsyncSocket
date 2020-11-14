@@ -92,6 +92,8 @@ Private Const CRYPT_MACHINE_KEYSET                      As Long = &H20
 Private Const AT_KEYEXCHANGE                            As Long = 1
 '--- for CertGetCertificateContextProperty
 Private Const CERT_KEY_PROV_INFO_PROP_ID                As Long = 2
+'--- for CryptImportKey
+Private Const CRYPT_EXPORTABLE                          As Long = 1
 '--- for ALPN
 Private Const SecApplicationProtocolNegotiationExt_ALPN As Long = 2
 Private Const SecApplicationProtocolNegotiationStatus_Success As Long = 1
@@ -728,6 +730,9 @@ RetryCredentials:
                     End If
                     pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME, AlertCode:=.LastAlertCode
                     GoTo QH
+                Case SEC_I_CONTEXT_EXPIRED
+                    .State = ucsTlsStateShutdown
+                    Exit Do
                 Case Else
                     pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & sApiSource, _
                         Replace(Replace(ERR_UNEXPECTED_RESULT, "%1", sApiSource), "%2", "&H" & Hex$(hResult)), AlertCode:=.LastAlertCode
@@ -1247,21 +1252,18 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
             lProvType = PROV_RSA_AES
             If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, CRYPT_MACHINE_KEYSET) = 0 Then
                 If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, CRYPT_NEWKEYSET Or CRYPT_MACHINE_KEYSET) = 0 Then
-                    '--- do nothing
-                End If
-            End If
-            If hProv = 0 Then
-                sProvName = MS_DEF_PROV
-                lProvType = PROV_RSA_FULL
-                If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, CRYPT_MACHINE_KEYSET) = 0 Then
-                    If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, CRYPT_NEWKEYSET Or CRYPT_MACHINE_KEYSET) = 0 Then
-                        hResult = Err.LastDllError
-                        sApiSource = "CryptAcquireContext"
-                        GoTo QH
+                    sProvName = MS_DEF_PROV
+                    lProvType = PROV_RSA_FULL
+                    If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, CRYPT_MACHINE_KEYSET) = 0 Then
+                        If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, CRYPT_NEWKEYSET Or CRYPT_MACHINE_KEYSET) = 0 Then
+                            hResult = Err.LastDllError
+                            sApiSource = "CryptAcquireContext"
+                            GoTo QH
+                        End If
                     End If
                 End If
             End If
-            If CryptImportKey(hProv, uPrivKeyInfo.KeyBlob(0), UBound(uPrivKeyInfo.KeyBlob) + 1, 0, 0, hKey) = 0 Then
+            If CryptImportKey(hProv, uPrivKeyInfo.KeyBlob(0), UBound(uPrivKeyInfo.KeyBlob) + 1, 0, CRYPT_EXPORTABLE, hKey) = 0 Then
                 hResult = Err.LastDllError
                 sApiSource = "CryptImportKey"
                 GoTo QH
