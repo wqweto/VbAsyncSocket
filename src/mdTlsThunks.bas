@@ -42,6 +42,7 @@ Private Const MODULE_NAME As String = "mdTlsThunks"
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
 #Const ImplCaptureTraffic = False
 #Const ImplTls10Support = False
+#Const ImplExoticCiphers = False
 
 '=========================================================================
 ' API
@@ -247,20 +248,22 @@ Private Const TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256  As Long = &HC02F&
 Private Const TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384  As Long = &HC030&
 Private Const TLS_CS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 As Long = &HCCA8&
 Private Const TLS_CS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 As Long = &HCCA9&
-Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA     As Long = &HC009&
-Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA     As Long = &HC00A&
+Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA   As Long = &HC009&
+Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA   As Long = &HC00A&
 Private Const TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA     As Long = &HC013&
 Private Const TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA     As Long = &HC014&
-Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256 As Long = &HC023&
-Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384 As Long = &HC024&
-Private Const TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA256  As Long = &HC027&
-Private Const TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA384  As Long = &HC028&
 Private Const TLS_CS_RSA_WITH_AES_128_CBC_SHA           As Long = &H2F
 Private Const TLS_CS_RSA_WITH_AES_256_CBC_SHA           As Long = &H35
-Private Const TLS_CS_RSA_WITH_AES_128_CBC_SHA256        As Long = &H3C
-Private Const TLS_CS_RSA_WITH_AES_256_CBC_SHA256        As Long = &H3D
 Private Const TLS_CS_RSA_WITH_AES_128_GCM_SHA256        As Long = &H9C
 Private Const TLS_CS_RSA_WITH_AES_256_GCM_SHA384        As Long = &H9D
+#If ImplExoticCiphers Then
+    Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256 As Long = &HC023&
+    Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384 As Long = &HC024&
+    Private Const TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA256  As Long = &HC027&
+    Private Const TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA384  As Long = &HC028&
+    Private Const TLS_CS_RSA_WITH_AES_128_CBC_SHA256        As Long = &H3C
+    Private Const TLS_CS_RSA_WITH_AES_256_CBC_SHA256        As Long = &H3D
+#End If
 Private Const TLS_GROUP_SECP256R1                       As Long = 23
 Private Const TLS_GROUP_SECP384R1                       As Long = 24
 Private Const TLS_GROUP_SECP521R1                       As Long = 25
@@ -950,7 +953,7 @@ Private Function pvTlsBuildClientHello(uCtx As UcsTlsContext, baOutput() As Byte
                 lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
                 '--- Cipher Suites
                 lPos = pvWriteBeginOfBlock(baOutput, lPos, .BlocksStack, Size:=2)
-                    For Each vElem In pvTlsGetOrderedCipherSuites(.LocalFeatures)
+                    For Each vElem In pvTlsGetSortedCipherSuites(.LocalFeatures)
                         lPos = pvWriteLong(baOutput, lPos, vElem, Size:=2)
                     Next
                 lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
@@ -2156,7 +2159,7 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
         lPos = pvReadLong(baInput, lPos, lCipherSuite, Size:=2)
         pvTlsSetupCipherSuite uCtx, lCipherSuite
         #If ImplUseDebugLog Then
-            DebugLog MODULE_NAME, FUNC_NAME, "Using " & pvTlsGetCipherSuiteName(.CipherSuite) & " w/ " & pvTlsGetExchGroupName(.ExchGroup) & " from " & .RemoteHostName
+            DebugLog MODULE_NAME, FUNC_NAME, "Using " & pvTlsGetCipherSuiteName(.CipherSuite) & " and " & pvTlsGetExchGroupName(.ExchGroup) & " from " & .RemoteHostName
         #End If
         If .HelloRetryRequest Then
             .HelloRetryCipherSuite = lCipherSuite
@@ -2178,9 +2181,7 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
                         Case TLS_EXTENSION_TYPE_KEY_SHARE
                             .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13
                             If lExtSize < 2 Then
-                                sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionType(lExtType))
-                                eAlertCode = uscTlsAlertDecodeError
-                                GoTo QH
+                                GoTo InvalidSize
                             End If
                             lPos = pvReadLong(baInput, lPos, lExchGroup, Size:=2)
                             pvTlsSetupExchEccGroup uCtx, lExchGroup
@@ -2198,9 +2199,7 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
                             End If
                         Case TLS_EXTENSION_TYPE_SUPPORTED_VERSIONS
                             If lExtSize <> 2 Then
-                                sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionType(lExtType))
-                                eAlertCode = uscTlsAlertDecodeError
-                                GoTo QH
+                                GoTo InvalidSize
                             End If
                             lPos = pvReadLong(baInput, lPos, .ProtocolVersion, Size:=2)
                         Case TLS_EXTENSION_TYPE_COOKIE
@@ -2233,6 +2232,10 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
     pvTlsParseHandshakeServerHello = True
 QH:
     Exit Function
+InvalidSize:
+    sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionType(lExtType))
+    eAlertCode = uscTlsAlertDecodeError
+    GoTo QH
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
     eAlertCode = uscTlsAlertInternalError
@@ -2268,7 +2271,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
     
     On Error GoTo EH
     Set cCipherPrefs = New Collection
-    For Each vElem In pvTlsGetOrderedCipherSuites(ucsTlsSupportTls13)
+    For Each vElem In pvTlsGetSortedCipherSuites(ucsTlsSupportTls13)
         cCipherPrefs.Add cCipherPrefs.Count, "#" & vElem
     Next
     lCipherPref = 1000
@@ -2312,9 +2315,6 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
             GoTo QH
         End If
         pvTlsSetupCipherSuite uCtx, lCipherSuite
-        #If ImplUseDebugLog Then
-            DebugLog MODULE_NAME, FUNC_NAME, "Using " & pvTlsGetCipherSuiteName(.CipherSuite) & " from " & .RemoteHostName
-        #End If
         lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack)
             lPos = pvReadLong(baInput, lPos, lLegacyCompress)
         lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
@@ -2371,9 +2371,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                         Case TLS_EXTENSION_TYPE_KEY_SHARE
                             .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13
                             If lExtSize < 2 Then
-                                sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionType(lExtType))
-                                eAlertCode = uscTlsAlertDecodeError
-                                GoTo QH
+                                GoTo InvalidSize
                             End If
                             lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lBlockSize)
                                 lBlockEnd = lPos + lBlockSize
@@ -2419,15 +2417,11 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                             lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
                         Case TLS_EXTENSION_TYPE_SIGNATURE_ALGORITHMS
                             If lExtSize < 2 Then
-                                sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionType(lExtType))
-                                eAlertCode = uscTlsAlertDecodeError
-                                GoTo QH
+                                GoTo InvalidSize
                             End If
                             lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lBlockSize)
                                 If lPos + lBlockSize <> lExtEnd Or lBlockSize = 0 Then
-                                    sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionType(lExtType))
-                                    eAlertCode = uscTlsAlertDecodeError
-                                    GoTo QH
+                                    GoTo InvalidSize
                                 End If
                                 Do While lPos < lExtEnd
                                     lPos = pvReadLong(baInput, lPos, lSignatureType, Size:=2)
@@ -2444,15 +2438,11 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                             lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
                         Case TLS_EXTENSION_TYPE_SUPPORTED_GROUPS
                             If lExtSize < 2 Then
-                                sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionType(lExtType))
-                                eAlertCode = uscTlsAlertDecodeError
-                                GoTo QH
+                                GoTo InvalidSize
                             End If
                             lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lBlockSize)
                                 If lPos + lBlockSize <> lExtEnd Or lBlockSize = 0 Then
-                                    sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionType(lExtType))
-                                    eAlertCode = uscTlsAlertDecodeError
-                                    GoTo QH
+                                    GoTo InvalidSize
                                 End If
                                 Set .RemoteSupportedGroups = New Collection
                                 Do While lPos < lExtEnd
@@ -2492,11 +2482,18 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                 Loop
             lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
         End If
+        #If ImplUseDebugLog Then
+            DebugLog MODULE_NAME, FUNC_NAME, "Using " & pvTlsGetCipherSuiteName(.CipherSuite) & " and " & pvTlsGetExchGroupName(.ExchGroup) & " from " & .RemoteHostName
+        #End If
     End With
     '--- success
     pvTlsParseHandshakeClientHello = True
 QH:
     Exit Function
+InvalidSize:
+    sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionType(lExtType))
+    eAlertCode = uscTlsAlertDecodeError
+    GoTo QH
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
     eAlertCode = uscTlsAlertInternalError
@@ -2720,7 +2717,14 @@ Private Sub pvTlsSetupCipherSuite(uCtx As UcsTlsContext, ByVal lCipherSuite As L
             Case TLS_CS_AES_256_GCM_SHA384, TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, TLS_CS_RSA_WITH_AES_256_GCM_SHA384
                 .DigestAlgo = ucsTlsAlgoDigestSha384
                 .DigestSize = TLS_SHA384_DIGEST_SIZE
-            Case TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, TLS_CS_RSA_WITH_AES_128_CBC_SHA256, TLS_CS_RSA_WITH_AES_256_CBC_SHA256
+            Case TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA, TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA, _
+                    TLS_CS_RSA_WITH_AES_128_CBC_SHA, TLS_CS_RSA_WITH_AES_256_CBC_SHA
+                .DigestAlgo = ucsTlsAlgoDigestSha256
+                .DigestSize = TLS_SHA256_DIGEST_SIZE
+                .MacAlgo = ucsTlsAlgoDigestSha1
+                .MacSize = TLS_SHA1_DIGEST_SIZE
+#If ImplExoticCiphers Then
+            Case TLS_CS_RSA_WITH_AES_128_CBC_SHA256, TLS_CS_RSA_WITH_AES_256_CBC_SHA256, TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA256
                 .DigestAlgo = ucsTlsAlgoDigestSha256
                 .DigestSize = TLS_SHA256_DIGEST_SIZE
                 .MacAlgo = ucsTlsAlgoDigestSha256
@@ -2730,12 +2734,7 @@ Private Sub pvTlsSetupCipherSuite(uCtx As UcsTlsContext, ByVal lCipherSuite As L
                 .DigestSize = TLS_SHA384_DIGEST_SIZE
                 .MacAlgo = ucsTlsAlgoDigestSha384
                 .MacSize = TLS_SHA384_DIGEST_SIZE
-            Case TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA, TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA, _
-                    TLS_CS_RSA_WITH_AES_128_CBC_SHA, TLS_CS_RSA_WITH_AES_256_CBC_SHA
-                .DigestAlgo = ucsTlsAlgoDigestSha256
-                .DigestSize = TLS_SHA256_DIGEST_SIZE
-                .MacAlgo = ucsTlsAlgoDigestSha1
-                .MacSize = TLS_SHA1_DIGEST_SIZE
+#End If
             End Select
             Select Case lCipherSuite
             Case TLS_CS_CHACHA20_POLY1305_SHA256, TLS_CS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256, TLS_CS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
@@ -2759,24 +2758,37 @@ Private Sub pvTlsSetupCipherSuite(uCtx As UcsTlsContext, ByVal lCipherSuite As L
                     .IvExplicitSize = 8
                 End If
                 .TagSize = TLS_AESGCM_TAG_SIZE
-            Case TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA, _
-                    TLS_CS_RSA_WITH_AES_128_CBC_SHA256, TLS_CS_RSA_WITH_AES_128_CBC_SHA
+            Case TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA, TLS_CS_RSA_WITH_AES_128_CBC_SHA
                 .BulkAlgo = ucsTlsAlgoBulkAesCbc128
                 .KeySize = TLS_AES128_KEY_SIZE
                 .IvSize = TLS_AESCBC_IV_SIZE
                 .IvExplicitSize = .IvSize
-            Case TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384, TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA384, TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA, _
-                    TLS_CS_RSA_WITH_AES_256_CBC_SHA256, TLS_CS_RSA_WITH_AES_256_CBC_SHA
+            Case TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA, TLS_CS_RSA_WITH_AES_256_CBC_SHA
                 .BulkAlgo = ucsTlsAlgoBulkAesCbc256
                 .KeySize = TLS_AES256_KEY_SIZE
                 .IvSize = TLS_AESCBC_IV_SIZE
                 .IvExplicitSize = .IvSize
+#If ImplExoticCiphers Then
+            Case TLS_CS_RSA_WITH_AES_128_CBC_SHA256, TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA256
+                .BulkAlgo = ucsTlsAlgoBulkAesCbc128
+                .KeySize = TLS_AES128_KEY_SIZE
+                .IvSize = TLS_AESCBC_IV_SIZE
+                .IvExplicitSize = .IvSize
+            Case TLS_CS_RSA_WITH_AES_256_CBC_SHA256, TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384, TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA384
+                .BulkAlgo = ucsTlsAlgoBulkAesCbc256
+                .KeySize = TLS_AES256_KEY_SIZE
+                .IvSize = TLS_AESCBC_IV_SIZE
+                .IvExplicitSize = .IvSize
+#End If
             End Select
             Select Case lCipherSuite
             Case TLS_CS_RSA_WITH_AES_128_CBC_SHA, TLS_CS_RSA_WITH_AES_256_CBC_SHA, _
-                    TLS_CS_RSA_WITH_AES_128_CBC_SHA256, TLS_CS_RSA_WITH_AES_256_CBC_SHA256, _
                     TLS_CS_RSA_WITH_AES_128_GCM_SHA256, TLS_CS_RSA_WITH_AES_256_GCM_SHA384
                 .UseRsaKeyTransport = True
+#If ImplExoticCiphers Then
+            Case TLS_CS_RSA_WITH_AES_128_CBC_SHA256, TLS_CS_RSA_WITH_AES_256_CBC_SHA256
+                .UseRsaKeyTransport = True
+#End If
             End Select
             If .BulkAlgo = 0 Or .DigestAlgo = 0 Then
                 Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_CIPHER_SUITE, "%1", "0x" & Hex$(.CipherSuite))
@@ -2785,7 +2797,7 @@ Private Sub pvTlsSetupCipherSuite(uCtx As UcsTlsContext, ByVal lCipherSuite As L
     End With
 End Sub
 
-Private Function pvTlsGetOrderedCipherSuites(ByVal eFilter As UcsTlsLocalFeaturesEnum) As Collection
+Private Function pvTlsGetSortedCipherSuites(ByVal eFilter As UcsTlsLocalFeaturesEnum) As Collection
     Const PREF      As Long = &H1000
     Dim oRetVal     As Collection
     
@@ -2833,6 +2845,7 @@ Private Function pvTlsGetOrderedCipherSuites(ByVal eFilter As UcsTlsLocalFeature
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
         End If
         '--- legacy AES in CBC mode
+#If ImplExoticCiphers Then
         If pvCryptoIsSupported(ucsTlsAlgoBulkAesCbc128) Then
             oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA256
@@ -2841,12 +2854,17 @@ Private Function pvTlsGetOrderedCipherSuites(ByVal eFilter As UcsTlsLocalFeature
             oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA384
         End If
+#End If
         If pvCryptoIsSupported(ucsTlsAlgoBulkAesCbc128) Then
             oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA
+        End If
+        If pvCryptoIsSupported(ucsTlsAlgoBulkAesCbc128) Then
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA
         End If
         If pvCryptoIsSupported(ucsTlsAlgoBulkAesCbc256) Then
             oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA
+        End If
+        If pvCryptoIsSupported(ucsTlsAlgoBulkAesCbc256) Then
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA
         End If
         '--- no perfect forward secrecy -> least preferred
@@ -2856,12 +2874,14 @@ Private Function pvTlsGetOrderedCipherSuites(ByVal eFilter As UcsTlsLocalFeature
         If pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
             oRetVal.Add TLS_CS_RSA_WITH_AES_256_GCM_SHA384
         End If
+#If ImplExoticCiphers Then
         If pvCryptoIsSupported(ucsTlsAlgoBulkAesCbc128) Then
             oRetVal.Add TLS_CS_RSA_WITH_AES_128_CBC_SHA256
         End If
         If pvCryptoIsSupported(ucsTlsAlgoBulkAesCbc256) Then
             oRetVal.Add TLS_CS_RSA_WITH_AES_256_CBC_SHA256
         End If
+#End If
         If pvCryptoIsSupported(ucsTlsAlgoBulkAesCbc128) Then
             oRetVal.Add TLS_CS_RSA_WITH_AES_128_CBC_SHA
         End If
@@ -2869,7 +2889,7 @@ Private Function pvTlsGetOrderedCipherSuites(ByVal eFilter As UcsTlsLocalFeature
             oRetVal.Add TLS_CS_RSA_WITH_AES_256_CBC_SHA
         End If
     End If
-    Set pvTlsGetOrderedCipherSuites = oRetVal
+    Set pvTlsGetSortedCipherSuites = oRetVal
 End Function
 
 Private Sub pvTlsSetLastError( _
@@ -3301,14 +3321,6 @@ Private Function pvTlsGetCipherSuiteName(ByVal lCipherSuite As Long) As String
         pvTlsGetCipherSuiteName = "ECDHE-RSA-CHACHA20-POLY1305"
     Case TLS_CS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
         pvTlsGetCipherSuiteName = "ECDHE-ECDSA-CHACHA20-POLY1305"
-    Case TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256
-        pvTlsGetCipherSuiteName = "ECDHE-ECDSA-AES128-SHA256"
-    Case TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384
-        pvTlsGetCipherSuiteName = "ECDHE-ECDSA-AES256-SHA384"
-    Case TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA256
-        pvTlsGetCipherSuiteName = "ECDHE-RSA-AES128-SHA256"
-    Case TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA384
-        pvTlsGetCipherSuiteName = "ECDHE-RSA-AES256-SHA384"
     Case TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA
         pvTlsGetCipherSuiteName = "ECDHE-ECDSA-AES128-SHA"
     Case TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA
@@ -3321,14 +3333,24 @@ Private Function pvTlsGetCipherSuiteName(ByVal lCipherSuite As Long) As String
         pvTlsGetCipherSuiteName = "AES128-GCM-SHA256"
     Case TLS_CS_RSA_WITH_AES_256_GCM_SHA384
         pvTlsGetCipherSuiteName = "AES256-GCM-SHA384"
-    Case TLS_CS_RSA_WITH_AES_128_CBC_SHA256
-        pvTlsGetCipherSuiteName = "AES128-SHA256"
-    Case TLS_CS_RSA_WITH_AES_256_CBC_SHA256
-        pvTlsGetCipherSuiteName = "AES256-SHA256"
     Case TLS_CS_RSA_WITH_AES_128_CBC_SHA
         pvTlsGetCipherSuiteName = "AES128-SHA"
     Case TLS_CS_RSA_WITH_AES_256_CBC_SHA
         pvTlsGetCipherSuiteName = "AES256-SHA"
+#If ImplExoticCiphers Then
+    Case TLS_CS_RSA_WITH_AES_128_CBC_SHA256
+        pvTlsGetCipherSuiteName = "AES128-SHA256"
+    Case TLS_CS_RSA_WITH_AES_256_CBC_SHA256
+        pvTlsGetCipherSuiteName = "AES256-SHA256"
+    Case TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256
+        pvTlsGetCipherSuiteName = "ECDHE-ECDSA-AES128-SHA256"
+    Case TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384
+        pvTlsGetCipherSuiteName = "ECDHE-ECDSA-AES256-SHA384"
+    Case TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA256
+        pvTlsGetCipherSuiteName = "ECDHE-RSA-AES128-SHA256"
+    Case TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA384
+        pvTlsGetCipherSuiteName = "ECDHE-RSA-AES256-SHA384"
+#End If
     Case Else
         pvTlsGetCipherSuiteName = Replace(STR_UNKNOWN, "%1", "0x" & Hex$(lCipherSuite))
     End Select
@@ -3455,10 +3477,7 @@ Private Function pvTlsSignatureVerify(baCert() As Byte, ByVal lSignatureType As 
     Select Case lSignatureType
     Case TLS_SIGNATURE_RSA_PKCS1_SHA256, TLS_SIGNATURE_RSA_PKCS1_SHA384, TLS_SIGNATURE_RSA_PKCS1_SHA512
         If Not pvCryptoRsaModExp(baSignature, uCertInfo.PubExp, uCertInfo.Modulus, baDecr) Then
-InvalidSignature:
-            sError = ERR_INVALID_SIGNATURE
-            eAlertCode = uscTlsAlertHandshakeFailure
-            GoTo QH
+            GoTo InvalidSignature
         End If
         If Not pvCryptoEmsaPkcs1Decode(baVerifyData, baDecr, lHashSize) Then
             GoTo InvalidSignature
@@ -3520,6 +3539,10 @@ QH:
         DebugLog MODULE_NAME, FUNC_NAME, IIf(pvTlsSignatureVerify, IIf(bSkip, "Skipping ", IIf(bDeprecated, "Deprecated ", "Valid ")), "Invalid ") & pvTlsSignatureTypeName(lSignatureType) & " signature" & IIf(bDeprecated, " (lCurveSize=" & lCurveSize & " from server's public key)", vbNullString)
     #End If
     Exit Function
+InvalidSignature:
+    sError = ERR_INVALID_SIGNATURE
+    eAlertCode = uscTlsAlertHandshakeFailure
+    GoTo QH
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
     eAlertCode = uscTlsAlertInternalError
