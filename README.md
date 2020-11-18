@@ -10,15 +10,47 @@ Additionally there is a source-compatible `cTlsSocket` class for transparent TLS
 
 1. Pure VB6 backend with ASM crypto thunks implementation for TLS 1.3 and (legacy) TLS 1.2 client-side and server-side (TLS 1.3 only) support with no dependency on external libraries (like openssl)
 
-2. Native client-side and server-side TLS support using OS provided SSPI library for all available protocol versions.
+2. Native client-side and server-side TLS support using OS provided SSPI/Schannel library for all available protocol versions.
 
-The VB6 with thunks backend optionally can leverage libsodium primitives for performance reasons (e.g. server-side implementations) although current thunks implementation auto-detects AES-NI and PCLMULQDQ instruction set availability on client machine and switches to [performance optimized implementation of AES](https://github.com/wqweto/VbAsyncSocket/blob/4b7f4d8bc650688e2b6ad5460c997ed1df26d2e0/lib/thunks/sshaes.c#L100-L240)[-GCM](https://github.com/wqweto/VbAsyncSocket/blob/4b7f4d8bc650688e2b6ad5460c997ed1df26d2e0/lib/thunks/gf128.c#L116-L165) which is even faster that OS native SSPI implementation of this cyphersuit.
+The VB6 with thunks backend optionally can leverage libsodium primitives for performance reasons (e.g. server-side implementations) although current thunks implementation auto-detects AES-NI and PCLMULQDQ instruction set availability on client machine and switches to [performance optimized implementation of AES](https://github.com/wqweto/VbAsyncSocket/blob/4b7f4d8bc650688e2b6ad5460c997ed1df26d2e0/lib/thunks/sshaes.c#L100-L240)[-GCM](https://github.com/wqweto/VbAsyncSocket/blob/4b7f4d8bc650688e2b6ad5460c997ed1df26d2e0/lib/thunks/gf128.c#L116-L165) which is even faster that OS native SSPI/Schannel implementation of this cipher suit.
 
 ### Usage
 
 Start by including `src\cAsyncSocket.cls` in your project to have a convenient wrapper of most WinSock API functions.
 
-Optionally you can add `src\cTlsSocket.cls` and `src\mdTlsThunks.bas` pair of source files to your project for TLS 1.3 secured connections using VB6 with thunks backend or add `src\cTlsSocket.cls` and `src\mdTlsNative.bas` pair of source files for an alternative backend using native OS provided SSPI library.
+Optionally you can add `src\cTlsSocket.cls` and `src\mdTlsThunks.bas` pair of source files to your project for TLS 1.3 secured connections using VB6 with thunks backend or add `src\cTlsSocket.cls` and `src\mdTlsNative.bas` pair of source files for an alternative backend using native OS provided SSPI/Schannel library.
+
+### Implemented Cipher Suites
+
+This list includes cipher suites as implemented in the ASM thunks backend while the native backend list depends on the OS version and SSPI/Schannel settings.
+
+Cipher Suite | Protocol Version | Notes
+--|--|--
+TLS_AES_128_GCM_SHA256|TLS 1.3|AEAD
+TLS_AES_256_GCM_SHA384|TLS 1.3|AEAD
+TLS_CHACHA20_POLY1305_SHA256|TLS 1.3|AEAD
+TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256|Legacy TLS 1.2|AEAD
+TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256|Legacy TLS 1.2|AEAD
+TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384|Legacy TLS 1.2|AEAD
+TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384|Legacy TLS 1.2|AEAD
+TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256|Legacy TLS 1.2|AEAD
+TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256|Legacy TLS 1.2|AEAD
+TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256|Legacy TLS 1.2|Exotic
+TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256|Legacy TLS 1.2|Exotic
+TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384|Legacy TLS 1.2|Exotic
+TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384|Legacy TLS 1.2|Exotic
+TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA|Legacy TLS 1.2|HMAC w/ SHA-1
+TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA|Legacy TLS 1.2|HMAC w/ SHA-1
+TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA|Legacy TLS 1.2|HMAC w/ SHA-1
+TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA|Legacy TLS 1.2|HMAC w/ SHA-1
+TLS_RSA_WITH_AES_128_GCM_SHA256|Legacy TLS 1.2|No FS
+TLS_RSA_WITH_AES_256_GCM_SHA384|Legacy TLS 1.2|No FS
+TLS_RSA_WITH_AES_128_CBC_SHA256|Legacy TLS 1.2|No FS, Exotic
+TLS_RSA_WITH_AES_256_CBC_SHA256|Legacy TLS 1.2|No FS, Exotic
+TLS_RSA_WITH_AES_128_CBC_SHA|Legacy TLS 1.2|No FS, HMAC w/ SHA-1
+TLS_RSA_WITH_AES_256_CBC_SHA|Legacy TLS 1.2|No FS, HMAC w/ SHA-1
+
+Note that "exotic" cipher suites are included behind a conditional compilation flag only (off by default).
 
 ### Sample SMTP with STARTTLS
 
@@ -56,4 +88,4 @@ Which produces debug output in `Immediate Window` similar to this:
  - [ ] Add wrappers for http and ftp protocols
  - [x] Add WinSock control replacement
  - [ ] Add more samples (incl. `vbcurl.exe` utility)
- - [ ] Refactor subclassing thunk to use msg queue not to re-enter IDE in debug mode
+ - [x] Refactor subclassing thunk to use msg queue not to re-enter IDE in debug mode
