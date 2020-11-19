@@ -1301,8 +1301,7 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
                 Exit Do
             End If
         Loop
-        bResult = TlsReceive(m_uCtx, baRecv, -1, m_baRecvBuffer, m_lRecvPos)
-        Call TlsSend(m_uCtx, baEmpty, 0, m_baSendBuffer, m_lSendPos)
+        bResult = TlsReceive(m_uCtx, baRecv, -1, m_baRecvBuffer, m_lRecvPos, m_baSendBuffer, m_lSendPos)
         Call pvOnSend
         If Not bResult Then
             Exit Do

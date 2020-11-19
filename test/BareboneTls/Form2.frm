@@ -95,8 +95,7 @@ Private Sub wscSocket_DataArrival(Index As Integer, ByVal bytesTotal As Long)
                 OnConnect Index
             End If
         Else
-            bError = Not TlsReceive(m_uCtx(Index), baRecv, -1, baPlainText, lSize)
-            Call TlsSend(m_uCtx(Index), baEmpty, 0, baOutput, lOutputPos)
+            bError = Not TlsReceive(m_uCtx(Index), baRecv, -1, baPlainText, lSize, baOutput, lOutputPos)
             If lOutputPos > 0 Then
                 wscSocket(Index).SendData baOutput
             End If

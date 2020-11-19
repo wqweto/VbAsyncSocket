@@ -392,8 +392,6 @@ Public Type UcsTlsContext
     '--- I/O buffers
     RecvBuffer()        As Byte
     RecvPos             As Long
-    SendBuffer()        As Byte
-    SendPos             As Long
 End Type
 
 Private Type UcsKeyInfo
@@ -753,7 +751,7 @@ EH:
     Resume QH
 End Function
 
-Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize As Long, baPlainText() As Byte, lPos As Long) As Boolean
+Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize As Long, baPlainText() As Byte, lPos As Long, baOutput() As Byte, lOutputPos As Long) As Boolean
     Const FUNC_NAME     As String = "TlsReceive"
     Dim hResult         As Long
     Dim lIdx            As Long
@@ -822,7 +820,7 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
             Case SEC_I_RENEGOTIATE
                 .State = ucsTlsStateHandshakeStart
                 '--- .RecvBuffer is populated already
-                If Not TlsHandshake(uCtx, baEmpty, 0, .SendBuffer, .SendPos) Then
+                If Not TlsHandshake(uCtx, baEmpty, 0, baOutput, lOutputPos) Then
                     GoTo QH
                 End If
                 Exit Do
@@ -860,16 +858,6 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
             GoTo QH
         End If
         pvTlsSetLastError uCtx
-        If lSize = 0 Then
-            '--- flush
-            If .SendPos > 0 Then
-                lOutputPos = pvWriteBuffer(baOutput, lOutputPos, VarPtr(.SendBuffer(0)), .SendPos)
-                .SendPos = 0
-            End If
-            '--- success
-            TlsSend = True
-            Exit Function
-        End If
         '--- figure out upper bound of total output and reserve space in baOutput
         lIdx = (lSize + .TlsSizes.cbMaximumMessage - 1) \ .TlsSizes.cbMaximumMessage
         pvWriteReserved baOutput, lOutputPos, .TlsSizes.cbHeader * lIdx + lSize + .TlsSizes.cbTrailer * lIdx

@@ -714,7 +714,7 @@ EH:
     Resume QH
 End Function
 
-Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize As Long, baPlainText() As Byte, lPos As Long) As Boolean
+Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize As Long, baPlainText() As Byte, lPos As Long, baOutput() As Byte, lOutputPos As Long) As Boolean
     Const FUNC_NAME     As String = "TlsReceive"
     
     On Error GoTo EH
@@ -748,6 +748,7 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
         pvTlsSetLastError uCtx
         '--- swap-in
         pvArraySwap .DecrBuffer, .DecrPos, baPlainText, lPos
+        pvArraySwap .SendBuffer, .SendPos, baOutput, lOutputPos
         If Not pvTlsParsePayload(uCtx, baInput, lSize, .LastError, .LastAlertCode) Then
             pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, .LastError, .LastAlertCode
             GoTo QH
@@ -757,6 +758,7 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
 QH:
         '--- swap-out
         pvArraySwap baPlainText, lPos, .DecrBuffer, .DecrPos
+        pvArraySwap baOutput, lOutputPos, .SendBuffer, .SendPos
     End With
     Exit Function
 EH:
@@ -772,20 +774,6 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
     With uCtx
         If lSize < 0 Then
             lSize = pvArraySize(baPlainText)
-        End If
-        If lSize = 0 Then
-            '--- flush
-            If .SendPos > 0 Then
-                If lOutputPos = 0 Then
-                    pvArraySwap .SendBuffer, .SendPos, baOutput, lOutputPos
-                Else
-                    lOutputPos = pvWriteBuffer(baOutput, lOutputPos, VarPtr(.SendBuffer(0)), .SendPos)
-                    .SendPos = 0
-                End If
-            End If
-            '--- success
-            TlsSend = True
-            Exit Function
         End If
         If .State = ucsTlsStateClosed Then
             pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_CONNECTION_CLOSED
@@ -3577,6 +3565,10 @@ Private Function pvTlsSignatureHashSize(ByVal lSignatureType As Long) As Long
     Const FUNC_NAME     As String = "pvTlsSignatureHashSize"
     
     Select Case pvTlsSignatureDigestAlgo(lSignatureType)
+    Case ucsTlsAlgoDigestMd5
+        pvTlsSignatureHashSize = 16
+    Case ucsTlsAlgoDigestSha1
+        pvTlsSignatureHashSize = 20
     Case ucsTlsAlgoDigestSha256
         pvTlsSignatureHashSize = 32
     Case ucsTlsAlgoDigestSha384
@@ -3584,7 +3576,7 @@ Private Function pvTlsSignatureHashSize(ByVal lSignatureType As Long) As Long
     Case ucsTlsAlgoDigestSha512
         pvTlsSignatureHashSize = 64
     Case Else
-        Err.Raise vbObjectError, FUNC_NAME, "Unsupported signature type " & lSignatureType
+        '--- do nothing
     End Select
 End Function
 
