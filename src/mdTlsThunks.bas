@@ -1752,7 +1752,9 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
     Dim lBlockEnd       As Long
     Dim lExtType        As Long
     Dim lExtSize        As Long
+    Dim lExtEnd         As Long
     Dim lStringSize     As Long
+    Dim lExchGroup      As Long
     
     On Error GoTo EH
     With uCtx
@@ -1808,6 +1810,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
 '                            DebugLog MODULE_NAME, FUNC_NAME, "EncryptedExtensions " & pvTlsGetExtensionType(lExtType)
                         #End If
                         lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lExtSize)
+                            lExtEnd = lPos + lExtSize
                             Select Case lExtType
                             Case TLS_EXTENSION_TYPE_ALPN
                                 lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2)
@@ -1815,6 +1818,17 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                                         lPos = pvReadString(baInput, lPos, .AlpnNegotiated, lStringSize)
                                     lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
                                 lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
+                            Case TLS_EXTENSION_TYPE_SUPPORTED_GROUPS
+                                If lExtSize < 2 Then
+                                    GoTo InvalidSize
+                                End If
+                                Set .RemoteSupportedGroups = New Collection
+                                Do While lPos < lExtEnd
+                                    lPos = pvReadLong(baInput, lPos, lExchGroup, Size:=2)
+                                    .RemoteSupportedGroups.Add lExchGroup, "#" & lExchGroup
+                                Loop
+                            Case Else
+                                lPos = lPos + lExtSize
                             End Select
                         lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
                     Loop
@@ -2103,6 +2117,10 @@ HelloRetryFailed:
 NoServerCertificate:
     sError = ERR_NO_SERVER_CERTIFICATE
     eAlertCode = uscTlsAlertCertificateUnknown
+    GoTo QH
+InvalidSize:
+    sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionType(lExtType))
+    eAlertCode = uscTlsAlertDecodeError
     GoTo QH
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
