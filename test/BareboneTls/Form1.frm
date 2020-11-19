@@ -110,7 +110,6 @@ End Sub
 
 Private Sub wscSocket_DataArrival(ByVal bytesTotal As Long)
     Dim bError              As Boolean
-    Dim baEmpty()           As Byte
     Dim baRecv()            As Byte
     Dim baOutput()          As Byte
     Dim lOutputPos          As Long
@@ -118,40 +117,40 @@ Private Sub wscSocket_DataArrival(ByVal bytesTotal As Long)
     Dim lSize               As Long
     
     On Error GoTo EH
-    baEmpty = vbNullString
-    Do While Not TlsIsClosed(m_uCtx)
-        wscSocket.GetData baRecv
-        If UBound(baRecv) < 0 Then
-            Exit Do
-        End If
+    If TlsIsClosed(m_uCtx) Or bytesTotal = 0 Then
+        Exit Sub
+    End If
+    wscSocket.GetData baRecv
+    If Not TlsIsReady(m_uCtx) Then
         lOutputPos = 0
-        If Not TlsIsReady(m_uCtx) Then
-            bError = Not TlsHandshake(m_uCtx, baRecv, -1, baOutput, lOutputPos)
-            If lOutputPos > 0 Then
-                wscSocket.SendData baOutput
-            End If
-            If bError Then
-                OnError TlsGetLastError(m_uCtx), "TlsHandshake"
-            End If
-            If TlsIsReady(m_uCtx) Then
-                OnConnect
-            End If
-        Else
-            bError = Not TlsReceive(m_uCtx, baRecv, -1, baPlainText, lSize, baOutput, lOutputPos)
-            If lOutputPos > 0 Then
-                wscSocket.SendData baOutput
-            End If
-            If bError Then
-                OnError TlsGetLastError(m_uCtx), "TlsReceive"
-            End If
-            If lSize > 0 Then
-                OnDataArrival lSize, baPlainText
-            End If
-            If TlsIsClosed(m_uCtx) Then
-                OnClose
-            End If
+        bError = Not TlsHandshake(m_uCtx, baRecv, -1, baOutput, lOutputPos)
+        If lOutputPos > 0 Then
+            wscSocket.SendData baOutput
         End If
-    Loop
+        If bError Then
+            OnError TlsGetLastError(m_uCtx), "TlsHandshake"
+        End If
+        If Not TlsIsReady(m_uCtx) Then
+            Exit Sub
+        End If
+        OnConnect
+        '--- fall-through w/ empty to flush app data in received handshake byte-array (if any)
+        baRecv = vbNullString
+    End If
+    lOutputPos = 0
+    bError = Not TlsReceive(m_uCtx, baRecv, -1, baPlainText, lSize, baOutput, lOutputPos)
+    If lOutputPos > 0 Then
+        wscSocket.SendData baOutput
+    End If
+    If lSize > 0 Then
+        OnDataArrival lSize, baPlainText
+    End If
+    If bError Then
+        OnError TlsGetLastError(m_uCtx), "TlsReceive"
+    End If
+    If TlsIsClosed(m_uCtx) Then
+        OnClose
+    End If
     Exit Sub
 EH:
     OnError Err.Description, "wscSocket_DataArrival"
