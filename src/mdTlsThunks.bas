@@ -198,7 +198,7 @@ Private Const TLS_HANDSHAKE_FINISHED                    As Long = 20
 Private Const TLS_HANDSHAKE_KEY_UPDATE                  As Long = 24
 'Private Const TLS_HANDSHAKE_COMPRESSED_CERTIFICATE      As Long = 25
 Private Const TLS_HANDSHAKE_MESSAGE_HASH                As Long = 254
-'--- TLS extensions from https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml
+'--- TLS Extensions from https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml
 Private Const TLS_EXTENSION_SERVER_NAME                 As Long = 0
 'Private Const TLS_EXTENSION_STATUS_REQUEST              As Long = 5
 Private Const TLS_EXTENSION_SUPPORTED_GROUPS            As Long = 10
@@ -249,7 +249,7 @@ Private Const TLS_GROUP_SECP384R1                       As Long = 24
 Private Const TLS_GROUP_SECP521R1                       As Long = 25
 Private Const TLS_GROUP_X25519                          As Long = 29
 Private Const TLS_GROUP_X448                            As Long = 30
-'--- TLS SignatureScheme from https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-signaturescheme
+'--- TLS Signature Scheme from https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-signaturescheme
 Private Const TLS_SIGNATURE_RSA_PKCS1_SHA1              As Long = &H201 '--- TLS 1.2
 Private Const TLS_SIGNATURE_RSA_PKCS1_SHA224            As Long = &H301
 Private Const TLS_SIGNATURE_RSA_PKCS1_SHA256            As Long = &H401
@@ -329,14 +329,12 @@ Private Const ERR_RECORD_TOO_BIG                        As String = "Record size
 Private Const ERR_FATAL_ALERT                           As String = "Received fatal alert"
 Private Const ERR_UNEXPECTED_RECORD_TYPE                As String = "Unexpected record type (%1)"
 Private Const ERR_UNEXPECTED_MSG_TYPE                   As String = "Unexpected message type for %1 state (%2)"
-Private Const ERR_UNEXPECTED_EXTENSION_TYPE             As String = "Unexpected extension type (%1)"
+Private Const ERR_UNEXPECTED_EXTENSION                  As String = "Unexpected extension (%1)"
 Private Const ERR_INVALID_STATE_HANDSHAKE               As String = "Invalid state for handshake content (%1)"
 Private Const ERR_INVALID_REMOTE_KEY                    As String = "Invalid remote key size"
-Private Const ERR_INVALID_SIZE_REMOTE_KEY               As String = "Invalid data size for remote key"
 Private Const ERR_INVALID_SIZE_EXTENSION                As String = "Invalid data size for %1"
 Private Const ERR_INVALID_SIGNATURE                     As String = "Invalid certificate signature"
 Private Const ERR_INVALID_HASH_SIZE                     As String = "Invalid hash size (%1)"
-Private Const ERR_COOKIE_NOT_ALLOWED                    As String = "Cookie not allowed outside HelloRetryRequest"
 Private Const ERR_NO_HANDSHAKE_MESSAGES                 As String = "Missing handshake messages"
 Private Const ERR_NO_PREVIOUS_SECRET                    As String = "Missing previous secret (%1)"
 Private Const ERR_NO_REMOTE_RANDOM                      As String = "Missing remote random"
@@ -2211,9 +2209,7 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
                                 .HelloRetryExchGroup = lExchGroup
                             Else
                                 If lExtSize <= 4 Then
-                                    sError = ERR_INVALID_SIZE_REMOTE_KEY
-                                    eAlertCode = uscTlsAlertDecodeError
-                                    GoTo QH
+                                    GoTo InvalidSize
                                 End If
                                 lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, Size:=2, BlockSize:=lPublicSize)
                                     lPos = pvReadArray(baInput, lPos, .RemoteExchPublic, lPublicSize)
@@ -2226,7 +2222,7 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
                             lPos = pvReadLong(baInput, lPos, .ProtocolVersion, Size:=2)
                         Case TLS_EXTENSION_COOKIE
                             If Not .HelloRetryRequest Then
-                                sError = ERR_COOKIE_NOT_ALLOWED
+                                sError = Replace(ERR_UNEXPECTED_EXTENSION, "%1", pvTlsGetExtensionName(lExtType))
                                 eAlertCode = uscTlsAlertIllegalParameter
                                 GoTo QH
                             End If
@@ -2490,7 +2486,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                         Case Else
                             If .HelloRetryRequest Then
                                 If Not SearchCollection(.RemoteExtensions, "#" & lExtType) Then
-                                    sError = Replace(ERR_UNEXPECTED_EXTENSION_TYPE, "%1", pvTlsGetExtensionName(lExtType))
+                                    sError = Replace(ERR_UNEXPECTED_EXTENSION, "%1", pvTlsGetExtensionName(lExtType))
                                     eAlertCode = uscTlsAlertIllegalParameter
                                     GoTo QH
                                 End If
@@ -3102,18 +3098,6 @@ Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext)
     End With
 End Sub
 
-Private Sub pvTlsGetHandshakeHash(uCtx As UcsTlsContext, baOutput() As Byte)
-    With uCtx
-        pvTlsArrayHash baOutput, .DigestAlgo, .HandshakeMessages
-    End With
-End Sub
-
-Private Sub pvTlsAppendHandshakeMessage(uCtx As UcsTlsContext, baInput() As Byte, ByVal lPos As Long, ByVal lSize As Long)
-    With uCtx
-        pvWriteBuffer .HandshakeMessages, pvArraySize(.HandshakeMessages), VarPtr(baInput(lPos)), lSize
-    End With
-End Sub
-
 Private Sub pvTlsKdfLegacyPrf(baRetVal() As Byte, ByVal eHash As UcsTlsCryptoAlgorithmsEnum, baSecret() As Byte, ByVal sLabel As String, baContext() As Byte, ByVal lSize As Long)
     Const FUNC_NAME     As String = "pvTlsKdfLegacyPHash"
     Dim baSeed()        As Byte
@@ -3139,6 +3123,18 @@ Private Sub pvTlsKdfLegacyPrf(baRetVal() As Byte, ByVal eHash As UcsTlsCryptoAlg
     If lRetValPos <> lSize Then
         pvArrayReallocate baRetVal, lSize, FUNC_NAME & ".baRetVal"
     End If
+End Sub
+
+Private Sub pvTlsGetHandshakeHash(uCtx As UcsTlsContext, baOutput() As Byte)
+    With uCtx
+        pvTlsArrayHash baOutput, .DigestAlgo, .HandshakeMessages
+    End With
+End Sub
+
+Private Sub pvTlsAppendHandshakeMessage(uCtx As UcsTlsContext, baInput() As Byte, ByVal lPos As Long, ByVal lSize As Long)
+    With uCtx
+        pvWriteBuffer .HandshakeMessages, pvArraySize(.HandshakeMessages), VarPtr(baInput(lPos)), lSize
+    End With
 End Sub
 
 '= crypto wrappers =======================================================
