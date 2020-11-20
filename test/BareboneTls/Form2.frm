@@ -92,8 +92,8 @@ Private Sub wscSocket_DataArrival(Index As Integer, ByVal bytesTotal As Long)
             Exit Sub
         End If
         OnConnect Index
-        '--- fall-through w/ empty to flush app data in received handshake byte-array (if any)
-        baRecv = vbNullString
+        '--- fall-through to flush application data after TLS handshake (if any)
+        Erase baRecv
     End If
     lOutputPos = 0
     bError = Not TlsReceive(m_uCtx(Index), baRecv, -1, baPlainText, lSize, baOutput, lOutputPos)

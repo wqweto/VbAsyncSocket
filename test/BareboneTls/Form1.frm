@@ -134,8 +134,8 @@ Private Sub wscSocket_DataArrival(ByVal bytesTotal As Long)
             Exit Sub
         End If
         OnConnect
-        '--- fall-through w/ empty to flush app data in received handshake byte-array (if any)
-        baRecv = vbNullString
+        '--- fall-through to flush application data after TLS handshake (if any)
+        Erase baRecv
     End If
     lOutputPos = 0
     bError = Not TlsReceive(m_uCtx, baRecv, -1, baPlainText, lSize, baOutput, lOutputPos)
@@ -212,9 +212,7 @@ Private Sub cmdConnect_Click()
     End If
     Connect vAddr(0), vPort(0)
     '--- construct initial http request based on host and path
-    If cobVerb.Text = "POST" Then
-        m_sRequest = String(20000, "a")
-    End If
+    m_sRequest = IIf(cobVerb.Text = "POST", String(20000, "a"), vbNullString)
     m_sRequest = cobVerb.Text & " /" & sPath & " HTTP/1.1" & vbCrLf & _
                "Connection: keep-alive" & vbCrLf & _
                "Content-Length: " & Len(m_sRequest) & vbCrLf & _
