@@ -251,6 +251,7 @@ Private Const TLS_GROUP_X25519                          As Long = 29
 Private Const TLS_GROUP_X448                            As Long = 30
 '--- TLS Signature Scheme from https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-signaturescheme
 Private Const TLS_SIGNATURE_RSA_PKCS1_SHA1              As Long = &H201 '--- TLS 1.2
+Private Const TLS_SIGNATURE_ECDSA_SHA1                  As Long = &H203
 Private Const TLS_SIGNATURE_RSA_PKCS1_SHA224            As Long = &H301
 Private Const TLS_SIGNATURE_RSA_PKCS1_SHA256            As Long = &H401
 Private Const TLS_SIGNATURE_RSA_PKCS1_SHA384            As Long = &H501
@@ -1042,8 +1043,14 @@ Private Function pvTlsBuildClientHello(uCtx As UcsTlsContext, baOutput() As Byte
                                 lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PKCS1_SHA256, Size:=2)
                                 lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PKCS1_SHA384, Size:=2)
                                 lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PKCS1_SHA512, Size:=2)
-                                If pvCryptoIsSupported(ucsTlsAlgoDigestSha1) Then
+                            End If
+                            '--- legacy SHA-1 based signatures
+                            If pvCryptoIsSupported(ucsTlsAlgoDigestSha1) Then
+                                If pvCryptoIsSupported(ucsTlsAlgoSignaturePkcs) Then
                                     lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PKCS1_SHA1, Size:=2)
+                                End If
+                                If pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1) Or pvCryptoIsSupported(ucsTlsAlgoExchSecp384r1) Then
+                                    lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_ECDSA_SHA1, Size:=2)
                                 End If
                             End If
                         lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
@@ -3342,6 +3349,8 @@ Private Function pvTlsSignatureName(ByVal lSignatureScheme As Long) As String
     Select Case lSignatureScheme
     Case TLS_SIGNATURE_RSA_PKCS1_SHA1
         pvTlsSignatureName = "RSA_PKCS1_SHA1"
+    Case TLS_SIGNATURE_ECDSA_SHA1
+        pvTlsSignatureName = "ECDSA_SHA1"
     Case TLS_SIGNATURE_RSA_PKCS1_SHA224
         pvTlsSignatureName = "RSA_PKCS1_SHA224"
     Case TLS_SIGNATURE_RSA_PKCS1_SHA256
@@ -3474,7 +3483,7 @@ Private Function pvTlsSignatureVerify(baCert() As Byte, ByVal lSignatureScheme A
         If Not pvCryptoEmsaPssDecode(baVerifyData, baDecr, uCertInfo.BitLen, lHashSize, lHashSize) Then
             GoTo InvalidSignature
         End If
-    Case TLS_SIGNATURE_ECDSA_SECP256R1_SHA256, TLS_SIGNATURE_ECDSA_SECP384R1_SHA384, TLS_SIGNATURE_ECDSA_SECP521R1_SHA512
+    Case TLS_SIGNATURE_ECDSA_SHA1, TLS_SIGNATURE_ECDSA_SECP256R1_SHA256, TLS_SIGNATURE_ECDSA_SECP384R1_SHA384, TLS_SIGNATURE_ECDSA_SECP521R1_SHA512
         If uCertInfo.AlgoObjId <> szOID_ECC_PUBLIC_KEY Then
             sError = Replace(ERR_UNSUPPORTED_PUBLIC_KEY, "%1", uCertInfo.AlgoObjId)
             eAlertCode = uscTlsAlertHandshakeFailure
