@@ -123,7 +123,7 @@ typedef struct {
 
 static int beginOfThunk(int i) { 
     int a[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }; 
-    int b[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 }; 
+    int b[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 };
     return a[b[i]];
 }
 
@@ -262,7 +262,9 @@ static int endOfThunk() { return 0; }
                                        const uint8_t *npub, const uint8_t *k, const size_t klen);
 #endif
 #if defined(IMPL_GMPRSA_THUNK) || defined(IMPL_SSHRSA_THUNK)
-    typedef void (*rsa_modexp_t)(uint32_t maxbytes, void *b, void *e, void *m, void *r);
+    typedef void (*rsa_modexp_t)(const uint32_t maxbytes, const uint8_t *base_in, const uint8_t *exp_in, const uint8_t *mod_in, uint8_t *ret_out);
+    typedef void (*rsa_crt_modexp_t)(const uint32_t maxbytes, const uint8_t *base_in, const uint8_t *exp_in, const uint8_t *mod_in, 
+                                     const uint8_t *p_in, const uint8_t *q_in, const uint8_t *iqmp_in, uint8_t *ret_out);
 #endif
 
 typedef struct _RSA_PUBLIC_KEY_XX
@@ -376,6 +378,7 @@ void __cdecl main()
 #endif
 #ifdef IMPL_SSHRSA_THUNK
     DECLARE_PFN(rsa_modexp_t, rsa_modexp);
+    DECLARE_PFN(rsa_crt_modexp_t, rsa_crt_modexp);
 #endif
 
 #ifdef IMPL_ECC256_THUNK
@@ -510,6 +513,7 @@ void __cdecl main()
 #endif
 #ifdef IMPL_SSHRSA_THUNK
     ((int *)hThunk)[idx++] = ((uint8_t *)rsa_modexp - (uint8_t *)beginOfThunk);
+    ((int *)hThunk)[idx++] = ((uint8_t *)rsa_crt_modexp - (uint8_t *)beginOfThunk);    
 #endif
 #ifdef IMPL_TINF_THUNK
     ((int *)hThunk)[idx++] = ((uint8_t *)tinf_uncompress - (uint8_t *)beginOfThunk);
