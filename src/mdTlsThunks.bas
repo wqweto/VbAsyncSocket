@@ -520,6 +520,9 @@ Private Type UcsKeyInfo
     BitLen              As Long
     Modulus()           As Byte
     PubExp()            As Byte
+    Prime1()            As Byte
+    Prime2()            As Byte
+    Coefficient()       As Byte
     PrivExp()           As Byte
 End Type
 
@@ -553,6 +556,7 @@ Private Enum UcsThunkPfnIndexEnum
     ucsPfnAesCbcEncrypt
     ucsPfnAesCbcDecrypt
     ucsPfnRsaModExp
+    ucsPfnRsaCrtModExp
     [_ucsPfnMax]
 End Enum
 
@@ -3406,8 +3410,8 @@ Private Sub pvTlsSignatureSign(baRetVal() As Byte, cPrivKey As Collection, ByVal
         If Not pvCryptoEmsaPkcs1Encode(baEnc, baVerifyData, uKeyInfo.BitLen, lHashSize) Then
             Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEmsaPkcs1Encode")
         End If
-        If Not pvCryptoRsaModExp(baEnc, uKeyInfo.PrivExp, uKeyInfo.Modulus, baRetVal) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoRsaModExp")
+        If Not pvCryptoRsaCrtModExp(baEnc, uKeyInfo.PrivExp, uKeyInfo.Modulus, uKeyInfo.Prime1, uKeyInfo.Prime2, uKeyInfo.Coefficient, baRetVal) Then
+            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoRsaCrtModExp")
         End If
     Case TLS_SIGNATURE_RSA_PSS_RSAE_SHA256, TLS_SIGNATURE_RSA_PSS_RSAE_SHA384, TLS_SIGNATURE_RSA_PSS_RSAE_SHA512, _
             TLS_SIGNATURE_RSA_PSS_PSS_SHA256, TLS_SIGNATURE_RSA_PSS_PSS_SHA384, TLS_SIGNATURE_RSA_PSS_PSS_SHA512
@@ -3415,8 +3419,8 @@ Private Sub pvTlsSignatureSign(baRetVal() As Byte, cPrivKey As Collection, ByVal
         If Not pvCryptoEmsaPssEncode(baEnc, baVerifyData, uKeyInfo.BitLen, lHashSize, lHashSize) Then
             Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEmsaPssEncode")
         End If
-        If Not pvCryptoRsaModExp(baEnc, uKeyInfo.PrivExp, uKeyInfo.Modulus, baRetVal) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoRsaModExp")
+        If Not pvCryptoRsaCrtModExp(baEnc, uKeyInfo.PrivExp, uKeyInfo.Modulus, uKeyInfo.Prime1, uKeyInfo.Prime2, uKeyInfo.Coefficient, baRetVal) Then
+            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoRsaCrtModExp")
         End If
     Case TLS_SIGNATURE_ECDSA_SECP256R1_SHA256
         Debug.Assert uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P256
@@ -4181,10 +4185,27 @@ DecodeRsa:
         Call CopyMemory(uRetVal.BitLen, uRetVal.KeyBlob(12), 4)
         lSize = (uRetVal.BitLen + 7) \ 8
         lHalfSize = (uRetVal.BitLen + 15) \ 16
+        '--- modulus (mod = p * q)
         pvArrayAllocate uRetVal.Modulus, lSize, FUNC_NAME & ".uRetVal.Modulus"
         Debug.Assert UBound(uRetVal.KeyBlob) - 20 >= UBound(uRetVal.Modulus)
         Call CopyMemory(uRetVal.Modulus(0), uRetVal.KeyBlob(20), UBound(uRetVal.Modulus) + 1)
         pvArrayReverse uRetVal.Modulus
+        '--- prime1 (p)
+        pvArrayAllocate uRetVal.Prime1, lHalfSize, FUNC_NAME & ".uRetVal.Prime1"
+        Debug.Assert UBound(uRetVal.KeyBlob) >= 20 + lSize + 0 * lHalfSize + UBound(uRetVal.Prime1)
+        Call CopyMemory(uRetVal.Prime1(0), uRetVal.KeyBlob(20 + lSize + 0 * lHalfSize), UBound(uRetVal.Prime1) + 1)
+        pvArrayReverse uRetVal.Prime1
+        '--- prime2 (q)
+        pvArrayAllocate uRetVal.Prime2, lHalfSize, FUNC_NAME & ".uRetVal.Prime2"
+        Debug.Assert UBound(uRetVal.KeyBlob) >= 20 + lSize + 1 * lHalfSize + UBound(uRetVal.Prime2)
+        Call CopyMemory(uRetVal.Prime2(0), uRetVal.KeyBlob(20 + lSize + 1 * lHalfSize), UBound(uRetVal.Prime2) + 1)
+        pvArrayReverse uRetVal.Prime2
+        '--- coefficient (iqmp)
+        pvArrayAllocate uRetVal.Coefficient, lHalfSize, FUNC_NAME & ".uRetVal.Coefficient"
+        Debug.Assert UBound(uRetVal.KeyBlob) >= 20 + lSize + 4 * lHalfSize + UBound(uRetVal.Coefficient)
+        Call CopyMemory(uRetVal.Coefficient(0), uRetVal.KeyBlob(20 + lSize + 4 * lHalfSize), UBound(uRetVal.Coefficient) + 1)
+        pvArrayReverse uRetVal.Coefficient
+        '--- privateExponent
         pvArrayAllocate uRetVal.PrivExp, lSize, FUNC_NAME & ".uRetVal.PrivExp"
         Debug.Assert UBound(uRetVal.KeyBlob) >= 20 + lSize + 5 * lHalfSize + UBound(uRetVal.PrivExp)
         Call CopyMemory(uRetVal.PrivExp(0), uRetVal.KeyBlob(20 + lSize + 5 * lHalfSize), UBound(uRetVal.PrivExp) + 1)
@@ -4467,6 +4488,7 @@ Private Function pvCryptoInit() As Boolean
             Call pvPatchTrampoline(AddressOf pvCallAesCbcEncrypt)
             Call pvPatchTrampoline(AddressOf pvCallAesCbcDecrypt)
             Call pvPatchTrampoline(AddressOf pvCallRsaModExp)
+            Call pvPatchTrampoline(AddressOf pvCallRsaCrtModExp)
             '--- init thunk's first 4 bytes -> global data in C/C++
             Call CopyMemory(ByVal .Thunk, VarPtr(.Glob(0)), 4)
             Call CopyMemory(.Glob(0), GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemAlloc"), 4)
@@ -5217,6 +5239,16 @@ Private Function pvCryptoRsaModExp(baBase() As Byte, baExp() As Byte, baModulus(
     pvCryptoRsaModExp = True
 End Function
 
+Private Function pvCryptoRsaCrtModExp(baBase() As Byte, baExp() As Byte, baModulus() As Byte, baPrime1() As Byte, baPrime2() As Byte, baCoefficient() As Byte, baRetVal() As Byte) As Boolean
+    Const FUNC_NAME     As String = "CryptoRsaCrtModExp"
+    
+    pvArrayAllocate baRetVal, UBound(baBase) + 1, FUNC_NAME & ".baRetVal"
+    Debug.Assert pvPatchTrampoline(AddressOf pvCallRsaCrtModExp)
+    Call pvCallRsaCrtModExp(m_uData.Pfn(ucsPfnRsaCrtModExp), UBound(baBase) + 1, baBase(0), baExp(0), baModulus(0), baPrime1(0), baPrime2(0), baCoefficient(0), baRetVal(0))
+    '--- success
+    pvCryptoRsaCrtModExp = True
+End Function
+
 '= private ===============================================================
 
 Private Function pvThunkAllocate(sText As String, Optional ByVal ThunkPtr As Long) As Long
@@ -5564,8 +5596,14 @@ Private Function pvCallAesCbcDecrypt( _
     ' static void cf_aescbc_decrypt(uint8_t *m, const uint8_t *c, const size_t clen,
     '                              const uint8_t *npub, const uint8_t *k, const size_t klen)
 End Function
-Private Function pvCallRsaModExp(ByVal Pfn As Long, ByVal lSize As Long, pBasePtr As Byte, pExpPtr As Byte, pModuloPtr As Byte, pResultPtr As Byte) As Long
-    ' void rsa_modexp(uint32_t maxbytes, const uint8_t *b, const uint8_t *e, const uint8_t *m, uint8_t *r)
+
+Private Function pvCallRsaModExp(ByVal Pfn As Long, ByVal lSize As Long, pBasePtr As Byte, pExpPtr As Byte, pModPtr As Byte, pRetPtr As Byte) As Long
+    ' static void rsa_modexp(const uint32_t maxbytes, const uint8_t *base_in, const uint8_t *exp_in, const uint8_t *mod_in, uint8_t *ret_out)
+End Function
+
+Private Function pvCallRsaCrtModExp(ByVal Pfn As Long, ByVal lSize As Long, pBasePtr As Byte, pExpPtr As Byte, pModPtr As Byte, pPPtr As Byte, pQPtr As Byte, pIqmpPtr As Byte, pRetPtr As Byte) As Long
+    ' static void rsa_crt_modexp(const uint32_t maxbytes, const uint8_t *base_in, const uint8_t *exp_in, const uint8_t *mod_in,
+    '                            const uint8_t *p_in, const uint8_t *q_in, const uint8_t *iqmp_in, uint8_t *ret_out)
 End Function
 
 Private Sub pvAppendBuffer(ByVal a01 As Long, ByVal a02 As Long, ByVal a03 As Long, ByVal a04 As Long, ByVal a05 As Long, ByVal a06 As Long, ByVal a07 As Long, ByVal a08 As Long, ByVal a09 As Long, ByVal a10 As Long, ByVal a11 As Long, ByVal a12 As Long, ByVal a13 As Long, ByVal a14 As Long, ByVal a15 As Long, ByVal a16 As Long, ByVal a17 As Long, ByVal a18 As Long, ByVal a19 As Long, ByVal a20 As Long, ByVal a21 As Long, ByVal a22 As Long, ByVal a23 As Long, ByVal a24 As Long, ByVal a25 As Long, ByVal a26 As Long, ByVal a27 As Long, ByVal a28 As Long, ByVal a29 As Long, ByVal a30 As Long, ByVal a31 As Long, ByVal a32 As Long)
