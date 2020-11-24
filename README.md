@@ -20,39 +20,7 @@ Start by including `src\cAsyncSocket.cls` in your project to have a convenient w
 
 Optionally you can add `src\cTlsSocket.cls` and `src\mdTlsThunks.bas` pair of source files to your project for TLS 1.3 secured connections using VB6 with thunks backend or add `src\cTlsSocket.cls` and `src\mdTlsNative.bas` pair of source files for an alternative backend using native OS provided SSPI/Schannel library.
 
-### Implemented Cipher Suites
-
-This list includes cipher suites as implemented in the ASM thunks backend while the native backend list depends on the OS version and SSPI/Schannel settings.
-
-Cipher Suite | Protocol Version | Notes
---|--|--
-TLS_AES_128_GCM_SHA256|TLS 1.3|AEAD
-TLS_AES_256_GCM_SHA384|TLS 1.3|AEAD
-TLS_CHACHA20_POLY1305_SHA256|TLS 1.3|AEAD
-TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256|Legacy TLS 1.2|AEAD
-TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256|Legacy TLS 1.2|AEAD
-TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384|Legacy TLS 1.2|AEAD
-TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384|Legacy TLS 1.2|AEAD
-TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256|Legacy TLS 1.2|AEAD
-TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256|Legacy TLS 1.2|AEAD
-TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256|Legacy TLS 1.2|Exotic
-TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256|Legacy TLS 1.2|Exotic
-TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384|Legacy TLS 1.2|Exotic
-TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384|Legacy TLS 1.2|Exotic
-TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA|Legacy TLS 1.2|HMAC w/ SHA-1
-TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA|Legacy TLS 1.2|HMAC w/ SHA-1
-TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA|Legacy TLS 1.2|HMAC w/ SHA-1
-TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA|Legacy TLS 1.2|HMAC w/ SHA-1
-TLS_RSA_WITH_AES_128_GCM_SHA256|Legacy TLS 1.2|No FS
-TLS_RSA_WITH_AES_256_GCM_SHA384|Legacy TLS 1.2|No FS
-TLS_RSA_WITH_AES_128_CBC_SHA256|Legacy TLS 1.2|No FS, Exotic
-TLS_RSA_WITH_AES_256_CBC_SHA256|Legacy TLS 1.2|No FS, Exotic
-TLS_RSA_WITH_AES_128_CBC_SHA|Legacy TLS 1.2|No FS, HMAC w/ SHA-1
-TLS_RSA_WITH_AES_256_CBC_SHA|Legacy TLS 1.2|No FS, HMAC w/ SHA-1
-
-Note that "exotic" cipher suites are included behind a conditional compilation flag only (off by default).
-
-### Sample SMTP with STARTTLS
+#### Sample SMTP with STARTTLS
 
 Here is a working sample with error checking omitted for brevity for accessing smtp.gmail.com over port 587.
 
@@ -80,6 +48,38 @@ Which produces debug output in `Immediate Window` similar to this:
     1428790.057 [INFO] Valid ECDSA_SECP256R1_SHA256 signature [mdTlsThunks.pvTlsSignatureVerify]
     TLS handshake complete: smtp.gmail.com
     221 2.0.0 closing connection c69sm2955334lfg.23 - gsmtp
+
+### Implemented Cipher Suites
+
+This list includes cipher suites as implemented in the ASM thunks backend while the native backend list depends on the OS version and SSPI/Schannel settings.
+
+Cipher Suite | First&nbsp;In | Selection String | Notes
+--|--|--|--
+TLS_AES_128_GCM_SHA256                          |TLS 1.3|EECDH+AESGCM|AEAD
+TLS_AES_256_GCM_SHA384                          |TLS 1.3|EECDH+AESGCM|AEAD
+TLS_CHACHA20_POLY1305_SHA256                    |TLS 1.3|EECDH+AESGCM|AEAD
+TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256         |TLS 1.2|EECDH+AESGCM|AEAD
+TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256           |TLS 1.2|EECDH+AESGCM|AEAD
+TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384         |TLS 1.2|EECDH+AESGCM|AEAD
+TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384           |TLS 1.2|EECDH+AESGCM|AEAD
+TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256   |TLS 1.2|EECDH+CHACHA20|AEAD
+TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256     |TLS 1.2|EECDH+CHACHA20|AEAD
+TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256         |TLS 1.2|EECDH+AES+SHA256|Exotic
+TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256           |TLS 1.2|EECDH+AES+SHA256|Exotic
+TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384         |TLS 1.2|EECDH+AES+SHA384|Exotic
+TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384           |TLS 1.2|EECDH+AES+SHA384|Exotic
+TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA            |TLSv1|EECDH+AES+SHA1|HMAC-SHA1
+TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA              |TLSv1|EECDH+AES+SHA1|HMAC-SHA1
+TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA            |TLSv1|EECDH+AES+SHA1|HMAC-SHA1
+TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA              |TLSv1|EECDH+AES+SHA1|HMAC-SHA1
+TLS_RSA_WITH_AES_128_GCM_SHA256                 |TLS 1.2|RSA+AESGCM|No FS
+TLS_RSA_WITH_AES_256_GCM_SHA384                 |TLS 1.2|RSA+AESGCM|No FS
+TLS_RSA_WITH_AES_128_CBC_SHA256                 |TLS 1.2|RSA+AES+SHA256|No FS, Exotic
+TLS_RSA_WITH_AES_256_CBC_SHA256                 |TLS 1.2|RSA+AES+SHA256|No FS, Exotic
+TLS_RSA_WITH_AES_128_CBC_SHA                    |SSLv3|RSA+AES+SHA1|No FS, HMAC-SHA1
+TLS_RSA_WITH_AES_256_CBC_SHA                    |SSLv3|RSA+AES+SHA1|No FS, HMAC-SHA1
+
+Note that "exotic" cipher suites are included behind a conditional compilation flag only (off by default).
 
 ### ToDo
 
