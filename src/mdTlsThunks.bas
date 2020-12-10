@@ -293,6 +293,7 @@ Private Const LNG_SHA384_HASHSZ                         As Long = 48
 Private Const LNG_SHA384_BLOCKSZ                        As Long = 128
 Private Const LNG_SHA384_CONTEXTSZ                      As Long = 200
 Private Const LNG_SHA512_HASHSZ                         As Long = 64
+Private Const LNG_SHA512_BLOCKSZ                        As Long = 128
 Private Const LNG_CHACHA20_KEYSZ                        As Long = 32
 Private Const LNG_CHACHA20POLY1305_IVSZ                 As Long = 12
 Private Const LNG_CHACHA20POLY1305_TAGSZ                As Long = 16
@@ -349,7 +350,7 @@ Private Const LNG_FACILITY_WIN32                        As Long = &H80070000
 
 Private m_baBuffer()                As Byte
 Private m_lBuffIdx                  As Long
-Private m_uData                     As UcsCryptoThunkData
+Private m_uData                     As UcsCryptoData
 Private m_baHelloRetryRandom()      As Byte
 Public g_oRequestSocket             As Object
 
@@ -397,9 +398,9 @@ Private Enum UcsTlsCryptoAlgorithmsEnum
     ucsTlsAlgoDigestSha256
     ucsTlsAlgoDigestSha384
     ucsTlsAlgoDigestSha512
-    '--- verify signature
-    ucsTlsAlgoSignaturePkcs = 31
-    ucsTlsAlgoSignaturePss
+    '--- padding
+    ucsTlsAlgoPaddingPkcs = 31
+    ucsTlsAlgoPaddingPss
 End Enum
 
 '--- TLS Alerts https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-6
@@ -560,19 +561,17 @@ Private Enum UcsThunkPfnIndexEnum
     [_ucsPfnMax]
 End Enum
 
-Private Type UcsCryptoThunkData
+Private Type UcsCryptoData
     Thunk               As Long
     Glob()              As Byte
     Pfn(1 To [_ucsPfnMax] - 1) As Long
-    Ecc256KeySize       As Long
-    Ecc384KeySize       As Long
 #If ImplUseLibSodium Then
     HashCtx(0 To LNG_LIBSODIUM_SHA512_CONTEXTSZ - 1) As Byte
 #Else
     HashCtx(0 To LNG_SHA384_CONTEXTSZ - 1) As Byte
 #End If
-    HashPad(0 To LNG_SHA384_BLOCKSZ - 1 + 1000) As Byte
-    HashFinal(0 To LNG_SHA384_HASHSZ - 1 + 1000) As Byte
+    HashPad(0 To LNG_SHA512_BLOCKSZ - 1) As Byte
+    HashFinal(0 To LNG_SHA512_HASHSZ - 1) As Byte
     hRandomProv         As Long
 End Type
 
@@ -1034,7 +1033,7 @@ Private Function pvTlsBuildClientHello(uCtx As UcsTlsContext, baOutput() As Byte
                             If pvCryptoIsSupported(ucsTlsAlgoExchSecp521r1) Then
                                 lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_ECDSA_SECP521R1_SHA512, Size:=2)
                             End If
-                            If pvCryptoIsSupported(ucsTlsAlgoSignaturePss) Then
+                            If pvCryptoIsSupported(ucsTlsAlgoPaddingPss) Then
                                 lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PSS_RSAE_SHA256, Size:=2)
                                 lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PSS_RSAE_SHA384, Size:=2)
                                 lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PSS_RSAE_SHA512, Size:=2)
@@ -1042,7 +1041,7 @@ Private Function pvTlsBuildClientHello(uCtx As UcsTlsContext, baOutput() As Byte
                                 lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PSS_PSS_SHA384, Size:=2)
                                 lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PSS_PSS_SHA512, Size:=2)
                             End If
-                            If pvCryptoIsSupported(ucsTlsAlgoSignaturePkcs) Then
+                            If pvCryptoIsSupported(ucsTlsAlgoPaddingPkcs) Then
                                 lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PKCS1_SHA224, Size:=2)
                                 lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PKCS1_SHA256, Size:=2)
                                 lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PKCS1_SHA384, Size:=2)
@@ -1050,7 +1049,7 @@ Private Function pvTlsBuildClientHello(uCtx As UcsTlsContext, baOutput() As Byte
                             End If
                             '--- legacy SHA-1 based signatures
                             If pvCryptoIsSupported(ucsTlsAlgoDigestSha1) Then
-                                If pvCryptoIsSupported(ucsTlsAlgoSignaturePkcs) Then
+                                If pvCryptoIsSupported(ucsTlsAlgoPaddingPkcs) Then
                                     lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PKCS1_SHA1, Size:=2)
                                 End If
                                 If pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1) Or pvCryptoIsSupported(ucsTlsAlgoExchSecp384r1) Then
@@ -1110,10 +1109,8 @@ Private Function pvTlsBuildClientLegacyKeyExchange(uCtx As UcsTlsContext, baOutp
     Dim baSignature()   As Byte
     Dim lIdx            As Long
     Dim baCert()        As Byte
-    Dim lLocalTrafficSeqNo As Long
     
     With uCtx
-        lLocalTrafficSeqNo = .LocalTrafficSeqNo
         '--- Record Header
         lPos = pvWriteBeginOfRecord(baOutput, lPos, TLS_CONTENT_TYPE_HANDSHAKE, uCtx)
             If .CertRequestSignatureScheme <> 0 Then
@@ -1912,6 +1909,9 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                         End If
                         lPos = pvReadLong(baInput, lPos, lNamedCurve, Size:=2)
                         pvTlsSetupExchEccGroup uCtx, lNamedCurve
+                        #If ImplUseDebugLog Then
+                            DebugLog MODULE_NAME, FUNC_NAME, "With exchange group " & pvTlsGetExchGroupName(.ExchGroup)
+                        #End If
                         lPos = pvReadBeginOfBlock(baInput, lPos, .BlocksStack, BlockSize:=lSignatureSize)
                             lPos = pvReadArray(baInput, lPos, .RemoteExchPublic, lSignatureSize)
                         lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
@@ -2190,7 +2190,7 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
         lPos = pvReadLong(baInput, lPos, lCipherSuite, Size:=2)
         pvTlsSetupCipherSuite uCtx, lCipherSuite
         #If ImplUseDebugLog Then
-            DebugLog MODULE_NAME, FUNC_NAME, "Using " & pvTlsGetCipherSuiteName(.CipherSuite) & " and " & pvTlsGetExchGroupName(.ExchGroup) & " from " & .RemoteHostName
+            DebugLog MODULE_NAME, FUNC_NAME, "Using " & pvTlsGetCipherSuiteName(.CipherSuite) & " from " & .RemoteHostName
         #End If
         If .HelloRetryRequest Then
             .HelloRetryCipherSuite = lCipherSuite
@@ -2216,6 +2216,9 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
                             End If
                             lPos = pvReadLong(baInput, lPos, lExchGroup, Size:=2)
                             pvTlsSetupExchEccGroup uCtx, lExchGroup
+                            #If ImplUseDebugLog Then
+                                DebugLog MODULE_NAME, FUNC_NAME, "With exchange group " & pvTlsGetExchGroupName(.ExchGroup)
+                            #End If
                             If .HelloRetryRequest Then
                                 .HelloRetryExchGroup = lExchGroup
                             Else
@@ -2437,6 +2440,9 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                                             End If
                                             lPos = pvReadArray(baInput, lPos, .RemoteExchPublic, lBlockSize)
                                             pvTlsSetupExchEccGroup uCtx, lExchGroup
+                                            #If ImplUseDebugLog Then
+                                                DebugLog MODULE_NAME, FUNC_NAME, "With exchange group " & pvTlsGetExchGroupName(.ExchGroup)
+                                            #End If
                                         End If
                                     lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
                                     If lExchGroup <> 0 Then
@@ -2636,13 +2642,13 @@ Private Function pvTlsMatchSignatureScheme(uCtx As UcsTlsContext, ByVal lSignatu
     Select Case lSignatureScheme
     Case TLS_SIGNATURE_RSA_PKCS1_SHA1
         If (uCtx.LocalFeatures And ucsTlsSupportTls12) <> 0 Then
-            If uKeyInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoSignaturePkcs) And pvCryptoIsSupported(ucsTlsAlgoDigestSha1) Then
+            If uKeyInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoPaddingPkcs) And pvCryptoIsSupported(ucsTlsAlgoDigestSha1) Then
                 pvTlsMatchSignatureScheme = True
             End If
         End If
     Case TLS_SIGNATURE_RSA_PKCS1_SHA224, TLS_SIGNATURE_RSA_PKCS1_SHA256, TLS_SIGNATURE_RSA_PKCS1_SHA384, TLS_SIGNATURE_RSA_PKCS1_SHA512
         If (uCtx.LocalFeatures And ucsTlsSupportTls12) <> 0 Then
-            If uKeyInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoSignaturePkcs) Then
+            If uKeyInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoPaddingPkcs) Then
                 pvTlsMatchSignatureScheme = True
             End If
         End If
@@ -2650,14 +2656,14 @@ Private Function pvTlsMatchSignatureScheme(uCtx As UcsTlsContext, ByVal lSignatu
         '--- PSS w/ SHA512 fails on short key lengths (min PSS size is 2 + lHashSize + lSaltSize w/ lSaltSize=lHashSize)
         lHashSize = pvTlsSignatureHashSize(lSignatureScheme)
         If (uKeyInfo.BitLen + 7) \ 8 > 2 + 2 * lHashSize Then
-            If uKeyInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoSignaturePss) Then
+            If uKeyInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoPaddingPss) Then
                 pvTlsMatchSignatureScheme = True
             End If
         End If
     Case TLS_SIGNATURE_RSA_PSS_PSS_SHA256, TLS_SIGNATURE_RSA_PSS_PSS_SHA384, TLS_SIGNATURE_RSA_PSS_PSS_SHA512
         lHashSize = pvTlsSignatureHashSize(lSignatureScheme)
         If (uKeyInfo.BitLen + 7) \ 8 > 2 + 2 * lHashSize Then
-            If uKeyInfo.AlgoObjId = szOID_RSA_SSA_PSS And pvCryptoIsSupported(ucsTlsAlgoSignaturePss) Then
+            If uKeyInfo.AlgoObjId = szOID_RSA_SSA_PSS And pvCryptoIsSupported(ucsTlsAlgoPaddingPss) Then
                 pvTlsMatchSignatureScheme = True
             End If
         End If
@@ -2857,7 +2863,7 @@ Private Function pvTlsGetSortedCipherSuites(ByVal eFilter As UcsTlsLocalFeatures
             oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
         End If
-        If pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm128) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
+        If pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm256) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
             oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
         End If
@@ -2870,7 +2876,7 @@ Private Function pvTlsGetSortedCipherSuites(ByVal eFilter As UcsTlsLocalFeatures
             oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
         End If
-        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm128) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
+        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm256) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
             oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
         End If
@@ -3226,7 +3232,7 @@ Private Function pvTlsBulkDecrypt(ByVal eBulk As UcsTlsCryptoAlgorithmsEnum, baR
             GoTo QH
         End If
     Case Else
-        Err.Raise vbObjectError, FUNC_NAME, "Unsupported AEAD type " & eBulk
+        Err.Raise vbObjectError, FUNC_NAME, "Unsupported bulk type " & eBulk
     End Select
     '--- success
     pvTlsBulkDecrypt = True
@@ -3250,7 +3256,7 @@ Private Sub pvTlsBulkEncrypt(ByVal eBulk As UcsTlsCryptoAlgorithmsEnum, baLocalI
             Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoAeadChacha20Poly1305Encrypt")
         End If
     Case Else
-        Err.Raise vbObjectError, FUNC_NAME, "Unsupported AEAD type " & eBulk
+        Err.Raise vbObjectError, FUNC_NAME, "Unsupported bulk type " & eBulk
     End Select
 End Sub
 
@@ -3273,7 +3279,7 @@ Private Sub pvTlsSharedSecret(baRetVal() As Byte, ByVal eKeyX As UcsTlsCryptoAlg
     Case ucsTlsAlgoExchCertificate
         baRetVal = baPriv
     Case Else
-        Err.Raise vbObjectError, FUNC_NAME, "Unsupported exchange curve " & eKeyX
+        Err.Raise vbObjectError, FUNC_NAME, "Unsupported exchange " & eKeyX
     End Select
 End Sub
 
@@ -4419,10 +4425,6 @@ Private Function pvAsn1EncodeEcdsaSignature(baRetVal() As Byte, baPlainSig() As 
     pvAsn1EncodeEcdsaSignature = True
 End Function
 
-'=========================================================================
-' Crypto
-'=========================================================================
-
 Private Function pvCryptoInit() As Boolean
     Const FUNC_NAME     As String = "CryptoInit"
     Dim lOffset         As Long
@@ -4453,8 +4455,6 @@ Private Function pvCryptoInit() As Boolean
             End If
         #End If
         If m_uData.Thunk = 0 Then
-            .Ecc256KeySize = 32
-            .Ecc384KeySize = 48
             '--- prepare thunk/context in executable memory
             pvGetThunkData baThunk
             .Thunk = VirtualAlloc(0, UBound(baThunk) + 1, MEM_COMMIT, PAGE_EXECUTE_READWRITE)
@@ -4520,9 +4520,9 @@ End Sub
 Private Function pvCryptoEccCurve25519MakeKey(baPrivate() As Byte, baPublic() As Byte) As Boolean
     Const FUNC_NAME     As String = "CryptoEccCurve25519MakeKey"
     
-    pvArrayAllocate baPrivate, m_uData.Ecc256KeySize, FUNC_NAME & ".baPrivate"
-    pvArrayAllocate baPublic, m_uData.Ecc256KeySize, FUNC_NAME & ".baPublic"
-    pvCryptoRandomBytes VarPtr(baPrivate(0)), m_uData.Ecc256KeySize
+    pvArrayAllocate baPrivate, LNG_X25519_KEYSZ, FUNC_NAME & ".baPrivate"
+    pvArrayAllocate baPublic, LNG_X25519_KEYSZ, FUNC_NAME & ".baPublic"
+    pvCryptoRandomBytes VarPtr(baPrivate(0)), LNG_X25519_KEYSZ
     '--- fix issues w/ specific privkeys
     baPrivate(0) = baPrivate(0) And 248
     baPrivate(UBound(baPrivate)) = (baPrivate(UBound(baPrivate)) And 127) Or 64
@@ -4539,9 +4539,9 @@ End Function
 Private Function pvCryptoEccCurve25519SharedSecret(baRetVal() As Byte, baPrivate() As Byte, baPublic() As Byte) As Boolean
     Const FUNC_NAME     As String = "CryptoEccCurve25519SharedSecret"
     
-    Debug.Assert UBound(baPrivate) >= m_uData.Ecc256KeySize - 1
-    Debug.Assert UBound(baPublic) >= m_uData.Ecc256KeySize - 1
-    pvArrayAllocate baRetVal, m_uData.Ecc256KeySize, FUNC_NAME & ".baRetVal"
+    Debug.Assert UBound(baPrivate) >= LNG_X25519_KEYSZ - 1
+    Debug.Assert UBound(baPublic) >= LNG_X25519_KEYSZ - 1
+    pvArrayAllocate baRetVal, LNG_X25519_KEYSZ, FUNC_NAME & ".baRetVal"
     #If ImplUseLibSodium Then
         Call crypto_scalarmult_curve25519(baRetVal(0), baPrivate(0), baPublic(0))
     #Else
@@ -4557,10 +4557,10 @@ Private Function pvCryptoEccSecp256r1MakeKey(baPrivate() As Byte, baPublic() As 
     Const MAX_RETRIES   As Long = 16
     Dim lIdx            As Long
     
-    pvArrayAllocate baPrivate, m_uData.Ecc256KeySize, FUNC_NAME & ".baPrivate"
-    pvArrayAllocate baPublic, 2 * m_uData.Ecc256KeySize + 1, FUNC_NAME & ".baPublic"
+    pvArrayAllocate baPrivate, LNG_SECP256R1_KEYSZ, FUNC_NAME & ".baPrivate"
+    pvArrayAllocate baPublic, 2 * LNG_SECP256R1_KEYSZ + 1, FUNC_NAME & ".baPublic"
     For lIdx = 1 To MAX_RETRIES
-        pvCryptoRandomBytes VarPtr(baPrivate(0)), m_uData.Ecc256KeySize
+        pvCryptoRandomBytes VarPtr(baPrivate(0)), LNG_SECP256R1_KEYSZ
         Debug.Assert pvPatchTrampoline(AddressOf pvCallSecpMakeKey)
         If pvCallSecpMakeKey(m_uData.Pfn(ucsPfnSecp256r1MakeKey), baPublic(0), baPrivate(0)) = 1 Then
             Exit For
@@ -4577,9 +4577,9 @@ End Function
 Private Function pvCryptoEccSecp256r1SharedSecret(baRetVal() As Byte, baPrivate() As Byte, baPublic() As Byte) As Boolean
     Const FUNC_NAME     As String = "CryptoEccSecp256r1SharedSecret"
     
-    Debug.Assert UBound(baPrivate) >= m_uData.Ecc256KeySize - 1
-    Debug.Assert UBound(baPublic) >= m_uData.Ecc256KeySize
-    pvArrayAllocate baRetVal, m_uData.Ecc256KeySize, FUNC_NAME & ".baRetVal"
+    Debug.Assert UBound(baPrivate) >= LNG_SECP256R1_KEYSZ - 1
+    Debug.Assert UBound(baPublic) >= LNG_SECP256R1_KEYSZ
+    pvArrayAllocate baRetVal, LNG_SECP256R1_KEYSZ, FUNC_NAME & ".baRetVal"
     Debug.Assert pvPatchTrampoline(AddressOf pvCallSecpSharedSecret)
     If pvCallSecpSharedSecret(m_uData.Pfn(ucsPfnSecp256r1SharedSecret), baPublic(0), baPrivate(0), baRetVal(0)) = 0 Then
         GoTo QH
@@ -4593,7 +4593,7 @@ End Function
 Public Function pvCryptoEccSecp256r1UncompressKey(baRetVal() As Byte, baPublic() As Byte) As Boolean
     Const FUNC_NAME     As String = "CryptoEccSecp256r1UncompressKey"
 
-    pvArrayAllocate baRetVal, 1 + 2 * m_uData.Ecc256KeySize, FUNC_NAME & ".baRetVal"
+    pvArrayAllocate baRetVal, 1 + 2 * LNG_SECP256R1_KEYSZ, FUNC_NAME & ".baRetVal"
     Debug.Assert pvPatchTrampoline(AddressOf pvCallSecpUncompressKey)
     If pvCallSecpUncompressKey(m_uData.Pfn(ucsPfnSecp256r1UncompressKey), baPublic(0), baRetVal(0)) = 0 Then
         GoTo QH
@@ -4610,10 +4610,10 @@ Private Function pvCryptoEccSecp256r1Sign(baRetVal() As Byte, baPrivKey() As Byt
     Dim baRandom()      As Byte
     Dim lIdx            As Long
     
-    pvArrayAllocate baRandom, m_uData.Ecc256KeySize, FUNC_NAME & ".baRandom"
-    pvArrayAllocate baRetVal, 2 * m_uData.Ecc256KeySize, FUNC_NAME & ".baRetVal"
+    pvArrayAllocate baRandom, LNG_SECP256R1_KEYSZ, FUNC_NAME & ".baRandom"
+    pvArrayAllocate baRetVal, 2 * LNG_SECP256R1_KEYSZ, FUNC_NAME & ".baRetVal"
     For lIdx = 1 To MAX_RETRIES
-        pvCryptoRandomBytes VarPtr(baRandom(0)), m_uData.Ecc256KeySize
+        pvCryptoRandomBytes VarPtr(baRandom(0)), LNG_SECP256R1_KEYSZ
         Debug.Assert pvPatchTrampoline(AddressOf pvCallSecpSign)
         If pvCallSecpSign(m_uData.Pfn(ucsPfnSecp256r1Sign), baPrivKey(0), baHash(0), baRandom(0), baRetVal(0)) <> 0 Then
             Exit For
@@ -4636,11 +4636,11 @@ Private Function pvCryptoEccSecp384r1MakeKey(baPrivate() As Byte, baPublic() As 
     Const FUNC_NAME     As String = "CryptoEccSecp384r1MakeKey"
     Const MAX_RETRIES   As Long = 16
     Dim lIdx            As Long
-        
-    pvArrayAllocate baPrivate, m_uData.Ecc384KeySize, FUNC_NAME & ".baPrivate"
-    pvArrayAllocate baPublic, 2 * m_uData.Ecc384KeySize + 1, FUNC_NAME & ".baPublic"
+    
+    pvArrayAllocate baPrivate, LNG_SECP384R1_KEYSZ, FUNC_NAME & ".baPrivate"
+    pvArrayAllocate baPublic, 2 * LNG_SECP384R1_KEYSZ + 1, FUNC_NAME & ".baPublic"
     For lIdx = 1 To MAX_RETRIES
-        pvCryptoRandomBytes VarPtr(baPrivate(0)), m_uData.Ecc384KeySize
+        pvCryptoRandomBytes VarPtr(baPrivate(0)), LNG_SECP384R1_KEYSZ
         Debug.Assert pvPatchTrampoline(AddressOf pvCallSecpMakeKey)
         If pvCallSecpMakeKey(m_uData.Pfn(ucsPfnSecp384r1MakeKey), baPublic(0), baPrivate(0)) = 1 Then
             Exit For
@@ -4657,9 +4657,9 @@ End Function
 Private Function pvCryptoEccSecp384r1SharedSecret(baRetVal() As Byte, baPrivate() As Byte, baPublic() As Byte) As Boolean
     Const FUNC_NAME     As String = "CryptoEccSecp384r1SharedSecret"
     
-    Debug.Assert UBound(baPrivate) >= m_uData.Ecc384KeySize - 1
-    Debug.Assert UBound(baPublic) >= m_uData.Ecc384KeySize
-    pvArrayAllocate baRetVal, m_uData.Ecc384KeySize, FUNC_NAME & ".baRetVal"
+    Debug.Assert UBound(baPrivate) >= LNG_SECP384R1_KEYSZ - 1
+    Debug.Assert UBound(baPublic) >= LNG_SECP384R1_KEYSZ
+    pvArrayAllocate baRetVal, LNG_SECP384R1_KEYSZ, FUNC_NAME & ".baRetVal"
     Debug.Assert pvPatchTrampoline(AddressOf pvCallSecpSharedSecret)
     If pvCallSecpSharedSecret(m_uData.Pfn(ucsPfnSecp384r1SharedSecret), baPublic(0), baPrivate(0), baRetVal(0)) = 0 Then
         GoTo QH
@@ -4673,7 +4673,7 @@ End Function
 Public Function pvCryptoEccSecp384r1UncompressKey(baRetVal() As Byte, baPublic() As Byte) As Boolean
     Const FUNC_NAME     As String = "CryptoEccSecp384r1UncompressKey"
 
-    pvArrayAllocate baRetVal, 1 + 2 * m_uData.Ecc384KeySize, FUNC_NAME & ".baRetVal"
+    pvArrayAllocate baRetVal, 1 + 2 * LNG_SECP384R1_KEYSZ, FUNC_NAME & ".baRetVal"
     Debug.Assert pvPatchTrampoline(AddressOf pvCallSecpUncompressKey)
     If pvCallSecpUncompressKey(m_uData.Pfn(ucsPfnSecp384r1UncompressKey), baPublic(0), baRetVal(0)) = 0 Then
         GoTo QH
@@ -4690,10 +4690,10 @@ Private Function pvCryptoEccSecp384r1Sign(baRetVal() As Byte, baPrivKey() As Byt
     Dim baRandom()      As Byte
     Dim lIdx            As Long
     
-    pvArrayAllocate baRandom, m_uData.Ecc384KeySize, FUNC_NAME & ".baRandom"
-    pvArrayAllocate baRetVal, 2 * m_uData.Ecc384KeySize, FUNC_NAME & ".baRetVal"
+    pvArrayAllocate baRandom, LNG_SECP384R1_KEYSZ, FUNC_NAME & ".baRandom"
+    pvArrayAllocate baRetVal, 2 * LNG_SECP384R1_KEYSZ, FUNC_NAME & ".baRetVal"
     For lIdx = 1 To MAX_RETRIES
-        pvCryptoRandomBytes VarPtr(baRandom(0)), m_uData.Ecc384KeySize
+        pvCryptoRandomBytes VarPtr(baRandom(0)), LNG_SECP384R1_KEYSZ
         Debug.Assert pvPatchTrampoline(AddressOf pvCallSecpSign)
         If pvCallSecpSign(m_uData.Pfn(ucsPfnSecp384r1Sign), baPrivKey(0), baHash(0), baRandom(0), baRetVal(0)) <> 0 Then
             Exit For
@@ -5348,7 +5348,7 @@ Public Function FromBase64Array(sText As String) As Byte()
     Const FUNC_NAME     As String = "FromBase64Array"
     Dim baRetVal()      As Byte
     Dim lSize           As Long
-    
+
     lSize = (Len(sText) \ 4) * 3
     pvArrayAllocate baRetVal, lSize, FUNC_NAME & ".baRetVal"
     pvThunkAllocate sText, VarPtr(baRetVal(0))
