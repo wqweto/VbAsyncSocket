@@ -72,12 +72,14 @@ Private Declare Function CryptImportPublicKeyInfo Lib "crypt32" (ByVal hCryptPro
 Private Declare Function CryptDecodeObjectEx Lib "crypt32" (ByVal dwCertEncodingType As Long, ByVal lpszStructType As Any, pbEncoded As Any, ByVal cbEncoded As Long, ByVal dwFlags As Long, ByVal pDecodePara As Long, pvStructInfo As Any, pcbStructInfo As Long) As Long
 Private Declare Function CertCreateCertificateContext Lib "crypt32" (ByVal dwCertEncodingType As Long, pbCertEncoded As Any, ByVal cbCertEncoded As Long) As Long
 Private Declare Function CertFreeCertificateContext Lib "crypt32" (ByVal pCertContext As Long) As Long
-'--- BCrypt
-Private Declare Function BCryptOpenAlgorithmProvider Lib "bcrypt" (ByRef hAlgorithm As Long, ByVal pszAlgId As Long, ByVal pszImplementation As Long, ByVal dwFlags As Long) As Long
-Private Declare Function BCryptCloseAlgorithmProvider Lib "bcrypt" (ByVal hAlgorithm As Long, ByVal dwFlags As Long) As Long
-Private Declare Function BCryptImportKeyPair Lib "bcrypt" (ByVal hAlgorithm As Long, ByVal hImportKey As Long, ByVal pszBlobType As Long, ByRef hKey As Long, pbInput As Any, ByVal cbInput As Long, ByVal dwFlags As Long) As Long
-Private Declare Function BCryptDestroyKey Lib "bcrypt" (ByVal hKey As Long) As Long
-Private Declare Function BCryptSignHash Lib "bcrypt" (ByVal hKey As Long, pPaddingInfo As Any, pbInput As Any, ByVal cbInput As Long, pbOutput As Any, ByVal cbOutput As Long, pcbResult As Long, ByVal dwFlags As Long) As Long
+#If ImplTlsServer Then
+    '--- BCrypt
+    Private Declare Function BCryptOpenAlgorithmProvider Lib "bcrypt" (ByRef hAlgorithm As Long, ByVal pszAlgId As Long, ByVal pszImplementation As Long, ByVal dwFlags As Long) As Long
+    Private Declare Function BCryptCloseAlgorithmProvider Lib "bcrypt" (ByVal hAlgorithm As Long, ByVal dwFlags As Long) As Long
+    Private Declare Function BCryptImportKeyPair Lib "bcrypt" (ByVal hAlgorithm As Long, ByVal hImportKey As Long, ByVal pszBlobType As Long, ByRef hKey As Long, pbInput As Any, ByVal cbInput As Long, ByVal dwFlags As Long) As Long
+    Private Declare Function BCryptDestroyKey Lib "bcrypt" (ByVal hKey As Long) As Long
+    Private Declare Function BCryptSignHash Lib "bcrypt" (ByVal hKey As Long, pPaddingInfo As Any, pbInput As Any, ByVal cbInput As Long, pbOutput As Any, ByVal cbOutput As Long, pcbResult As Long, ByVal dwFlags As Long) As Long
+#End If
 '--- libsodium
 Private Declare Function sodium_init Lib "libsodium" () As Long
 Private Declare Function randombytes_buf Lib "libsodium" (ByVal lpOut As Long, ByVal lSize As Long) As Long
@@ -276,7 +278,7 @@ Private Const ERR_NO_REMOTE_RANDOM                      As String = "Missing rem
 Private Const ERR_NO_SERVER_CERTIFICATE                 As String = "Missing server certificate"
 Private Const ERR_NO_SUPPORTED_CIPHER_SUITE             As String = "Missing supported ciphersuite"
 Private Const ERR_NO_PRIVATE_KEY                        As String = "Missing server private key"
-Private Const ERR_NO_SERVER_COMPILED                    As String = "Server TLS not compiled (TLS_NOSERVER = 1)"
+Private Const ERR_NO_SERVER_COMPILED                    As String = "Server TLS not compiled (ASYNCSOCKET_NO_TLSSERVER = 1)"
 '--- numeric
 Private Const LNG_OUT_OF_MEMORY                         As Long = 8
 Private Const LNG_FACILITY_WIN32                        As Long = &H80070000
@@ -960,6 +962,7 @@ Private Function pvTlsBuildClientLegacyKeyExchange(uCtx As UcsTlsContext, baOutp
     With uCtx
         '--- Record Header
         lPos = pvWriteBeginOfRecord(baOutput, lPos, TLS_CONTENT_TYPE_HANDSHAKE, uCtx)
+#If ImplTlsServer Then
             If .CertRequestSignatureScheme <> 0 Then
                 '--- Client Certificate
                 lMessagePos = lPos
@@ -976,6 +979,7 @@ Private Function pvTlsBuildClientLegacyKeyExchange(uCtx As UcsTlsContext, baOutp
                 lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
                 pvTlsAppendHandshakeMessage uCtx, baOutput, lMessagePos, lPos - lMessagePos
             End If
+#End If
             '--- Handshake Client Key Exchange
             lMessagePos = lPos
             lPos = pvWriteLong(baOutput, lPos, TLS_HANDSHAKE_CLIENT_KEY_EXCHANGE)
@@ -991,6 +995,7 @@ Private Function pvTlsBuildClientLegacyKeyExchange(uCtx As UcsTlsContext, baOutp
                 End If
             lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
             pvTlsAppendHandshakeMessage uCtx, baOutput, lMessagePos, lPos - lMessagePos
+#If ImplTlsServer Then
             If .CertRequestSignatureScheme > 0 Then
                 '--- Client Certificate Verify
                 lMessagePos = lPos
@@ -1004,6 +1009,7 @@ Private Function pvTlsBuildClientLegacyKeyExchange(uCtx As UcsTlsContext, baOutp
                 lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
                 pvTlsAppendHandshakeMessage uCtx, baOutput, lMessagePos, lPos - lMessagePos
             End If
+#End If
         lPos = pvWriteEndOfRecord(baOutput, lPos, uCtx)
         '--- Legacy Change Cipher Spec
         lPos = pvWriteBeginOfRecord(baOutput, lPos, TLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC, uCtx)
@@ -1041,6 +1047,7 @@ Private Function pvTlsBuildClientHandshakeFinished(uCtx As UcsTlsContext, baOutp
     Dim baEmpty()       As Byte
     
     With uCtx
+#If ImplTlsServer Then
         If .CertRequestSignatureScheme <> 0 Then
             '--- Record Header
             lPos = pvWriteBeginOfRecord(baOutput, lPos, TLS_CONTENT_TYPE_APPDATA, uCtx)
@@ -1086,6 +1093,7 @@ Private Function pvTlsBuildClientHandshakeFinished(uCtx As UcsTlsContext, baOutp
                 lPos = pvWriteLong(baOutput, lPos, TLS_CONTENT_TYPE_HANDSHAKE)
             lPos = pvWriteEndOfRecord(baOutput, lPos, uCtx)
         End If
+#End If
         '--- Legacy Change Cipher Spec
         pvArrayByte baTemp, TLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC, TLS_RECORD_VERSION \ &H100, TLS_RECORD_VERSION, 0, 1, 1
         lPos = pvWriteArray(baOutput, lPos, baTemp)
@@ -1107,6 +1115,7 @@ Private Function pvTlsBuildClientHandshakeFinished(uCtx As UcsTlsContext, baOutp
 QH:
 End Function
 
+#If ImplTlsServer Then
 Private Function pvTlsBuildServerHello(uCtx As UcsTlsContext, baOutput() As Byte, ByVal lPos As Long) As Long
     Dim lMessagePos     As Long
     Dim baTemp()        As Byte
@@ -1262,6 +1271,7 @@ Private Function pvTlsBuildServerHandshakeFinished(uCtx As UcsTlsContext, baOutp
     End With
     pvTlsBuildServerHandshakeFinished = lPos
 End Function
+#End If
 
 Private Function pvTlsBuildApplicationData(uCtx As UcsTlsContext, baOutput() As Byte, ByVal lPos As Long, baData() As Byte, ByVal lDataPos As Long, ByVal lSize As Long, ByVal lContentType As Long) As Long
     With uCtx
@@ -1761,10 +1771,12 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                     Else
                         GoTo UnexpectedMessageType
                     End If
+#If ImplTlsServer Then
                 Case TLS_HANDSHAKE_CERTIFICATE_REQUEST
                     If Not pvTlsParseHandshakeCertificateRequest(uCtx, baInput, lPos, sError, eAlertCode) Then
                         GoTo QH
                     End If
+#End If
                 Case Else
                     '--- do nothing
                     lPos = lPos + lMessageSize
@@ -1924,6 +1936,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                         .SendPos = pvWriteArray(.SendBuffer, .SendPos, baMessage)
                     End If
                     lPos = lPos + lMessageSize
+#If ImplTlsServer Then
                 Case TLS_HANDSHAKE_CERTIFICATE_REQUEST
                     If Not pvTlsParseHandshakeCertificateRequest(uCtx, baInput, lPos, sError, eAlertCode) Then
                         GoTo QH
@@ -1931,6 +1944,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                     .SendPos = pvTlsBuildClientHandshakeFinished(uCtx, .SendBuffer, .SendPos)
                     '--- not used past handshake
                     Erase .HandshakeMessages
+#End If
                 Case Else
                     GoTo UnexpectedMessageType
                 End Select
@@ -2347,6 +2361,7 @@ EH:
     eAlertCode = uscTlsAlertInternalError
 End Function
 
+#If ImplTlsServer Then
 Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, baInput() As Byte, lPos As Long, sError As String, eAlertCode As UcsTlsAlertDescriptionsEnum) As Boolean
     Dim lSignatureScheme As Long
     Dim lSize           As Long
@@ -2448,6 +2463,7 @@ EH:
     sError = Err.Description & " [" & Err.Source & "]"
     eAlertCode = uscTlsAlertInternalError
 End Function
+#End If
 
 Private Function pvTlsMatchSignatureScheme(uCtx As UcsTlsContext, ByVal lSignatureScheme As Long, uKeyInfo As UcsKeyInfo) As Boolean
     Dim lHashSize       As Long
@@ -2868,7 +2884,7 @@ Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext)
 End Sub
 
 Private Sub pvTlsKdfLegacyPrf(baRetVal() As Byte, ByVal eHash As UcsTlsCryptoAlgorithmsEnum, baSecret() As Byte, ByVal sLabel As String, baContext() As Byte, ByVal lSize As Long)
-    Const FUNC_NAME     As String = "pvTlsKdfLegacyPHash"
+    Const FUNC_NAME     As String = "pvTlsKdfLegacyPrf"
     Dim baSeed()        As Byte
     Dim lRetValPos      As Long
     Dim baInput()       As Byte
@@ -3090,6 +3106,7 @@ Private Function pvTlsSignatureName(ByVal lSignatureScheme As Long) As String
     End Select
 End Function
 
+#If ImplTlsServer Then
 Private Sub pvTlsSignatureSign(baRetVal() As Byte, cPrivKey As Collection, ByVal lSignatureScheme As Long, baVerifyData() As Byte)
     Const FUNC_NAME     As String = "pvTlsSignatureSign"
     Dim baPrivKey()     As Byte
@@ -3119,6 +3136,7 @@ Private Sub pvTlsSignatureSign(baRetVal() As Byte, cPrivKey As Collection, ByVal
         Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_SIGNATURE_FAILED, "%1", pvTlsSignatureName(lSignatureScheme))
     End If
 End Sub
+#End If
 
 Private Function pvTlsSignatureVerify(baCert() As Byte, ByVal lSignatureScheme As Long, baVerifyData() As Byte, baSignature() As Byte, sError As String, eAlertCode As UcsTlsAlertDescriptionsEnum) As Boolean
     #If baCert And lSignatureScheme And baVerifyData And baSignature And sError And eAlertCode Then '--- touch args
@@ -3461,6 +3479,7 @@ Private Function pvCryptoIsSupported(ByVal eAlgo As UcsTlsCryptoAlgorithmsEnum) 
     End Select
 End Function
 
+#If ImplTlsServer Then
 Private Sub pvCryptoRsaPkcsSign(baRetVal() As Byte, baKeyBlob() As Byte, ByVal lSignatureScheme As Long, baMessage() As Byte)
     Const FUNC_NAME     As String = "CryptoRsaPkcsSign"
     Const MAX_SIG_SIZE  As Long = MAX_RSA_KEY / 8
@@ -3685,6 +3704,7 @@ Private Function pvAsn1EncodeEcdsaSignature(baRetVal() As Byte, baPlainSig() As 
     '--- success
     pvAsn1EncodeEcdsaSignature = True
 End Function
+#End If
 
 Private Function pvAsn1DecodePrivateKey(baPrivKey() As Byte, uRetVal As UcsKeyInfo) As Boolean
     Const FUNC_NAME     As String = "Asn1DecodePrivateKey"
