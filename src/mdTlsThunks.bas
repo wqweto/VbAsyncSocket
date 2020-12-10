@@ -38,7 +38,6 @@ DefObj A-Z
 Private Const MODULE_NAME As String = "mdTlsThunks"
 
 #Const ImplTlsServer = (ASYNCSOCKET_NO_TLSSERVER = 0)
-#Const ImplUseLibSodium = (ASYNCSOCKET_USE_LIBSODIUM <> 0)
 #Const ImplUseShared = (ASYNCSOCKET_USE_SHARED <> 0)
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
 #Const ImplCaptureTraffic = False
@@ -103,27 +102,6 @@ Private Declare Function CryptImportPublicKeyInfo Lib "crypt32" (ByVal hCryptPro
 Private Declare Function CryptDecodeObjectEx Lib "crypt32" (ByVal dwCertEncodingType As Long, ByVal lpszStructType As Any, pbEncoded As Any, ByVal cbEncoded As Long, ByVal dwFlags As Long, ByVal pDecodePara As Long, pvStructInfo As Any, pcbStructInfo As Long) As Long
 Private Declare Function CertCreateCertificateContext Lib "crypt32" (ByVal dwCertEncodingType As Long, pbCertEncoded As Any, ByVal cbCertEncoded As Long) As Long
 Private Declare Function CertFreeCertificateContext Lib "crypt32" (ByVal pCertContext As Long) As Long
-#If ImplUseLibSodium Then
-    Private Declare Function LoadLibrary Lib "kernel32" Alias "LoadLibraryA" (ByVal lpLibFileName As String) As Long
-    '--- libsodium
-    Private Declare Function sodium_init Lib "libsodium" () As Long
-    Private Declare Function randombytes_buf Lib "libsodium" (ByVal lpOut As Long, ByVal lSize As Long) As Long
-    Private Declare Function crypto_scalarmult_curve25519 Lib "libsodium" (lpOut As Any, lpConstN As Any, lpConstP As Any) As Long
-    Private Declare Function crypto_scalarmult_curve25519_base Lib "libsodium" (lpOut As Any, lpConstN As Any) As Long
-    Private Declare Function crypto_hash_sha256 Lib "libsodium" (lpOut As Any, lpConstIn As Any, ByVal lSize As Long, Optional ByVal lHighSize As Long) As Long
-    Private Declare Function crypto_hash_sha256_init Lib "libsodium" (lpState As Any) As Long
-    Private Declare Function crypto_hash_sha256_update Lib "libsodium" (lpState As Any, lpConstIn As Any, ByVal lSize As Long, Optional ByVal lHighSize As Long) As Long
-    Private Declare Function crypto_hash_sha256_final Lib "libsodium" (lpState As Any, lpOut As Any) As Long
-    Private Declare Function crypto_hash_sha512_init Lib "libsodium" (lpState As Any) As Long
-    Private Declare Function crypto_hash_sha512_update Lib "libsodium" (lpState As Any, lpConstIn As Any, ByVal lSize As Long, Optional ByVal lHighSize As Long) As Long
-    Private Declare Function crypto_hash_sha512_final Lib "libsodium" (lpState As Any, lpOut As Any) As Long
-    Private Declare Function crypto_aead_chacha20poly1305_ietf_decrypt Lib "libsodium" (lpOut As Any, lOutSize As Any, ByVal nSec As Long, lConstIn As Any, ByVal lInSize As Long, ByVal lHighInSize As Long, lpConstAd As Any, ByVal lAdSize As Long, ByVal lHighAdSize As Long, lpConstNonce As Any, lpConstKey As Any) As Long
-    Private Declare Function crypto_aead_chacha20poly1305_ietf_encrypt Lib "libsodium" (lpOut As Any, lOutSize As Any, lConstIn As Any, ByVal lInSize As Long, ByVal lHighInSize As Long, lpConstAd As Any, ByVal lAdSize As Long, ByVal lHighAdSize As Long, ByVal nSec As Long, lpConstNonce As Any, lpConstKey As Any) As Long
-    Private Declare Function crypto_aead_aes256gcm_is_available Lib "libsodium" () As Long
-    Private Declare Function crypto_aead_aes256gcm_decrypt Lib "libsodium" (lpOut As Any, lOutSize As Any, ByVal nSec As Long, lConstIn As Any, ByVal lInSize As Long, ByVal lHighInSize As Long, lpConstAd As Any, ByVal lAdSize As Long, ByVal lHighAdSize As Long, lpConstNonce As Any, lpConstKey As Any) As Long
-    Private Declare Function crypto_aead_aes256gcm_encrypt Lib "libsodium" (lpOut As Any, lOutSize As Any, lConstIn As Any, ByVal lInSize As Long, ByVal lHighInSize As Long, lpConstAd As Any, ByVal lAdSize As Long, ByVal lHighAdSize As Long, ByVal nSec As Long, lpConstNonce As Any, lpConstKey As Any) As Long
-    Private Declare Function crypto_hash_sha512_statebytes Lib "libsodium" () As Long
-#End If
 
 Private Type CRYPT_BLOB_DATA
     cbData              As Long
@@ -164,7 +142,6 @@ End Type
 ' Constants and member variables
 '=========================================================================
 
-Private Const STR_LIBSODIUM_SHA384_STATE                As String = "2J4FwV2du8sH1Xw2KimaYhfdcDBaAVmROVkO99jsLxUxC8D/ZyYzZxEVWGiHSrSOp4/5ZA0uDNukT/q+HUi1Rw=="
 Private Const STR_VL_ALERTS                             As String = "0|Close notify|10|Unexpected message|20|Bad record mac|21|Decryption failed|22|Record overflow|30|Decompression failure|40|Handshake failure|41|No certificate|42|Bad certificate|43|Unsupported certificate|44|Certificate revoked|45|Certificate expired|46|Certificate unknown|47|Illegal parameter|48|Unknown certificate authority|50|Decode error|51|Decrypt error|70|Protocol version|71|Insufficient security|80|Internal error|90|User canceled|100|No renegotiation|109|Missing extension|110|Unsupported expension|112|Unrecognized name|116|Certificate required|120|No application protocol"
 Private Const STR_VL_STATES                             As String = "0|New|1|Closed|2|HandshakeStart|3|ExpectServerHello|4|ExpectExtensions|5|ExpectServerFinished|6|ExpectClientHello|7|ExpectClientFinished|8|PostHandshake|9|Shutdown"
 Private Const STR_VL_HANDSHAKE_MESSAGES                 As String = "1|client_hello|2|server_hello|4|new_session_ticket|5|end_of_early_data|8|encrypted_extensions|11|certificate|12|server_key_exchange|13|certificate_request|14|server_hello_done|15|certificate_verify|16|client_key_exchange|20|finished|24|key_update|25|compressed_certificate|254|message_hash"
@@ -306,7 +283,6 @@ Private Const LNG_ANS1_TYPE_SEQUENCE                    As Long = &H30
 Private Const LNG_ANS1_TYPE_INTEGER                     As Long = &H2
 Private Const LNG_HMAC_INNER_PAD                        As Long = &H36
 Private Const LNG_HMAC_OUTER_PAD                        As Long = &H5C
-Private Const LNG_LIBSODIUM_SHA512_CONTEXTSZ            As Long = 64 + 16 + 128
 '--- errors
 Private Const ERR_CONNECTION_CLOSED                     As String = "Connection closed"
 Private Const ERR_GENER_KEYPAIR_FAILED                  As String = "Failed generating key pair (%1)"
@@ -345,7 +321,6 @@ Private Const ERR_NO_SUPPORTED_CIPHER_SUITE             As String = "Missing sup
 Private Const ERR_NO_PRIVATE_KEY                        As String = "Missing server private key"
 Private Const ERR_NO_SERVER_COMPILED                    As String = "Server TLS not compiled (TLS_NOSERVER = 1)"
 '--- numeric
-Private Const LNG_OUT_OF_MEMORY                         As Long = 8
 Private Const LNG_FACILITY_WIN32                        As Long = &H80070000
 
 Private m_baBuffer()                As Byte
@@ -565,11 +540,7 @@ Private Type UcsCryptoData
     Thunk               As Long
     Glob()              As Byte
     Pfn(1 To [_ucsPfnMax] - 1) As Long
-#If ImplUseLibSodium Then
-    HashCtx(0 To LNG_LIBSODIUM_SHA512_CONTEXTSZ - 1) As Byte
-#Else
     HashCtx(0 To LNG_SHA384_CONTEXTSZ - 1) As Byte
-#End If
     HashPad(0 To LNG_SHA512_BLOCKSZ - 1) As Byte
     HashFinal(0 To LNG_SHA512_HASHSZ - 1) As Byte
     hRandomProv         As Long
@@ -3920,18 +3891,10 @@ Private Function pvCryptoIsSupported(ByVal eAlgo As UcsTlsCryptoAlgorithmsEnum) 
     Case ucsTlsAlgoExchSecp521r1
         '--- not supported
     Case ucsTlsAlgoBulkAesGcm128, ucsTlsAlgoBulkAesGcm256
-        #If ImplUseLibSodium Then
-            pvCryptoIsSupported = (crypto_aead_aes256gcm_is_available() <> 0 And eAlgo = ucsTlsAlgoBulkAesGcm256)
-        #Else
-            pvCryptoIsSupported = True
-        #End If
+        pvCryptoIsSupported = True
     Case PREF + ucsTlsAlgoBulkAesGcm128, PREF + ucsTlsAlgoBulkAesGcm256
         '--- signal if AES preferred over Chacha20
-        #If ImplUseLibSodium Then
-            pvCryptoIsSupported = (crypto_aead_aes256gcm_is_available() <> 0 And eAlgo = PREF + ucsTlsAlgoBulkAesGcm256)
-        #Else
-            pvCryptoIsSupported = True
-        #End If
+        pvCryptoIsSupported = True
     Case Else
         pvCryptoIsSupported = True
     End Select
@@ -4434,26 +4397,13 @@ Private Function pvCryptoInit() As Boolean
     Dim sApiSource      As String
     
     With m_uData
-        #If ImplUseLibSodium Then
-            If GetModuleHandle("libsodium.dll") = 0 Then
-                If LoadLibrary(App.Path & "\libsodium.dll") = 0 Then
-                    Call LoadLibrary(App.Path & "\..\..\lib\libsodium.dll")
-                End If
-                If sodium_init() < 0 Then
-                    hResult = LNG_OUT_OF_MEMORY
-                    sApiSource = "sodium_init"
-                    GoTo QH
-                End If
+        If .hRandomProv = 0 Then
+            If CryptAcquireContext(.hRandomProv, 0, 0, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT) = 0 Then
+                hResult = Err.LastDllError
+                sApiSource = "CryptAcquireContext"
+                GoTo QH
             End If
-        #Else
-            If .hRandomProv = 0 Then
-                If CryptAcquireContext(.hRandomProv, 0, 0, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT) = 0 Then
-                    hResult = Err.LastDllError
-                    sApiSource = "CryptAcquireContext"
-                    GoTo QH
-                End If
-            End If
-        #End If
+        End If
         If m_uData.Thunk = 0 Then
             '--- prepare thunk/context in executable memory
             pvGetThunkData baThunk
@@ -4507,12 +4457,10 @@ End Function
 #If False Then
 Public Sub pvCryptoTerminate()
     With m_uData
-        #If Not ImplUseLibSodium Then
-            If .hRandomProv <> 0 Then
-                Call CryptReleaseContext(.hRandomProv, 0)
-                .hRandomProv = 0
-            End If
-        #End If
+        If .hRandomProv <> 0 Then
+            Call CryptReleaseContext(.hRandomProv, 0)
+            .hRandomProv = 0
+        End If
     End With
 End Sub
 #End If
@@ -4526,12 +4474,8 @@ Private Function pvCryptoEccCurve25519MakeKey(baPrivate() As Byte, baPublic() As
     '--- fix issues w/ specific privkeys
     baPrivate(0) = baPrivate(0) And 248
     baPrivate(UBound(baPrivate)) = (baPrivate(UBound(baPrivate)) And 127) Or 64
-    #If ImplUseLibSodium Then
-        Call crypto_scalarmult_curve25519_base(baPublic(0), baPrivate(0))
-    #Else
-        Debug.Assert pvPatchTrampoline(AddressOf pvCallCurve25519MulBase)
-        pvCallCurve25519MulBase m_uData.Pfn(ucsPfnCurve25519ScalarMultBase), baPublic(0), baPrivate(0)
-    #End If
+    Debug.Assert pvPatchTrampoline(AddressOf pvCallCurve25519MulBase)
+    pvCallCurve25519MulBase m_uData.Pfn(ucsPfnCurve25519ScalarMultBase), baPublic(0), baPrivate(0)
     '--- success
     pvCryptoEccCurve25519MakeKey = True
 End Function
@@ -4542,12 +4486,8 @@ Private Function pvCryptoEccCurve25519SharedSecret(baRetVal() As Byte, baPrivate
     Debug.Assert UBound(baPrivate) >= LNG_X25519_KEYSZ - 1
     Debug.Assert UBound(baPublic) >= LNG_X25519_KEYSZ - 1
     pvArrayAllocate baRetVal, LNG_X25519_KEYSZ, FUNC_NAME & ".baRetVal"
-    #If ImplUseLibSodium Then
-        Call crypto_scalarmult_curve25519(baRetVal(0), baPrivate(0), baPublic(0))
-    #Else
-        Debug.Assert pvPatchTrampoline(AddressOf pvCallCurve25519Multiply)
-        pvCallCurve25519Multiply m_uData.Pfn(ucsPfnCurve25519ScalarMultiply), baRetVal(0), baPrivate(0), baPublic(0)
-    #End If
+    Debug.Assert pvPatchTrampoline(AddressOf pvCallCurve25519Multiply)
+    pvCallCurve25519Multiply m_uData.Pfn(ucsPfnCurve25519ScalarMultiply), baRetVal(0), baPrivate(0), baPublic(0)
     '--- success
     pvCryptoEccCurve25519SharedSecret = True
 End Function
@@ -4797,19 +4737,15 @@ Private Function pvCryptoHashSha256(baRetVal() As Byte, baInput() As Byte, Optio
         lPtr = VarPtr(baInput(Pos))
     End If
     pvArrayAllocate baRetVal, LNG_SHA256_HASHSZ, FUNC_NAME & ".baRetVal"
-    #If ImplUseLibSodium Then
-        Call crypto_hash_sha256(baRetVal(0), ByVal lPtr, Size)
-    #Else
-        With m_uData
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Init)
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Update)
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Final)
-            lCtxPtr = VarPtr(.HashCtx(0))
-            pvCallSha2Init .Pfn(ucsPfnSha256Init), lCtxPtr
-            pvCallSha2Update .Pfn(ucsPfnSha256Update), lCtxPtr, lPtr, Size
-            pvCallSha2Final .Pfn(ucsPfnSha256Final), lCtxPtr, baRetVal(0)
-        End With
-    #End If
+    With m_uData
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Init)
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Update)
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Final)
+        lCtxPtr = VarPtr(.HashCtx(0))
+        pvCallSha2Init .Pfn(ucsPfnSha256Init), lCtxPtr
+        pvCallSha2Update .Pfn(ucsPfnSha256Update), lCtxPtr, lPtr, Size
+        pvCallSha2Final .Pfn(ucsPfnSha256Final), lCtxPtr, baRetVal(0)
+    End With
     '--- success
     pvCryptoHashSha256 = True
 End Function
@@ -4830,19 +4766,12 @@ Private Function pvCryptoHashSha384(baRetVal() As Byte, baInput() As Byte, Optio
     pvArrayAllocate baRetVal, LNG_SHA384_HASHSZ, FUNC_NAME & ".baRetVal"
     With m_uData
         lCtxPtr = VarPtr(.HashCtx(0))
-        #If ImplUseLibSodium Then
-            Call crypto_hash_sha384_init(.HashCtx)
-            Call crypto_hash_sha512_update(ByVal lCtxPtr, ByVal lPtr, Size)
-            Call crypto_hash_sha512_final(ByVal lCtxPtr, .HashFinal(0))
-            Call CopyMemory(baRetVal(0), .HashFinal(0), LNG_SHA384_HASHSZ)
-        #Else
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Init)
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Update)
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Final)
-            pvCallSha2Init .Pfn(ucsPfnSha384Init), lCtxPtr
-            pvCallSha2Update .Pfn(ucsPfnSha384Update), lCtxPtr, lPtr, Size
-            pvCallSha2Final .Pfn(ucsPfnSha384Final), lCtxPtr, baRetVal(0)
-        #End If
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Init)
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Update)
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Final)
+        pvCallSha2Init .Pfn(ucsPfnSha384Init), lCtxPtr
+        pvCallSha2Update .Pfn(ucsPfnSha384Update), lCtxPtr, lPtr, Size
+        pvCallSha2Final .Pfn(ucsPfnSha384Final), lCtxPtr, baRetVal(0)
     End With
     '--- success
     pvCryptoHashSha384 = True
@@ -4864,19 +4793,12 @@ Private Function pvCryptoHashSha512(baRetVal() As Byte, baInput() As Byte, Optio
     pvArrayAllocate baRetVal, LNG_SHA512_HASHSZ, FUNC_NAME & ".baRetVal"
     With m_uData
         lCtxPtr = VarPtr(.HashCtx(0))
-        #If ImplUseLibSodium Then
-            Call crypto_hash_sha512_init(ByVal lCtxPtr)
-            Call crypto_hash_sha512_update(ByVal lCtxPtr, ByVal lPtr, Size)
-            Call crypto_hash_sha512_final(ByVal lCtxPtr, .HashFinal(0))
-            Call CopyMemory(baRetVal(0), .HashFinal(0), LNG_SHA512_HASHSZ)
-        #Else
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Init)
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Update)
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Final)
-            pvCallSha2Init .Pfn(ucsPfnSha512Init), lCtxPtr
-            pvCallSha2Update .Pfn(ucsPfnSha512Update), lCtxPtr, lPtr, Size
-            pvCallSha2Final .Pfn(ucsPfnSha512Final), lCtxPtr, baRetVal(0)
-        #End If
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Init)
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Update)
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Final)
+        pvCallSha2Init .Pfn(ucsPfnSha512Init), lCtxPtr
+        pvCallSha2Update .Pfn(ucsPfnSha512Update), lCtxPtr, lPtr, Size
+        pvCallSha2Final .Pfn(ucsPfnSha512Final), lCtxPtr, baRetVal(0)
     End With
     '--- success
     pvCryptoHashSha512 = True
@@ -4962,48 +4884,27 @@ Private Function pvCryptoHmacSha256(baRetVal() As Byte, baKey() As Byte, baInput
     With m_uData
         lCtxPtr = VarPtr(.HashCtx(0))
         pvArrayAllocate baRetVal, LNG_SHA256_HASHSZ, FUNC_NAME & ".baRetVal"
-        #If ImplUseLibSodium Then
-            '-- inner hash
-            Call crypto_hash_sha256_init(ByVal lCtxPtr)
-            Call FillMemory(.HashPad(0), LNG_SHA256_BLOCKSZ, LNG_HMAC_INNER_PAD)
-            For lIdx = 0 To UBound(baKey)
-                .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_INNER_PAD
-            Next
-            Call crypto_hash_sha256_update(ByVal lCtxPtr, .HashPad(0), LNG_SHA256_BLOCKSZ)
-            Call crypto_hash_sha256_update(ByVal lCtxPtr, ByVal lPtr, Size)
-            Call crypto_hash_sha256_final(ByVal lCtxPtr, .HashFinal(0))
-            '-- outer hash
-            Call crypto_hash_sha256_init(ByVal lCtxPtr)
-            Call FillMemory(.HashPad(0), LNG_SHA256_BLOCKSZ, LNG_HMAC_OUTER_PAD)
-            For lIdx = 0 To UBound(baKey)
-                .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_OUTER_PAD
-            Next
-            Call crypto_hash_sha256_update(ByVal lCtxPtr, .HashPad(0), LNG_SHA256_BLOCKSZ)
-            Call crypto_hash_sha256_update(ByVal lCtxPtr, .HashFinal(0), LNG_SHA256_HASHSZ)
-            Call crypto_hash_sha256_final(ByVal lCtxPtr, baRetVal(0))
-        #Else
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Init)
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Update)
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Final)
-            '-- inner hash
-            pvCallSha2Init .Pfn(ucsPfnSha256Init), lCtxPtr
-            Call FillMemory(.HashPad(0), LNG_SHA256_BLOCKSZ, LNG_HMAC_INNER_PAD)
-            For lIdx = 0 To UBound(baKey)
-                .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_INNER_PAD
-            Next
-            pvCallSha2Update .Pfn(ucsPfnSha256Update), lCtxPtr, VarPtr(.HashPad(0)), LNG_SHA256_BLOCKSZ
-            pvCallSha2Update .Pfn(ucsPfnSha256Update), lCtxPtr, lPtr, Size
-            pvCallSha2Final .Pfn(ucsPfnSha256Final), lCtxPtr, .HashFinal(0)
-            '-- outer hash
-            pvCallSha2Init .Pfn(ucsPfnSha256Init), lCtxPtr
-            Call FillMemory(.HashPad(0), LNG_SHA256_BLOCKSZ, LNG_HMAC_OUTER_PAD)
-            For lIdx = 0 To UBound(baKey)
-                .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_OUTER_PAD
-            Next
-            pvCallSha2Update .Pfn(ucsPfnSha256Update), lCtxPtr, VarPtr(.HashPad(0)), LNG_SHA256_BLOCKSZ
-            pvCallSha2Update .Pfn(ucsPfnSha256Update), lCtxPtr, VarPtr(.HashFinal(0)), LNG_SHA256_HASHSZ
-            pvCallSha2Final .Pfn(ucsPfnSha256Final), lCtxPtr, baRetVal(0)
-        #End If
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Init)
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Update)
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Final)
+        '-- inner hash
+        pvCallSha2Init .Pfn(ucsPfnSha256Init), lCtxPtr
+        Call FillMemory(.HashPad(0), LNG_SHA256_BLOCKSZ, LNG_HMAC_INNER_PAD)
+        For lIdx = 0 To UBound(baKey)
+            .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_INNER_PAD
+        Next
+        pvCallSha2Update .Pfn(ucsPfnSha256Update), lCtxPtr, VarPtr(.HashPad(0)), LNG_SHA256_BLOCKSZ
+        pvCallSha2Update .Pfn(ucsPfnSha256Update), lCtxPtr, lPtr, Size
+        pvCallSha2Final .Pfn(ucsPfnSha256Final), lCtxPtr, .HashFinal(0)
+        '-- outer hash
+        pvCallSha2Init .Pfn(ucsPfnSha256Init), lCtxPtr
+        Call FillMemory(.HashPad(0), LNG_SHA256_BLOCKSZ, LNG_HMAC_OUTER_PAD)
+        For lIdx = 0 To UBound(baKey)
+            .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_OUTER_PAD
+        Next
+        pvCallSha2Update .Pfn(ucsPfnSha256Update), lCtxPtr, VarPtr(.HashPad(0)), LNG_SHA256_BLOCKSZ
+        pvCallSha2Update .Pfn(ucsPfnSha256Update), lCtxPtr, VarPtr(.HashFinal(0)), LNG_SHA256_HASHSZ
+        pvCallSha2Final .Pfn(ucsPfnSha256Final), lCtxPtr, baRetVal(0)
     End With
     '--- success
     pvCryptoHmacSha256 = True
@@ -5027,49 +4928,27 @@ Private Function pvCryptoHmacSha384(baRetVal() As Byte, baKey() As Byte, baInput
     With m_uData
         lCtxPtr = VarPtr(.HashCtx(0))
         pvArrayAllocate baRetVal, LNG_SHA384_HASHSZ, FUNC_NAME & ".baRetVal"
-        #If ImplUseLibSodium Then
-            '-- inner hash
-            Call crypto_hash_sha384_init(.HashCtx)
-            Call FillMemory(.HashPad(0), LNG_SHA384_BLOCKSZ, LNG_HMAC_INNER_PAD)
-            For lIdx = 0 To UBound(baKey)
-                .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_INNER_PAD
-            Next
-            Call crypto_hash_sha512_update(ByVal lCtxPtr, .HashPad(0), LNG_SHA384_BLOCKSZ)
-            Call crypto_hash_sha512_update(ByVal lCtxPtr, ByVal lPtr, Size)
-            Call crypto_hash_sha512_final(ByVal lCtxPtr, .HashFinal(0))
-            '-- outer hash
-            Call crypto_hash_sha384_init(.HashCtx)
-            Call FillMemory(.HashPad(0), LNG_SHA384_BLOCKSZ, LNG_HMAC_OUTER_PAD)
-            For lIdx = 0 To UBound(baKey)
-                .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_OUTER_PAD
-            Next
-            Call crypto_hash_sha512_update(ByVal lCtxPtr, .HashPad(0), LNG_SHA384_BLOCKSZ)
-            Call crypto_hash_sha512_update(ByVal lCtxPtr, .HashFinal(0), LNG_SHA384_HASHSZ)
-            Call crypto_hash_sha512_final(ByVal lCtxPtr, .HashFinal(0))
-            Call CopyMemory(baRetVal(0), .HashFinal(0), LNG_SHA384_HASHSZ)
-        #Else
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Init)
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Update)
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Final)
-            '-- inner hash
-            pvCallSha2Init .Pfn(ucsPfnSha384Init), lCtxPtr
-            Call FillMemory(.HashPad(0), LNG_SHA384_BLOCKSZ, LNG_HMAC_INNER_PAD)
-            For lIdx = 0 To UBound(baKey)
-                .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_INNER_PAD
-            Next
-            pvCallSha2Update .Pfn(ucsPfnSha384Update), lCtxPtr, VarPtr(.HashPad(0)), LNG_SHA384_BLOCKSZ
-            pvCallSha2Update .Pfn(ucsPfnSha384Update), lCtxPtr, lPtr, Size
-            pvCallSha2Final .Pfn(ucsPfnSha384Final), lCtxPtr, .HashFinal(0)
-            '-- outer hash
-            pvCallSha2Init .Pfn(ucsPfnSha384Init), lCtxPtr
-            Call FillMemory(.HashPad(0), LNG_SHA384_BLOCKSZ, LNG_HMAC_OUTER_PAD)
-            For lIdx = 0 To UBound(baKey)
-                .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_OUTER_PAD
-            Next
-            pvCallSha2Update .Pfn(ucsPfnSha384Update), lCtxPtr, VarPtr(.HashPad(0)), LNG_SHA384_BLOCKSZ
-            pvCallSha2Update .Pfn(ucsPfnSha384Update), lCtxPtr, VarPtr(.HashFinal(0)), LNG_SHA384_HASHSZ
-            pvCallSha2Final .Pfn(ucsPfnSha384Final), lCtxPtr, baRetVal(0)
-        #End If
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Init)
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Update)
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Final)
+        '-- inner hash
+        pvCallSha2Init .Pfn(ucsPfnSha384Init), lCtxPtr
+        Call FillMemory(.HashPad(0), LNG_SHA384_BLOCKSZ, LNG_HMAC_INNER_PAD)
+        For lIdx = 0 To UBound(baKey)
+            .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_INNER_PAD
+        Next
+        pvCallSha2Update .Pfn(ucsPfnSha384Update), lCtxPtr, VarPtr(.HashPad(0)), LNG_SHA384_BLOCKSZ
+        pvCallSha2Update .Pfn(ucsPfnSha384Update), lCtxPtr, lPtr, Size
+        pvCallSha2Final .Pfn(ucsPfnSha384Final), lCtxPtr, .HashFinal(0)
+        '-- outer hash
+        pvCallSha2Init .Pfn(ucsPfnSha384Init), lCtxPtr
+        Call FillMemory(.HashPad(0), LNG_SHA384_BLOCKSZ, LNG_HMAC_OUTER_PAD)
+        For lIdx = 0 To UBound(baKey)
+            .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_OUTER_PAD
+        Next
+        pvCallSha2Update .Pfn(ucsPfnSha384Update), lCtxPtr, VarPtr(.HashPad(0)), LNG_SHA384_BLOCKSZ
+        pvCallSha2Update .Pfn(ucsPfnSha384Update), lCtxPtr, VarPtr(.HashFinal(0)), LNG_SHA384_HASHSZ
+        pvCallSha2Final .Pfn(ucsPfnSha384Final), lCtxPtr, baRetVal(0)
     End With
     '--- success
     pvCryptoHmacSha384 = True
@@ -5088,16 +4967,12 @@ Private Function pvCryptoAeadChacha20Poly1305Encrypt( _
         If lAdSize > 0 Then
             lAdPtr = VarPtr(baAad(lAadPos))
         End If
-        #If ImplUseLibSodium Then
-            Call crypto_aead_chacha20poly1305_ietf_encrypt(baBuffer(lPos), ByVal 0, baBuffer(lPos), lSize, 0, ByVal lAdPtr, lAdSize, 0, 0, baNonce(0), baKey(0))
-        #Else
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallChacha20Poly1305Encrypt)
-            Call pvCallChacha20Poly1305Encrypt(m_uData.Pfn(ucsPfnChacha20Poly1305Encrypt), _
-                    baKey(0), baNonce(0), _
-                    lAdPtr, lAdSize, _
-                    baBuffer(lPos), lSize, _
-                    baBuffer(lPos), baBuffer(lPos + lSize))
-        #End If
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallChacha20Poly1305Encrypt)
+        Call pvCallChacha20Poly1305Encrypt(m_uData.Pfn(ucsPfnChacha20Poly1305Encrypt), _
+                baKey(0), baNonce(0), _
+                lAdPtr, lAdSize, _
+                baBuffer(lPos), lSize, _
+                baBuffer(lPos), baBuffer(lPos + lSize))
     End If
     '--- success
     pvCryptoAeadChacha20Poly1305Encrypt = True
@@ -5110,22 +4985,15 @@ Private Function pvCryptoAeadChacha20Poly1305Decrypt( _
     Debug.Assert pvArraySize(baNonce) = LNG_CHACHA20POLY1305_IVSZ
     Debug.Assert pvArraySize(baKey) = LNG_CHACHA20_KEYSZ
     Debug.Assert pvArraySize(baBuffer) >= lPos + lSize
-    #If ImplUseLibSodium Then
-        If crypto_aead_chacha20poly1305_ietf_decrypt(baBuffer(lPos), ByVal 0, 0, baBuffer(lPos), lSize, 0, baAad(lAadPos), lAdSize, 0, baNonce(0), baKey(0)) = 0 Then
-            '--- success
-            pvCryptoAeadChacha20Poly1305Decrypt = True
-        End If
-    #Else
-        Debug.Assert pvPatchTrampoline(AddressOf pvCallChacha20Poly1305Decrypt)
-        If pvCallChacha20Poly1305Decrypt(m_uData.Pfn(ucsPfnChacha20Poly1305Decrypt), _
-                baKey(0), baNonce(0), _
-                baAad(lAadPos), lAdSize, _
-                baBuffer(lPos), lSize - LNG_CHACHA20POLY1305_TAGSZ, _
-                baBuffer(lPos + lSize - LNG_CHACHA20POLY1305_TAGSZ), baBuffer(lPos)) = 0 Then
-            '--- success
-            pvCryptoAeadChacha20Poly1305Decrypt = True
-        End If
-    #End If
+    Debug.Assert pvPatchTrampoline(AddressOf pvCallChacha20Poly1305Decrypt)
+    If pvCallChacha20Poly1305Decrypt(m_uData.Pfn(ucsPfnChacha20Poly1305Decrypt), _
+            baKey(0), baNonce(0), _
+            baAad(lAadPos), lAdSize, _
+            baBuffer(lPos), lSize - LNG_CHACHA20POLY1305_TAGSZ, _
+            baBuffer(lPos + lSize - LNG_CHACHA20POLY1305_TAGSZ), baBuffer(lPos)) = 0 Then
+        '--- success
+        pvCryptoAeadChacha20Poly1305Decrypt = True
+    End If
 End Function
 
 Private Function pvCryptoAeadAesGcmEncrypt( _
@@ -5135,26 +5003,18 @@ Private Function pvCryptoAeadAesGcmEncrypt( _
     Dim lAdPtr          As Long
     
     Debug.Assert pvArraySize(baNonce) = LNG_AESGCM_IVSZ
-    #If ImplUseLibSodium Then
-        Debug.Assert pvArraySize(baKey) = LNG_AES256_KEYSZ
-    #Else
-        Debug.Assert pvArraySize(baKey) = LNG_AES128_KEYSZ Or pvArraySize(baKey) = LNG_AES256_KEYSZ
-    #End If
+    Debug.Assert pvArraySize(baKey) = LNG_AES128_KEYSZ Or pvArraySize(baKey) = LNG_AES256_KEYSZ
     Debug.Assert pvArraySize(baBuffer) >= lPos + lSize + LNG_AESGCM_TAGSZ
     If lSize > 0 Then
         If lAdSize > 0 Then
             lAdPtr = VarPtr(baAad(lAadPos))
         End If
-        #If ImplUseLibSodium Then
-            Call crypto_aead_aes256gcm_encrypt(baBuffer(lPos), ByVal 0, baBuffer(lPos), lSize, 0, ByVal lAdPtr, lAdSize, 0, 0, baNonce(0), baKey(0))
-        #Else
-            Debug.Assert pvPatchTrampoline(AddressOf pvCallAesGcmEncrypt)
-            Call pvCallAesGcmEncrypt(m_uData.Pfn(ucsPfnAesGcmEncrypt), _
-                    baBuffer(lPos), baBuffer(lPos + lSize), _
-                    baBuffer(lPos), lSize, _
-                    lAdPtr, lAdSize, _
-                    baNonce(0), baKey(0), UBound(baKey) + 1)
-        #End If
+        Debug.Assert pvPatchTrampoline(AddressOf pvCallAesGcmEncrypt)
+        Call pvCallAesGcmEncrypt(m_uData.Pfn(ucsPfnAesGcmEncrypt), _
+                baBuffer(lPos), baBuffer(lPos + lSize), _
+                baBuffer(lPos), lSize, _
+                lAdPtr, lAdSize, _
+                baNonce(0), baKey(0), UBound(baKey) + 1)
     End If
     '--- success
     pvCryptoAeadAesGcmEncrypt = True
@@ -5165,29 +5025,18 @@ Private Function pvCryptoAeadAesGcmDecrypt( _
             baAad() As Byte, ByVal lAadPos As Long, ByVal lAdSize As Long, _
             baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
     Debug.Assert pvArraySize(baNonce) = LNG_AESGCM_IVSZ
-    #If ImplUseLibSodium Then
-        Debug.Assert pvArraySize(baKey) = LNG_AES256_KEYSZ
-    #Else
-        Debug.Assert pvArraySize(baKey) = LNG_AES128_KEYSZ Or pvArraySize(baKey) = LNG_AES256_KEYSZ
-    #End If
+    Debug.Assert pvArraySize(baKey) = LNG_AES128_KEYSZ Or pvArraySize(baKey) = LNG_AES256_KEYSZ
     Debug.Assert pvArraySize(baBuffer) >= lPos + lSize
-    #If ImplUseLibSodium Then
-        If crypto_aead_aes256gcm_decrypt(baBuffer(lPos), ByVal 0, 0, baBuffer(lPos), lSize, 0, baAad(lAadPos), lAdSize, 0, baNonce(0), baKey(0)) = 0 Then
-            '--- success
-            pvCryptoAeadAesGcmDecrypt = True
-        End If
-    #Else
-        Debug.Assert pvPatchTrampoline(AddressOf pvCallAesGcmDecrypt)
-        If pvCallAesGcmDecrypt(m_uData.Pfn(ucsPfnAesGcmDecrypt), _
-                baBuffer(lPos), _
-                baBuffer(lPos), lSize - LNG_AESGCM_TAGSZ, _
-                baBuffer(lPos + lSize - LNG_AESGCM_TAGSZ), _
-                baAad(lAadPos), lAdSize, _
-                baNonce(0), baKey(0), UBound(baKey) + 1) = 0 Then
-            '--- success
-            pvCryptoAeadAesGcmDecrypt = True
-        End If
-    #End If
+    Debug.Assert pvPatchTrampoline(AddressOf pvCallAesGcmDecrypt)
+    If pvCallAesGcmDecrypt(m_uData.Pfn(ucsPfnAesGcmDecrypt), _
+            baBuffer(lPos), _
+            baBuffer(lPos), lSize - LNG_AESGCM_TAGSZ, _
+            baBuffer(lPos + lSize - LNG_AESGCM_TAGSZ), _
+            baAad(lAadPos), lAdSize, _
+            baNonce(0), baKey(0), UBound(baKey) + 1) = 0 Then
+        '--- success
+        pvCryptoAeadAesGcmDecrypt = True
+    End If
 End Function
 
 Private Function pvCryptoAeadAesCbcEncrypt( _
@@ -5222,11 +5071,7 @@ Private Function pvCryptoAeadAesCbcDecrypt( _
 End Function
 
 Private Sub pvCryptoRandomBytes(ByVal lPtr As Long, ByVal lSize As Long)
-    #If ImplUseLibSodium Then
-        Call randombytes_buf(lPtr, lSize)
-    #Else
-        Call CryptGenRandom(m_uData.hRandomProv, lSize, lPtr)
-    #End If
+    Call CryptGenRandom(m_uData.hRandomProv, lSize, lPtr)
 End Sub
 
 Private Function pvCryptoRsaModExp(baBase() As Byte, baExp() As Byte, baModulus() As Byte, baRetVal() As Byte) As Boolean
@@ -5483,19 +5328,6 @@ Private Function DesignDumpMemory(ByVal lPtr As Long, ByVal lSize As Long) As St
     Next
     DesignDumpMemory = Join(aResult, vbCrLf)
 End Function
-#End If
-
-#If ImplUseLibSodium Then
-Private Sub crypto_hash_sha384_init(baCtx() As Byte)
-    Static baSha384State() As Byte
-    
-    If pvArraySize(baSha384State) = 0 Then
-        baSha384State = FromBase64Array(STR_LIBSODIUM_SHA384_STATE)
-    End If
-    Debug.Assert pvArraySize(baCtx) >= crypto_hash_sha512_statebytes()
-    Call crypto_hash_sha512_init(baCtx(0))
-    Call CopyMemory(baCtx(0), baSha384State(0), UBound(baSha384State) + 1)
-End Sub
 #End If
 
 '= trampolines ===========================================================

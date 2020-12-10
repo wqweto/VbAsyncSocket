@@ -9,7 +9,7 @@ Module=mdTlsNative; ..\..\src\mdTlsNative.bas
 IconForm="Form2"
 Startup="Form2"
 HelpFile=""
-Title="Project1"
+Title="SecureNative"
 ExeName32="Project2.exe"
 Command32=""
 Name="SecureNative"
@@ -21,7 +21,7 @@ RevisionVer=0
 AutoIncrementVer=0
 ServerSupportFiles=0
 VersionCompanyName="Unicontsoft"
-CondComp="ASYNCSOCKET_USE_LIBSODIUM = 0 : USE_DEBUG_LOG = 1 : Dummy = 1"
+CondComp="USE_DEBUG_LOG = 1 : Dummy = 1"
 CompilationType=0
 OptimizationType=0
 FavorPentiumPro(tm)=0

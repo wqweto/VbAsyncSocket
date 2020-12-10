@@ -1240,7 +1240,6 @@ Private Function pvOnReceive(Optional ByVal Flush As Boolean) As Boolean
     Dim baRecv()        As Byte
     Dim bResult         As Boolean
     Dim lPrevSize       As Long
-    Dim baEmpty()       As Byte
     Dim sError          As String
     
     On Error GoTo EH
