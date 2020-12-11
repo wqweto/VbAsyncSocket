@@ -6,13 +6,15 @@ Simple and thin WinSock API wrappers for VB6 loosly based on the original [`CAsy
 
 Base class `cAsyncSocket` wraps OS non-blocking sockets that can be used to implement various network components in VB6 -- clients and servers -- and supports both async and blocking network communications.
 
-Additionally there is a source-compatible `cTlsSocket` class for transparent TLS transport layer encryption with a couple of crypto backend implementations:
+Additionally there is a source-compatible `cTlsSocket` class for transparent TLS transport layer encryption with several crypto backend implementations:
 
-1. Pure VB6 backend with ASM crypto thunks implementation for TLS 1.3 and (legacy) TLS 1.2 client-side and server-side (TLS 1.3 only) support with no dependency on external libraries (like openssl)
+1. `mdTlsThunks` is a pure VB6 with ASM thunks implementation for TLS 1.3 and (legacy) TLS 1.2 client-side and server-side (TLS 1.3 only) support with no dependency on external libraries (like openssl)
 
-2. Native client-side and server-side TLS support using OS provided SSPI/Schannel library for all available protocol versions.
+2. `mdTlsNative` is a native client-side and server-side TLS support using OS provided SSPI/Schannel library for all available protocol versions.
 
-The VB6 with thunks backend optionally can leverage libsodium primitives for performance reasons (e.g. server-side implementations) although current thunks implementation auto-detects AES-NI and PCLMULQDQ instruction set availability on client machine and switches to [performance optimized implementation of AES](https://github.com/wqweto/VbAsyncSocket/blob/4b7f4d8bc650688e2b6ad5460c997ed1df26d2e0/lib/thunks/sshaes.c#L100-L240)[-GCM](https://github.com/wqweto/VbAsyncSocket/blob/4b7f4d8bc650688e2b6ad5460c997ed1df26d2e0/lib/thunks/gf128.c#L116-L165) which is even faster that OS native SSPI/Schannel implementation of this cipher suit.
+3. `mdTlsSodium` is a stripped down compact backend with dependency on libsodium for crypto primitives (no ASM thunking used) with a total compiled size of 64KB.
+
+The VB6 with thunks backend implementation auto-detects AES-NI and PCLMULQDQ instruction set availability on client machine and switches to [performance optimized implementation of AES](https://github.com/wqweto/VbAsyncSocket/blob/4b7f4d8bc650688e2b6ad5460c997ed1df26d2e0/lib/thunks/sshaes.c#L100-L240)[-GCM](https://github.com/wqweto/VbAsyncSocket/blob/4b7f4d8bc650688e2b6ad5460c997ed1df26d2e0/lib/thunks/gf128.c#L116-L165) which is even faster that OS native SSPI/Schannel implementation of this cipher suit. The VB6 with thunks backend and native backend support legacy OSes up to NT 4.0 while libsodium DLL is compiled with XP support only.
 
 ### Usage
 
