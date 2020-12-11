@@ -142,7 +142,6 @@ Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As 
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
 Private Declare Function GetFileAttributes Lib "kernel32" Alias "GetFileAttributesA" (ByVal lpFileName As String) As Long
 Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
-Private Declare Sub GetSystemTime Lib "kernel32" (lpSystemTime As SYSTEMTIME)
 Private Declare Function lstrlenW Lib "kernel32" (ByVal lpString As Long) As Long
 Private Declare Function GetVersionEx Lib "kernel32" Alias "GetVersionExA" (lpVersionInformation As Any) As Long
 '--- advapi32
@@ -318,17 +317,6 @@ Private Type NCryptBufferDesc
     cBuffers            As Long
     pBuffers            As Long
     Buffers()           As NCryptBuffer
-End Type
-
-Private Type SYSTEMTIME
-    wYear               As Integer
-    wMonth              As Integer
-    wDayOfWeek          As Integer
-    wDay                As Integer
-    wHour               As Integer
-    wMinute             As Integer
-    wSecond             As Integer
-    wMilliseconds       As Integer
 End Type
 
 Private Type CERT_CHAIN_ENGINE_CONFIG
@@ -1707,20 +1695,19 @@ End Function
 
 Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey As Collection, Optional ByVal Subject As String) As Boolean
     Const FUNC_NAME     As String = "pvPkiGenerSelfSignedCertificate"
+    Const STR_CONTAINER As String = "VbAsyncSocket"
     Dim hProv           As Long
     Dim hKey            As Long
     Dim sName           As String
     Dim baName()        As Byte
     Dim lSize           As Long
     Dim uName           As CRYPT_BLOB_DATA
-    Dim uExpire         As SYSTEMTIME
-    Dim uInfo           As CRYPT_KEY_PROV_INFO
     Dim pCertContext    As Long
     Dim hResult         As Long
     Dim sApiSource      As String
     
-    If CryptAcquireContext(hProv, 0, 0, PROV_RSA_FULL, 0) = 0 Then
-        If CryptAcquireContext(hProv, 0, 0, PROV_RSA_FULL, CRYPT_NEWKEYSET) = 0 Then
+    If CryptAcquireContext(hProv, StrPtr(STR_CONTAINER), 0, PROV_RSA_FULL, 0) = 0 Then
+        If CryptAcquireContext(hProv, StrPtr(STR_CONTAINER), 0, PROV_RSA_FULL, CRYPT_NEWKEYSET) = 0 Then
             hResult = Err.LastDllError
             sApiSource = "CryptAcquireContext"
             GoTo QH
@@ -1748,13 +1735,10 @@ Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey 
         .cbData = lSize
         .pbData = VarPtr(baName(0))
     End With
-    Call GetSystemTime(uExpire)
-    uExpire.wYear = uExpire.wYear + 1
-    With uInfo
-        .dwProvType = PROV_RSA_FULL
-        .dwKeySpec = AT_SIGNATURE
-    End With
-    pCertContext = CertCreateSelfSignCertificate(hProv, uName, 0, uInfo, 0, ByVal 0, uExpire, 0)
+    pCertContext = CertCreateSelfSignCertificate(hProv, uName, 0, ByVal 0, 0, ByVal 0, ByVal 0, 0)
+    If pCertContext = 0 Then
+        GoTo QH
+    End If
     If pvPkiAppendCertContext(pCertContext, cCerts, cPrivKey) Then
         '--- success
         pvPkiGenerSelfSignedCertificate = True
@@ -1765,7 +1749,7 @@ QH:
     End If
     If hProv <> 0 Then
         Call CryptReleaseContext(hProv, 0)
-        Call CryptAcquireContext(0, 0, 0, PROV_RSA_FULL, CRYPT_DELETEKEYSET)
+        Call CryptAcquireContext(0, StrPtr(STR_CONTAINER), 0, PROV_RSA_FULL, CRYPT_DELETEKEYSET)
     End If
     If LenB(sApiSource) <> 0 Then
         Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
