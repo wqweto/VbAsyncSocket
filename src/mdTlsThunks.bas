@@ -314,7 +314,7 @@ Private Const ERR_INVALID_SIZE_EXTENSION                As String = "Invalid dat
 Private Const ERR_INVALID_SIGNATURE                     As String = "Invalid certificate signature"
 Private Const ERR_INVALID_HASH_SIZE                     As String = "Invalid hash size (%1)"
 Private Const ERR_NO_HANDSHAKE_MESSAGES                 As String = "Missing handshake messages"
-Private Const ERR_NO_PREVIOUS_SECRET                    As String = "Missing previous secret (%1)"
+Private Const ERR_NO_PREVIOUS_SECRET                    As String = "Missing previous %1"
 Private Const ERR_NO_REMOTE_RANDOM                      As String = "Missing remote random"
 Private Const ERR_NO_SERVER_CERTIFICATE                 As String = "Missing server certificate"
 Private Const ERR_NO_SUPPORTED_CIPHER_SUITE             As String = "Missing supported ciphersuite"
@@ -2931,15 +2931,15 @@ Private Sub pvTlsDeriveHandshakeSecrets(uCtx As UcsTlsContext)
     Dim baDerivedSecret() As Byte
     Dim baSharedSecret() As Byte
     Dim baEmpty()       As Byte
-    Dim baEmpty2()      As Byte
+    Dim baZeroes()      As Byte
     
     With uCtx
         If pvArraySize(.HandshakeMessages) = 0 Then
             Err.Raise vbObjectError, FUNC_NAME, ERR_NO_HANDSHAKE_MESSAGES
         End If
         pvTlsGetHandshakeHash uCtx, baHandshakeHash
-        pvArrayAllocate baEmpty2, .DigestSize, FUNC_NAME & ".DigestSize"
-        pvTlsHkdfExtract baEarlySecret, .DigestAlgo, baEmpty2, baEmpty2
+        pvArrayAllocate baZeroes, .DigestSize, FUNC_NAME & ".baZeroes"
+        pvTlsHkdfExtract baEarlySecret, .DigestAlgo, baZeroes, baZeroes
         pvTlsArrayHash baEmptyHash, .DigestAlgo, baEmpty
         pvTlsHkdfExpandLabel baDerivedSecret, .DigestAlgo, baEarlySecret, "derived", baEmptyHash, .DigestSize
         pvTlsSharedSecret baSharedSecret, .ExchAlgo, .LocalExchPrivate, .RemoteExchPublic
@@ -2960,7 +2960,7 @@ Private Sub pvTlsDeriveApplicationSecrets(uCtx As UcsTlsContext, baHandshakeHash
     Dim baEmptyHash()   As Byte
     Dim baDerivedSecret() As Byte
     Dim baEmpty()       As Byte
-    Dim baEmpty2()       As Byte
+    Dim baZeroes()      As Byte
     
     With uCtx
         If pvArraySize(.HandshakeMessages) = 0 Then
@@ -2968,8 +2968,8 @@ Private Sub pvTlsDeriveApplicationSecrets(uCtx As UcsTlsContext, baHandshakeHash
         End If
         pvTlsArrayHash baEmptyHash, .DigestAlgo, baEmpty
         pvTlsHkdfExpandLabel baDerivedSecret, .DigestAlgo, .HandshakeSecret, "derived", baEmptyHash, .DigestSize
-        pvArrayAllocate baEmpty2, .DigestSize, FUNC_NAME & ".baEmpty2"
-        pvTlsHkdfExtract .MasterSecret, .DigestAlgo, baDerivedSecret, baEmpty2
+        pvArrayAllocate baZeroes, .DigestSize, FUNC_NAME & ".baZeroes"
+        pvTlsHkdfExtract .MasterSecret, .DigestAlgo, baDerivedSecret, baZeroes
         pvTlsHkdfExpandLabel .RemoteTrafficSecret, .DigestAlgo, .MasterSecret, IIf(.IsServer, "c", "s") & " ap traffic", baHandshakeHash, .DigestSize
         pvTlsHkdfExpandLabel .RemoteTrafficKey, .DigestAlgo, .RemoteTrafficSecret, "key", baEmpty, .KeySize
         pvTlsHkdfExpandLabel .RemoteTrafficIV, .DigestAlgo, .RemoteTrafficSecret, "iv", baEmpty, .IvSize
@@ -3087,7 +3087,7 @@ Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext)
 End Sub
 
 Private Sub pvTlsKdfLegacyPrf(baRetVal() As Byte, ByVal eHash As UcsTlsCryptoAlgorithmsEnum, baSecret() As Byte, ByVal sLabel As String, baContext() As Byte, ByVal lSize As Long)
-    Const FUNC_NAME     As String = "pvTlsKdfLegacyPHash"
+    Const FUNC_NAME     As String = "pvTlsKdfLegacyPrf"
     Dim baSeed()        As Byte
     Dim lRetValPos      As Long
     Dim baInput()       As Byte
@@ -4471,7 +4471,7 @@ Private Function pvCryptoEccCurve25519MakeKey(baPrivate() As Byte, baPublic() As
     pvArrayAllocate baPrivate, LNG_X25519_KEYSZ, FUNC_NAME & ".baPrivate"
     pvArrayAllocate baPublic, LNG_X25519_KEYSZ, FUNC_NAME & ".baPublic"
     pvCryptoRandomBytes VarPtr(baPrivate(0)), LNG_X25519_KEYSZ
-    '--- fix issues w/ specific privkeys
+    '--- fix privkey randomness
     baPrivate(0) = baPrivate(0) And 248
     baPrivate(UBound(baPrivate)) = (baPrivate(UBound(baPrivate)) And 127) Or 64
     Debug.Assert pvPatchTrampoline(AddressOf pvCallCurve25519MulBase)
@@ -4888,20 +4888,20 @@ Private Function pvCryptoHmacSha256(baRetVal() As Byte, baKey() As Byte, baInput
         Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Update)
         Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Final)
         '-- inner hash
-        pvCallSha2Init .Pfn(ucsPfnSha256Init), lCtxPtr
         Call FillMemory(.HashPad(0), LNG_SHA256_BLOCKSZ, LNG_HMAC_INNER_PAD)
         For lIdx = 0 To UBound(baKey)
             .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_INNER_PAD
         Next
+        pvCallSha2Init .Pfn(ucsPfnSha256Init), lCtxPtr
         pvCallSha2Update .Pfn(ucsPfnSha256Update), lCtxPtr, VarPtr(.HashPad(0)), LNG_SHA256_BLOCKSZ
         pvCallSha2Update .Pfn(ucsPfnSha256Update), lCtxPtr, lPtr, Size
         pvCallSha2Final .Pfn(ucsPfnSha256Final), lCtxPtr, .HashFinal(0)
         '-- outer hash
-        pvCallSha2Init .Pfn(ucsPfnSha256Init), lCtxPtr
         Call FillMemory(.HashPad(0), LNG_SHA256_BLOCKSZ, LNG_HMAC_OUTER_PAD)
         For lIdx = 0 To UBound(baKey)
             .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_OUTER_PAD
         Next
+        pvCallSha2Init .Pfn(ucsPfnSha256Init), lCtxPtr
         pvCallSha2Update .Pfn(ucsPfnSha256Update), lCtxPtr, VarPtr(.HashPad(0)), LNG_SHA256_BLOCKSZ
         pvCallSha2Update .Pfn(ucsPfnSha256Update), lCtxPtr, VarPtr(.HashFinal(0)), LNG_SHA256_HASHSZ
         pvCallSha2Final .Pfn(ucsPfnSha256Final), lCtxPtr, baRetVal(0)
@@ -4932,20 +4932,20 @@ Private Function pvCryptoHmacSha384(baRetVal() As Byte, baKey() As Byte, baInput
         Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Update)
         Debug.Assert pvPatchTrampoline(AddressOf pvCallSha2Final)
         '-- inner hash
-        pvCallSha2Init .Pfn(ucsPfnSha384Init), lCtxPtr
         Call FillMemory(.HashPad(0), LNG_SHA384_BLOCKSZ, LNG_HMAC_INNER_PAD)
         For lIdx = 0 To UBound(baKey)
             .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_INNER_PAD
         Next
+        pvCallSha2Init .Pfn(ucsPfnSha384Init), lCtxPtr
         pvCallSha2Update .Pfn(ucsPfnSha384Update), lCtxPtr, VarPtr(.HashPad(0)), LNG_SHA384_BLOCKSZ
         pvCallSha2Update .Pfn(ucsPfnSha384Update), lCtxPtr, lPtr, Size
         pvCallSha2Final .Pfn(ucsPfnSha384Final), lCtxPtr, .HashFinal(0)
         '-- outer hash
-        pvCallSha2Init .Pfn(ucsPfnSha384Init), lCtxPtr
         Call FillMemory(.HashPad(0), LNG_SHA384_BLOCKSZ, LNG_HMAC_OUTER_PAD)
         For lIdx = 0 To UBound(baKey)
             .HashPad(lIdx) = baKey(lIdx) Xor LNG_HMAC_OUTER_PAD
         Next
+        pvCallSha2Init .Pfn(ucsPfnSha384Init), lCtxPtr
         pvCallSha2Update .Pfn(ucsPfnSha384Update), lCtxPtr, VarPtr(.HashPad(0)), LNG_SHA384_BLOCKSZ
         pvCallSha2Update .Pfn(ucsPfnSha384Update), lCtxPtr, VarPtr(.HashFinal(0)), LNG_SHA384_HASHSZ
         pvCallSha2Final .Pfn(ucsPfnSha384Final), lCtxPtr, baRetVal(0)
@@ -4963,17 +4963,15 @@ Private Function pvCryptoAeadChacha20Poly1305Encrypt( _
     Debug.Assert pvArraySize(baNonce) = LNG_CHACHA20POLY1305_IVSZ
     Debug.Assert pvArraySize(baKey) = LNG_CHACHA20_KEYSZ
     Debug.Assert pvArraySize(baBuffer) >= lPos + lSize + LNG_CHACHA20POLY1305_TAGSZ
-    If lSize > 0 Then
-        If lAdSize > 0 Then
-            lAdPtr = VarPtr(baAad(lAadPos))
-        End If
-        Debug.Assert pvPatchTrampoline(AddressOf pvCallChacha20Poly1305Encrypt)
-        Call pvCallChacha20Poly1305Encrypt(m_uData.Pfn(ucsPfnChacha20Poly1305Encrypt), _
-                baKey(0), baNonce(0), _
-                lAdPtr, lAdSize, _
-                baBuffer(lPos), lSize, _
-                baBuffer(lPos), baBuffer(lPos + lSize))
+    If lAdSize > 0 Then
+        lAdPtr = VarPtr(baAad(lAadPos))
     End If
+    Debug.Assert pvPatchTrampoline(AddressOf pvCallChacha20Poly1305Encrypt)
+    Call pvCallChacha20Poly1305Encrypt(m_uData.Pfn(ucsPfnChacha20Poly1305Encrypt), _
+            baKey(0), baNonce(0), _
+            lAdPtr, lAdSize, _
+            baBuffer(lPos), lSize, _
+            baBuffer(lPos), baBuffer(lPos + lSize))
     '--- success
     pvCryptoAeadChacha20Poly1305Encrypt = True
 End Function
@@ -5005,17 +5003,15 @@ Private Function pvCryptoAeadAesGcmEncrypt( _
     Debug.Assert pvArraySize(baNonce) = LNG_AESGCM_IVSZ
     Debug.Assert pvArraySize(baKey) = LNG_AES128_KEYSZ Or pvArraySize(baKey) = LNG_AES256_KEYSZ
     Debug.Assert pvArraySize(baBuffer) >= lPos + lSize + LNG_AESGCM_TAGSZ
-    If lSize > 0 Then
-        If lAdSize > 0 Then
-            lAdPtr = VarPtr(baAad(lAadPos))
-        End If
-        Debug.Assert pvPatchTrampoline(AddressOf pvCallAesGcmEncrypt)
-        Call pvCallAesGcmEncrypt(m_uData.Pfn(ucsPfnAesGcmEncrypt), _
-                baBuffer(lPos), baBuffer(lPos + lSize), _
-                baBuffer(lPos), lSize, _
-                lAdPtr, lAdSize, _
-                baNonce(0), baKey(0), UBound(baKey) + 1)
+    If lAdSize > 0 Then
+        lAdPtr = VarPtr(baAad(lAadPos))
     End If
+    Debug.Assert pvPatchTrampoline(AddressOf pvCallAesGcmEncrypt)
+    Call pvCallAesGcmEncrypt(m_uData.Pfn(ucsPfnAesGcmEncrypt), _
+            baBuffer(lPos), baBuffer(lPos + lSize), _
+            baBuffer(lPos), lSize, _
+            lAdPtr, lAdSize, _
+            baNonce(0), baKey(0), UBound(baKey) + 1)
     '--- success
     pvCryptoAeadAesGcmEncrypt = True
 End Function
