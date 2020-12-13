@@ -894,11 +894,11 @@ Private Function pvTlsBuildClientHello(uCtx As UcsTlsContext, baOutput() As Byte
         If (.LocalFeatures And ucsTlsSupportTls13) <> 0 And .ExchGroup = 0 Then
             '--- populate preferred .ExchGroup and .LocalExchPublic
             If pvCryptoIsSupported(ucsTlsAlgoExchX25519) Then
-                pvTlsSetupExchEccGroup uCtx, TLS_GROUP_X25519
+                pvTlsSetupExchGroup uCtx, TLS_GROUP_X25519
             ElseIf pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1) Then
-                pvTlsSetupExchEccGroup uCtx, TLS_GROUP_SECP256R1
+                pvTlsSetupExchGroup uCtx, TLS_GROUP_SECP256R1
             ElseIf pvCryptoIsSupported(ucsTlsAlgoExchSecp384r1) Then
-                pvTlsSetupExchEccGroup uCtx, TLS_GROUP_SECP384R1
+                pvTlsSetupExchGroup uCtx, TLS_GROUP_SECP384R1
             End If
         End If
         '--- Record Header
@@ -1879,7 +1879,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                             GoTo QH
                         End If
                         lPos = pvReadLong(baInput, lPos, lNamedCurve, Size:=2)
-                        pvTlsSetupExchEccGroup uCtx, lNamedCurve
+                        pvTlsSetupExchGroup uCtx, lNamedCurve
                         #If ImplUseDebugLog Then
                             DebugLog MODULE_NAME, FUNC_NAME, "With exchange group " & pvTlsGetExchGroupName(.ExchGroup)
                         #End If
@@ -2186,7 +2186,7 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
                                 GoTo InvalidSize
                             End If
                             lPos = pvReadLong(baInput, lPos, lExchGroup, Size:=2)
-                            pvTlsSetupExchEccGroup uCtx, lExchGroup
+                            pvTlsSetupExchGroup uCtx, lExchGroup
                             #If ImplUseDebugLog Then
                                 DebugLog MODULE_NAME, FUNC_NAME, "With exchange group " & pvTlsGetExchGroupName(.ExchGroup)
                             #End If
@@ -2410,7 +2410,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                                                 GoTo QH
                                             End If
                                             lPos = pvReadArray(baInput, lPos, .RemoteExchPublic, lBlockSize)
-                                            pvTlsSetupExchEccGroup uCtx, lExchGroup
+                                            pvTlsSetupExchGroup uCtx, lExchGroup
                                             #If ImplUseDebugLog Then
                                                 DebugLog MODULE_NAME, FUNC_NAME, "With exchange group " & pvTlsGetExchGroupName(.ExchGroup)
                                             #End If
@@ -2612,47 +2612,39 @@ Private Function pvTlsMatchSignatureScheme(uCtx As UcsTlsContext, ByVal lSignatu
     
     Select Case lSignatureScheme
     Case TLS_SIGNATURE_RSA_PKCS1_SHA1
-        If (uCtx.LocalFeatures And ucsTlsSupportTls12) <> 0 Then
-            If uKeyInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoPaddingPkcs) And pvCryptoIsSupported(ucsTlsAlgoDigestSha1) Then
-                pvTlsMatchSignatureScheme = True
-            End If
+        If (uCtx.LocalFeatures And ucsTlsSupportTls12) <> 0 And uKeyInfo.AlgoObjId = szOID_RSA_RSA Then
+            pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoPaddingPkcs) And pvCryptoIsSupported(ucsTlsAlgoDigestSha1)
         End If
     Case TLS_SIGNATURE_RSA_PKCS1_SHA224, TLS_SIGNATURE_RSA_PKCS1_SHA256, TLS_SIGNATURE_RSA_PKCS1_SHA384, TLS_SIGNATURE_RSA_PKCS1_SHA512
-        If (uCtx.LocalFeatures And ucsTlsSupportTls12) <> 0 Then
-            If uKeyInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoPaddingPkcs) Then
-                pvTlsMatchSignatureScheme = True
-            End If
+        If (uCtx.LocalFeatures And ucsTlsSupportTls12) <> 0 And uKeyInfo.AlgoObjId = szOID_RSA_RSA Then
+            pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoPaddingPkcs)
         End If
     Case TLS_SIGNATURE_RSA_PSS_RSAE_SHA256, TLS_SIGNATURE_RSA_PSS_RSAE_SHA384, TLS_SIGNATURE_RSA_PSS_RSAE_SHA512
         '--- PSS w/ SHA512 fails on short key lengths (min PSS size is 2 + lHashSize + lSaltSize w/ lSaltSize=lHashSize)
         lHashSize = pvTlsSignatureHashSize(lSignatureScheme)
-        If (uKeyInfo.BitLen + 7) \ 8 > 2 + 2 * lHashSize Then
-            If uKeyInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoPaddingPss) Then
-                pvTlsMatchSignatureScheme = True
-            End If
+        If (uKeyInfo.BitLen + 7) \ 8 > 2 + 2 * lHashSize And uKeyInfo.AlgoObjId = szOID_RSA_RSA Then
+            pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoPaddingPss)
         End If
     Case TLS_SIGNATURE_RSA_PSS_PSS_SHA256, TLS_SIGNATURE_RSA_PSS_PSS_SHA384, TLS_SIGNATURE_RSA_PSS_PSS_SHA512
         lHashSize = pvTlsSignatureHashSize(lSignatureScheme)
-        If (uKeyInfo.BitLen + 7) \ 8 > 2 + 2 * lHashSize Then
-            If uKeyInfo.AlgoObjId = szOID_RSA_SSA_PSS And pvCryptoIsSupported(ucsTlsAlgoPaddingPss) Then
-                pvTlsMatchSignatureScheme = True
-            End If
+        If (uKeyInfo.BitLen + 7) \ 8 > 2 + 2 * lHashSize And uKeyInfo.AlgoObjId = szOID_RSA_SSA_PSS Then
+            pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoPaddingPss)
         End If
     Case TLS_SIGNATURE_ECDSA_SECP256R1_SHA256, TLS_SIGNATURE_ECDSA_SECP384R1_SHA384, TLS_SIGNATURE_ECDSA_SECP521R1_SHA512
         If uKeyInfo.AlgoObjId = szOID_ECC_PUBLIC_KEY Then
             pvTlsMatchSignatureScheme = True
-        ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P256 And lSignatureScheme = TLS_SIGNATURE_ECDSA_SECP256R1_SHA256 And pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1) Then
-            pvTlsMatchSignatureScheme = True
-        ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P384 And lSignatureScheme = TLS_SIGNATURE_ECDSA_SECP384R1_SHA384 And pvCryptoIsSupported(ucsTlsAlgoExchSecp384r1) Then
-            pvTlsMatchSignatureScheme = True
-        ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P521 And lSignatureScheme = TLS_SIGNATURE_ECDSA_SECP521R1_SHA512 And pvCryptoIsSupported(ucsTlsAlgoExchSecp521r1) Then
-            pvTlsMatchSignatureScheme = True
+        ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P256 And lSignatureScheme = TLS_SIGNATURE_ECDSA_SECP256R1_SHA256 Then
+            pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1)
+        ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P384 And lSignatureScheme = TLS_SIGNATURE_ECDSA_SECP384R1_SHA384 Then
+            pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoExchSecp384r1)
+        ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P521 And lSignatureScheme = TLS_SIGNATURE_ECDSA_SECP521R1_SHA512 Then
+            pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoExchSecp521r1)
         End If
     End Select
 End Function
 
-Private Sub pvTlsSetupExchEccGroup(uCtx As UcsTlsContext, ByVal lExchGroup As Long)
-    Const FUNC_NAME     As String = "pvTlsSetupExchEccGroup"
+Private Sub pvTlsSetupExchGroup(uCtx As UcsTlsContext, ByVal lExchGroup As Long)
+    Const FUNC_NAME     As String = "pvTlsSetupExchGroup"
     
     With uCtx
         If .ExchGroup <> lExchGroup Then

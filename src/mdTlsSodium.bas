@@ -33,7 +33,6 @@ Private Const PKCS_PRIVATE_KEY_INFO                     As Long = 44
 Private Const X509_ECC_PRIVATE_KEY                      As Long = 82
 Private Const CRYPT_DECODE_NOCOPY_FLAG                  As Long = &H1
 Private Const CRYPT_DECODE_ALLOC_FLAG                   As Long = &H8000
-Private Const ERROR_FILE_NOT_FOUND                      As Long = 2
 '--- for CryptCreateHash
 Private Const CALG_RC2                                  As Long = &H6602&
 Private Const CALG_HMAC                                 As Long = &H8009&
@@ -64,7 +63,9 @@ Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
 Private Declare Function LoadLibrary Lib "kernel32" Alias "LoadLibraryA" (ByVal lpLibFileName As String) As Long
 '--- msvbvm60
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
-Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
+#If ImplTlsServer Then
+    Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
+#End If
 '--- advapi32
 Private Declare Function CryptAcquireContext Lib "advapi32" Alias "CryptAcquireContextW" (phProv As Long, ByVal pszContainer As Long, ByVal pszProvider As Long, ByVal dwProvType As Long, ByVal dwFlags As Long) As Long
 Private Declare Function CryptGenRandom Lib "advapi32" (ByVal hProv As Long, ByVal dwLen As Long, ByVal pbBuffer As Long) As Long
@@ -814,7 +815,7 @@ Private Function pvTlsBuildClientHello(uCtx As UcsTlsContext, baOutput() As Byte
         If (.LocalFeatures And ucsTlsSupportTls13) <> 0 And .ExchGroup = 0 Then
             '--- populate preferred .ExchGroup and .LocalExchPublic
             If pvCryptoIsSupported(ucsTlsAlgoExchX25519) Then
-                pvTlsSetupExchEccGroup uCtx, TLS_GROUP_X25519
+                pvTlsSetupExchGroup uCtx, TLS_GROUP_X25519
             End If
         End If
         '--- Record Header
@@ -901,21 +902,13 @@ Private Function pvTlsBuildClientHello(uCtx As UcsTlsContext, baOutput() As Byte
                     lPos = pvWriteLong(baOutput, lPos, TLS_EXTENSION_SIGNATURE_ALGORITHMS, Size:=2)
                     lPos = pvWriteBeginOfBlock(baOutput, lPos, .BlocksStack, Size:=2)
                         lPos = pvWriteBeginOfBlock(baOutput, lPos, .BlocksStack, Size:=2)
-                            lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_ECDSA_SECP256R1_SHA256, Size:=2)
-                            lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_ECDSA_SECP384R1_SHA384, Size:=2)
-                            lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_ECDSA_SECP521R1_SHA512, Size:=2)
-                            lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PSS_RSAE_SHA256, Size:=2)
-                            lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PSS_RSAE_SHA384, Size:=2)
-                            lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PSS_RSAE_SHA512, Size:=2)
-                            lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PSS_PSS_SHA256, Size:=2)
-                            lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PSS_PSS_SHA384, Size:=2)
-                            lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PSS_PSS_SHA512, Size:=2)
-                            lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PKCS1_SHA224, Size:=2)
-                            lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PKCS1_SHA256, Size:=2)
-                            lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PKCS1_SHA384, Size:=2)
-                            lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PKCS1_SHA512, Size:=2)
-                            lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_RSA_PKCS1_SHA1, Size:=2)
-                            lPos = pvWriteLong(baOutput, lPos, TLS_SIGNATURE_ECDSA_SHA1, Size:=2)
+                            For Each vElem In Array(TLS_SIGNATURE_ECDSA_SECP256R1_SHA256, TLS_SIGNATURE_ECDSA_SECP384R1_SHA384, TLS_SIGNATURE_ECDSA_SECP521R1_SHA512, _
+                                                    TLS_SIGNATURE_RSA_PSS_RSAE_SHA256, TLS_SIGNATURE_RSA_PSS_RSAE_SHA384, TLS_SIGNATURE_RSA_PSS_RSAE_SHA512, _
+                                                    TLS_SIGNATURE_RSA_PSS_PSS_SHA256, TLS_SIGNATURE_RSA_PSS_PSS_SHA384, TLS_SIGNATURE_RSA_PSS_PSS_SHA512, _
+                                                    TLS_SIGNATURE_RSA_PKCS1_SHA224, TLS_SIGNATURE_RSA_PKCS1_SHA256, TLS_SIGNATURE_RSA_PKCS1_SHA384, _
+                                                    TLS_SIGNATURE_RSA_PKCS1_SHA512, TLS_SIGNATURE_RSA_PKCS1_SHA1, TLS_SIGNATURE_ECDSA_SHA1)
+                                lPos = pvWriteLong(baOutput, lPos, vElem, Size:=2)
+                            Next
                         lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
                     lPos = pvWriteEndOfBlock(baOutput, lPos, .BlocksStack)
                     If (.LocalFeatures And ucsTlsSupportTls13) <> 0 Then
@@ -1750,7 +1743,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, baInput() As Byte, l
                             GoTo QH
                         End If
                         lPos = pvReadLong(baInput, lPos, lNamedCurve, Size:=2)
-                        pvTlsSetupExchEccGroup uCtx, lNamedCurve
+                        pvTlsSetupExchGroup uCtx, lNamedCurve
                         #If ImplUseDebugLog Then
                             DebugLog MODULE_NAME, FUNC_NAME, "With exchange group " & pvTlsGetExchGroupName(.ExchGroup)
                         #End If
@@ -2059,7 +2052,7 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, baInput()
                                 GoTo InvalidSize
                             End If
                             lPos = pvReadLong(baInput, lPos, lExchGroup, Size:=2)
-                            pvTlsSetupExchEccGroup uCtx, lExchGroup
+                            pvTlsSetupExchGroup uCtx, lExchGroup
                             #If ImplUseDebugLog Then
                                 DebugLog MODULE_NAME, FUNC_NAME, "With exchange group " & pvTlsGetExchGroupName(.ExchGroup)
                             #End If
@@ -2277,7 +2270,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
                                                 GoTo QH
                                             End If
                                             lPos = pvReadArray(baInput, lPos, .RemoteExchPublic, lBlockSize)
-                                            pvTlsSetupExchEccGroup uCtx, lExchGroup
+                                            pvTlsSetupExchGroup uCtx, lExchGroup
                                             #If ImplUseDebugLog Then
                                                 DebugLog MODULE_NAME, FUNC_NAME, "With exchange group " & pvTlsGetExchGroupName(.ExchGroup)
                                             #End If
@@ -2356,7 +2349,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, baInput()
             lPos = pvReadEndOfBlock(baInput, lPos, .BlocksStack)
         End If
         #If ImplUseDebugLog Then
-            DebugLog MODULE_NAME, FUNC_NAME, "Using " & pvTlsGetCipherSuiteName(.CipherSuite) & " and " & pvTlsGetExchGroupName(.ExchGroup) & " from " & .RemoteHostName
+            DebugLog MODULE_NAME, FUNC_NAME, "Using " & pvTlsGetCipherSuiteName(.CipherSuite) & " from " & .RemoteHostName
         #End If
     End With
     '--- success
@@ -2477,43 +2470,36 @@ End Function
 #End If
 
 Private Function pvTlsMatchSignatureScheme(uCtx As UcsTlsContext, ByVal lSignatureScheme As Long, uKeyInfo As UcsKeyInfo) As Boolean
-    Dim lHashSize       As Long
+    Dim bHasEnoughBits  As Boolean
     
+    '--- PSS w/ SHA512 fails on short key lengths (min PSS size is 2 + lHashSize + lSaltSize where lSaltSize=lHashSize)
+    bHasEnoughBits = (uKeyInfo.BitLen + 7) \ 8 > 2 + 2 * pvTlsSignatureHashSize(lSignatureScheme)
     Select Case lSignatureScheme
     Case TLS_SIGNATURE_RSA_PKCS1_SHA1, TLS_SIGNATURE_RSA_PKCS1_SHA256
-        If (uCtx.LocalFeatures And ucsTlsSupportTls12) <> 0 Then
-            If uKeyInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoPaddingPkcs) Then
-                pvTlsMatchSignatureScheme = True
-            End If
+        If (uCtx.LocalFeatures And ucsTlsSupportTls12) <> 0 And uKeyInfo.AlgoObjId = szOID_RSA_RSA Then
+            pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoPaddingPkcs)
         End If
     Case TLS_SIGNATURE_RSA_PSS_RSAE_SHA256, TLS_SIGNATURE_RSA_PSS_RSAE_SHA384, TLS_SIGNATURE_RSA_PSS_RSAE_SHA512
-        '--- PSS w/ SHA512 fails on short key lengths (min PSS size is 2 + lHashSize + lSaltSize w/ lSaltSize=lHashSize)
-        lHashSize = pvTlsSignatureHashSize(lSignatureScheme)
-        If (uKeyInfo.BitLen + 7) \ 8 > 2 + 2 * lHashSize Then
-            If uKeyInfo.AlgoObjId = szOID_RSA_RSA And pvCryptoIsSupported(ucsTlsAlgoPaddingPss) Then
-                pvTlsMatchSignatureScheme = True
-            End If
+        If bHasEnoughBits And uKeyInfo.AlgoObjId = szOID_RSA_RSA Then
+            pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoPaddingPss)
         End If
     Case TLS_SIGNATURE_RSA_PSS_PSS_SHA256, TLS_SIGNATURE_RSA_PSS_PSS_SHA384, TLS_SIGNATURE_RSA_PSS_PSS_SHA512
-        lHashSize = pvTlsSignatureHashSize(lSignatureScheme)
-        If (uKeyInfo.BitLen + 7) \ 8 > 2 + 2 * lHashSize Then
-            If uKeyInfo.AlgoObjId = szOID_RSA_SSA_PSS And pvCryptoIsSupported(ucsTlsAlgoPaddingPss) Then
-                pvTlsMatchSignatureScheme = True
-            End If
+        If bHasEnoughBits And uKeyInfo.AlgoObjId = szOID_RSA_SSA_PSS Then
+            pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoPaddingPss)
         End If
     Case TLS_SIGNATURE_ECDSA_SECP256R1_SHA256, TLS_SIGNATURE_ECDSA_SECP384R1_SHA384, TLS_SIGNATURE_ECDSA_SECP521R1_SHA512
-        If uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P256 And lSignatureScheme = TLS_SIGNATURE_ECDSA_SECP256R1_SHA256 And pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1) Then
-            pvTlsMatchSignatureScheme = True
-        ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P384 And lSignatureScheme = TLS_SIGNATURE_ECDSA_SECP384R1_SHA384 And pvCryptoIsSupported(ucsTlsAlgoExchSecp384r1) Then
-            pvTlsMatchSignatureScheme = True
-        ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P521 And lSignatureScheme = TLS_SIGNATURE_ECDSA_SECP521R1_SHA512 And pvCryptoIsSupported(ucsTlsAlgoExchSecp521r1) Then
-            pvTlsMatchSignatureScheme = True
+        If uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P256 And lSignatureScheme = TLS_SIGNATURE_ECDSA_SECP256R1_SHA256 Then
+            pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1)
+        ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P384 And lSignatureScheme = TLS_SIGNATURE_ECDSA_SECP384R1_SHA384 Then
+            pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoExchSecp384r1)
+        ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P521 And lSignatureScheme = TLS_SIGNATURE_ECDSA_SECP521R1_SHA512 Then
+            pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoExchSecp521r1)
         End If
     End Select
 End Function
 
-Private Sub pvTlsSetupExchEccGroup(uCtx As UcsTlsContext, ByVal lExchGroup As Long)
-    Const FUNC_NAME     As String = "pvTlsSetupExchEccGroup"
+Private Sub pvTlsSetupExchGroup(uCtx As UcsTlsContext, ByVal lExchGroup As Long)
+    Const FUNC_NAME     As String = "pvTlsSetupExchGroup"
     
     With uCtx
         If .ExchGroup <> lExchGroup Then
@@ -2558,7 +2544,7 @@ Private Sub pvTlsSetupExchRsaCertificate(uCtx As UcsTlsContext, baCert() As Byte
         End If
         lSize = pvArraySize(.LocalExchPrivate)
         lAlignedSize = (lSize + MAX_RSA_BYTES - 1 And -MAX_RSA_BYTES) + MAX_RSA_BYTES
-        ReDim .LocalExchRsaEncrPriv(0 To lAlignedSize - 1) As Byte
+        pvArrayAllocate .LocalExchRsaEncrPriv, lAlignedSize, FUNC_NAME & ".LocalExchRsaEncrPriv"
         Call CopyMemory(.LocalExchRsaEncrPriv(0), .LocalExchPrivate(0), lSize)
         If CryptEncrypt(hPubKey, 0, 1, 0, .LocalExchRsaEncrPriv(0), lSize, lAlignedSize) = 0 Then
             pvCryptoSetApiError Err.LastDllError, "CryptEncrypt"
@@ -3531,7 +3517,7 @@ Private Sub pvCryptoRsaPssSign(baRetVal() As Byte, baKeyBlob() As Byte, ByVal lS
         pvCryptoSetApiError hResult, "BCryptSignHash"
         GoTo QH
     End If
-    ReDim baRetVal(0 To lSize - 1) As Byte
+    pvArrayAllocate baRetVal, lSize, FUNC_NAME & ".baRetVal"
     hResult = BCryptSignHash(hKey, uPadInfo, baHash(0), UBound(baHash) + 1, baRetVal(0), UBound(baRetVal) + 1, lSize, BCRYPT_PAD_PSS)
     If hResult < 0 Then
         pvCryptoSetApiError hResult, "BCryptSignHash#2"
@@ -3603,7 +3589,7 @@ Private Sub pvCryptoEcdsaSign(baRetVal() As Byte, baKeyBlob() As Byte, ByVal lSi
         pvCryptoSetApiError hResult, "BCryptSignHash"
         GoTo QH
     End If
-    ReDim baTemp(0 To lSize - 1) As Byte
+    pvArrayAllocate baTemp, lSize, FUNC_NAME & ".baTemp"
     hResult = BCryptSignHash(hKey, ByVal 0, baHash(0), UBound(baHash) + 1, baTemp(0), UBound(baTemp) + 1, lSize, 0)
     If hResult < 0 Then
         pvCryptoSetApiError hResult, "BCryptSignHash#2"
@@ -3698,20 +3684,8 @@ DecodeRsa:
         End If
         Debug.Assert UBound(uRetVal.KeyBlob) + 1 - lSize >= uEccKeyInfo.PrivateKey.cbData
         Call CopyMemory(uRetVal.KeyBlob(lSize), ByVal uEccKeyInfo.PrivateKey.pbData, uEccKeyInfo.PrivateKey.cbData)
-    ElseIf Err.LastDllError = ERROR_FILE_NOT_FOUND Then
-        '--- no X509_ECC_PRIVATE_KEY struct type on NT4 -> decode in a wildly speculative way
-        Call CopyMemory(lSize, baPrivKey(6), 1)
-        If 7 + 3 * lSize <= UBound(baPrivKey) Then
-            uRetVal.AlgoObjId = szOID_ECC_CURVE_P256
-            pvArrayAllocate uRetVal.KeyBlob, 3 * lSize, FUNC_NAME & ".uRetVal.KeyBlob"
-            Call CopyMemory(uRetVal.KeyBlob(0), baPrivKey(UBound(baPrivKey) + 1 - 2 * lSize), 2 * lSize)
-            Call CopyMemory(uRetVal.KeyBlob(2 * lSize), baPrivKey(7), lSize)
-        Else
-            pvCryptoSetApiError ERROR_FILE_NOT_FOUND, "CryptDecodeObjectEx(X509_ECC_PRIVATE_KEY)"
-            GoTo QH
-        End If
     Else
-        pvCryptoSetApiError Err.LastDllError, "CryptDecodeObjectEx(X509_ECC_PRIVATE_KEY)"
+        pvCryptoSetApiError Err.LastDllError, "CryptDecodeObjectEx"
         GoTo QH
     End If
     '--- success
@@ -3797,10 +3771,13 @@ Private Function pvCryptoHash(baRetVal() As Byte, ByVal lHashAlgId As Long, baIn
             GoTo QH
         End If
     End If
-    Call CryptGetHashParam(hHash, HP_HASHSIZE, lHashSize, 4, 0)
-    ReDim baRetVal(0 To lHashSize - 1) As Byte
-    If CryptGetHashParam(hHash, HP_HASHVAL, baRetVal(0), lHashSize, 0) = 0 Then
+    If CryptGetHashParam(hHash, HP_HASHSIZE, lHashSize, 4, 0) = 0 Then
         pvCryptoSetApiError Err.LastDllError, "CryptGetHashParam"
+        GoTo QH
+    End If
+    pvArrayAllocate baRetVal, lHashSize, FUNC_NAME & ".baRetVal"
+    If CryptGetHashParam(hHash, HP_HASHVAL, baRetVal(0), lHashSize, 0) = 0 Then
+        pvCryptoSetApiError Err.LastDllError, "CryptGetHashParam#2"
         GoTo QH
     End If
     '--- success
@@ -3841,16 +3818,21 @@ Private Function pvCryptoHmac(baRetVal() As Byte, ByVal lHashAlgId As Long, baKe
         GoTo QH
     End If
     If Size < 0 Then
-        Size = UBound(baInput) + 1
+        Size = pvArraySize(baInput)
     End If
-    If CryptHashData(hHash, baInput(Pos), Size, 0) = 0 Then
-        pvCryptoSetApiError Err.LastDllError, "CryptHashData"
+    If Size > 0 Then
+        If CryptHashData(hHash, baInput(Pos), Size, 0) = 0 Then
+            pvCryptoSetApiError Err.LastDllError, "CryptHashData"
+            GoTo QH
+        End If
+    End If
+    If CryptGetHashParam(hHash, HP_HASHSIZE, lHashSize, 4, 0) = 0 Then
+        pvCryptoSetApiError Err.LastDllError, "CryptGetHashParam"
         GoTo QH
     End If
-    Call CryptGetHashParam(hHash, HP_HASHSIZE, lHashSize, 4, 0)
-    ReDim baRetVal(0 To lHashSize - 1) As Byte
+    pvArrayAllocate baRetVal, lHashSize, FUNC_NAME & ".baRetVal"
     If CryptGetHashParam(hHash, HP_HASHVAL, baRetVal(0), lHashSize, 0) = 0 Then
-        pvCryptoSetApiError Err.LastDllError, "CryptGetHashParam"
+        pvCryptoSetApiError Err.LastDllError, "CryptGetHashParam#2"
         GoTo QH
     End If
     '--- success
