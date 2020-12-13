@@ -87,6 +87,7 @@ Private Sub SendData(baData() As Byte)
         OnError TlsGetLastError(m_uCtx), "TlsSend"
     End If
     If lOutputPos > 0 Then
+        Debug.Assert UBound(baOutput) + 1 = lOutputPos
         wscSocket.SendData baOutput
     End If
 End Sub
@@ -101,6 +102,7 @@ Private Sub wscSocket_Connect()
         OnError TlsGetLastError(m_uCtx), "TlsHandshake"
     End If
     If lOutputPos > 0 Then
+        Debug.Assert UBound(baOutput) + 1 = lOutputPos
         wscSocket.SendData baOutput
     End If
     Exit Sub
@@ -125,6 +127,7 @@ Private Sub wscSocket_DataArrival(ByVal bytesTotal As Long)
         lOutputPos = 0
         bError = Not TlsHandshake(m_uCtx, baRecv, -1, baOutput, lOutputPos)
         If lOutputPos > 0 Then
+            Debug.Assert UBound(baOutput) + 1 = lOutputPos
             wscSocket.SendData baOutput
         End If
         If bError Then
@@ -229,7 +232,7 @@ Private Sub Form_Load()
     For Each vElem In Split("GET|POST", "|")
         cobVerb.AddItem vElem
     Next
-    For Each vElem In Split("websocket.org|www.howsmyssl.com/a/check|cert-test.sandbox.google.com|tls13.1d.pw|localhost:44330|tls.ctf.network|www.mikestoolbox.org|swifttls.org|tls13.pinterjann.is|rsa8192.badssl.com|rsa4096.badssl.com|rsa2048.badssl.com|ecc384.badssl.com|ecc256.badssl.com|dir.bg|host.bg|bgdev.org|cnn.com|gmail.com|google.com|saas.bg|saas.bg:465|www.cloudflare.com|devblogs.microsoft.com|www.brentozar.com|ayende.com/blog|www.nerds2nerds.com|robert.ocallahan.org|distrowatch.com|server.cryptomix.com/secure/|www.integralblue.com/testhandshake/", "|")
+    For Each vElem In Split("www.howsmyssl.com/a/check|cert-test.sandbox.google.com|tls13.1d.pw|localhost:44330|websocket.org|www.mikestoolbox.org|swifttls.org|tls13.pinterjann.is|rsa8192.badssl.com|rsa4096.badssl.com|rsa2048.badssl.com|ecc384.badssl.com|ecc256.badssl.com|dir.bg|host.bg|bgdev.org|cnn.com|gmail.com|google.com|saas.bg|saas.bg:465|www.cloudflare.com|devblogs.microsoft.com|www.brentozar.com|ayende.com/blog|www.nerds2nerds.com|robert.ocallahan.org|distrowatch.com|server.cryptomix.com/secure/|www.integralblue.com/testhandshake/", "|")
         cobAddress.AddItem vElem
     Next
     With New Form2
@@ -258,9 +261,30 @@ Private Sub pvAppendLogText(txtLog As TextBox, sValue As String)
     Call SendMessage(txtLog.hWnd, WM_SETREDRAW, 0, ByVal 0)
     Call SendMessage(txtLog.hWnd, EM_SETSEL, 0, ByVal -1)
     Call SendMessage(txtLog.hWnd, EM_SETSEL, -1, ByVal -1)
-    Call SendMessage(txtLog.hWnd, EM_REPLACESEL, 1, ByVal sValue)
+    Call SendMessage(txtLog.hWnd, EM_REPLACESEL, 1, ByVal preg_replace("\r*\n", sValue, vbCrLf))
     Call SendMessage(txtLog.hWnd, EM_SETSEL, 0, ByVal -1)
     Call SendMessage(txtLog.hWnd, EM_SETSEL, -1, ByVal -1)
     Call SendMessage(txtLog.hWnd, WM_SETREDRAW, 1, ByVal 0)
     Call SendMessage(txtLog.hWnd, WM_VSCROLL, SB_BOTTOM, ByVal 0)
 End Sub
+
+Public Function preg_replace(find_re As String, sText As String, Optional sReplace As String) As String
+    preg_replace = pvInitRegExp(find_re).Replace(sText, sReplace)
+End Function
+
+Private Function pvInitRegExp(sPattern As String) As Object
+    Dim lIdx            As Long
+
+    Set pvInitRegExp = CreateObject("VBScript.RegExp")
+    With pvInitRegExp
+        .Global = True
+        If Left$(sPattern, 1) = "/" Then
+            lIdx = InStrRev(sPattern, "/")
+            .Pattern = Mid$(sPattern, 2, lIdx - 2)
+            .IgnoreCase = (InStr(lIdx, sPattern, "i") > 0)
+            .MultiLine = (InStr(lIdx, sPattern, "m") > 0)
+        Else
+            .Pattern = sPattern
+        End If
+    End With
+End Function
