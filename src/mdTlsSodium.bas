@@ -2390,7 +2390,8 @@ Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, uI
             .CertRequestSignatureScheme = -1
             lSigPos = 0
             Do While lSigPos < pvArraySize(baSignatureSchemes)
-                lSigPos = pvArrayReadLong(baSignatureSchemes, lSigPos, lSignatureScheme, Size:=2)
+                lSignatureScheme = baSignatureSchemes(lSigPos) * &H100& + baSignatureSchemes(lSigPos + 1)
+                lSigPos = lSigPos + 2
                 If pvTlsMatchSignatureScheme(uCtx, lSignatureScheme, uKeyInfo) Then
                     .CertRequestSignatureScheme = lSignatureScheme
                     Exit Do
@@ -2474,7 +2475,7 @@ Private Sub pvTlsSetupExchRsaCertificate(uCtx As UcsTlsContext, baCert() As Byte
     With uCtx
         .ExchAlgo = ucsTlsAlgoExchCertificate
         pvTlsGetRandom .LocalExchPrivate, TLS_HELLO_RANDOM_SIZE + TLS_HELLO_RANDOM_SIZE \ 2 '--- always 48
-        pvArrayWriteLong .LocalExchPrivate, 0, TLS_LOCAL_LEGACY_VERSION, Size:=2
+        Call CopyMemory(.LocalExchPrivate(0), TLS_LOCAL_LEGACY_VERSION, 2)
         pCertContext = CertCreateCertificateContext(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, baCert(0), UBound(baCert) + 1)
         If pCertContext = 0 Then
             pvCryptoSetApiError Err.LastDllError, "CertCreateCertificateContext"
@@ -2744,7 +2745,7 @@ End Sub
 
 Private Sub pvTlsHkdfExpandLabel(baRetVal() As Byte, ByVal eHash As UcsTlsCryptoAlgorithmsEnum, baKey() As Byte, ByVal sLabel As String, baContext() As Byte, ByVal lSize As Long)
     Const FUNC_NAME     As String = "pvTlsHkdfExpandLabel"
-    Dim lPos            As Long
+    Dim uOutput         As UcsBuffer
     Dim uInfo           As UcsBuffer
     Dim uInput          As UcsBuffer
     Dim lIdx            As Long
@@ -2759,17 +2760,19 @@ Private Sub pvTlsHkdfExpandLabel(baRetVal() As Byte, ByVal eHash As UcsTlsCrypto
     pvBufferWriteArray uInfo, baContext
     pvBufferWriteEOF uInfo
     lIdx = 1
-    Do While lPos < lSize
+    Do While uOutput.Size < lSize
         uInput.Size = 0
         pvBufferWriteArray uInput, baLast
         pvBufferWriteArray uInput, uInfo.Data
         pvBufferWriteLong uInput, lIdx
         pvBufferWriteEOF uInput
         pvTlsGetHmac baLast, eHash, baKey, uInput.Data
-        lPos = pvArrayWriteArray(baRetVal, lPos, baLast)
+        pvBufferWriteArray uOutput, baLast
         lIdx = lIdx + 1
     Loop
-    lPos = pvArrayWriteEOF(baRetVal, lSize)
+    uOutput.Size = lSize
+    pvBufferWriteEOF uOutput
+    baRetVal = uOutput.Data
 End Sub
 
 Private Sub pvTlsHkdfExtract(baRetVal() As Byte, ByVal eHash As UcsTlsCryptoAlgorithmsEnum, baKey() As Byte, baInput() As Byte)
@@ -2817,7 +2820,7 @@ Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext)
 End Sub
 
 Private Sub pvTlsKdfLegacyPrf(baRetVal() As Byte, ByVal eHash As UcsTlsCryptoAlgorithmsEnum, baKey() As Byte, ByVal sLabel As String, baContext() As Byte, ByVal lSize As Long)
-    Dim lPos            As Long
+    Dim uOutput         As UcsBuffer
     Dim uSeed           As UcsBuffer
     Dim uInput          As UcsBuffer
     Dim baLast()        As Byte
@@ -2829,16 +2832,18 @@ Private Sub pvTlsKdfLegacyPrf(baRetVal() As Byte, ByVal eHash As UcsTlsCryptoAlg
     pvBufferWriteArray uSeed, baContext
     pvBufferWriteEOF uSeed
     baLast = uSeed.Data
-    Do While lPos < lSize
+    Do While uOutput.Size < lSize
         baTemp = baLast
         pvTlsGetHmac baLast, eHash, baKey, baTemp
         pvBufferWriteArray uInput, baLast
         pvBufferWriteArray uInput, uSeed.Data
         pvBufferWriteEOF uInput
         pvTlsGetHmac baHmac, eHash, baKey, uInput.Data
-        lPos = pvArrayWriteArray(baRetVal, lPos, baHmac)
+        pvBufferWriteArray uOutput, baHmac
     Loop
-    lPos = pvArrayWriteEOF(baRetVal, lSize)
+    uOutput.Size = lSize
+    pvBufferWriteEOF uOutput
+    baRetVal = uOutput.Data
 End Sub
 
 Private Sub pvTlsGetHandshakeHash(uCtx As UcsTlsContext, baRetVal() As Byte)
@@ -2876,9 +2881,6 @@ Private Sub pvTlsGetHash(baRetVal() As Byte, ByVal eHash As UcsTlsCryptoAlgorith
     Dim lHashAlgId      As Long
     
     Select Case eHash
-    Case 0
-        pvArrayReadArray baInput, Pos, baRetVal, Size
-        Exit Sub
     Case ucsTlsAlgoDigestSha256
         lHashAlgId = CALG_SHA_256
     Case ucsTlsAlgoDigestSha384
@@ -3183,7 +3185,7 @@ Private Sub pvBufferWriteRecordEnd(uOutput As UcsBuffer, uCtx As UcsTlsContext)
                 lMessagePos = vRecordData(1)
                 baLocalIV = vRecordData(2)
                 lMessageSize = uOutput.Size - lMessagePos
-                pvBufferWriteReserved uOutput, .TagSize
+                pvBufferWriteBlob uOutput, 0, .TagSize
                 If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
                     pvBufferWriteLong uAad, 0, Size:=4
                     pvBufferWriteLong uAad, .LocalTrafficSeqNo, Size:=4
@@ -3210,122 +3212,73 @@ Private Sub pvBufferWriteRecordEnd(uOutput As UcsBuffer, uCtx As UcsTlsContext)
 End Sub
 
 Private Sub pvBufferWriteBlockStart(uOutput As UcsBuffer, Optional ByVal Size As Long = 1)
-    uOutput.Size = pvArrayWriteBlockStart(uOutput.Data, uOutput.Size, uOutput.Stack, Size)
+    Dim lPos            As Long
+    
+    With uOutput
+        If .Stack Is Nothing Then
+            Set .Stack = New Collection
+        End If
+        If .Stack.Count = 0 Then
+            .Stack.Add .Size
+        Else
+            .Stack.Add .Size, Before:=1
+        End If
+        lPos = .Size
+        pvBufferWriteBlob uOutput, 0, Size
+        '--- note: keep Size in uOutput.Data
+        .Data(lPos) = (Size And &HFF)
+    End With
 End Sub
 
 Private Sub pvBufferWriteBlockEnd(uOutput As UcsBuffer)
-    uOutput.Size = pvArrayWriteBlockEnd(uOutput.Data, uOutput.Size, uOutput.Stack)
+    Dim lPos            As Long
+    
+    With uOutput
+        lPos = .Size
+        .Size = .Stack.Item(1)
+        .Stack.Remove 1
+        pvBufferWriteLong uOutput, lPos - .Size - .Data(.Size), Size:=.Data(.Size)
+        .Size = lPos
+    End With
 End Sub
 
 Private Sub pvBufferWriteString(uOutput As UcsBuffer, sValue As String)
-    uOutput.Size = pvArrayWriteString(uOutput.Data, uOutput.Size, sValue)
+    pvBufferWriteArray uOutput, StrConv(sValue, vbFromUnicode)
 End Sub
 
 Private Sub pvBufferWriteArray(uOutput As UcsBuffer, baSrc() As Byte)
-    uOutput.Size = pvArrayWriteArray(uOutput.Data, uOutput.Size, baSrc)
+    Dim lSize       As Long
+    
+    With uOutput
+        lSize = pvArraySize(baSrc)
+        If lSize > 0 Then
+            .Size = pvArrayWriteBlob(.Data, .Size, VarPtr(baSrc(0)), lSize)
+        End If
+    End With
 End Sub
 
 Private Sub pvBufferWriteLong(uOutput As UcsBuffer, ByVal lValue As Long, Optional ByVal Size As Long = 1)
-    uOutput.Size = pvArrayWriteLong(uOutput.Data, uOutput.Size, lValue, Size)
-End Sub
+    Static baTemp(0 To 3) As Byte
+    Dim lPos            As Long
 
-Private Sub pvBufferWriteReserved(uOutput As UcsBuffer, ByVal lSize As Long)
-    uOutput.Size = pvArrayWriteReserved(uOutput.Data, uOutput.Size, lSize)
+    With uOutput
+        If Size <= 1 Then
+            pvBufferWriteBlob uOutput, VarPtr(lValue), Size
+        Else
+            lPos = .Size
+            pvBufferWriteBlob uOutput, 0, Size
+            Call CopyMemory(baTemp(0), lValue, 4)
+            .Data(lPos + 0) = baTemp(Size - 1)
+            .Data(lPos + 1) = baTemp(Size - 2)
+            If Size >= 3 Then .Data(lPos + 2) = baTemp(Size - 3)
+            If Size >= 4 Then .Data(lPos + 3) = baTemp(Size - 4)
+        End If
+    End With
 End Sub
 
 Private Sub pvBufferWriteBlob(uOutput As UcsBuffer, ByVal lPtr As Long, ByVal lSize As Long)
     uOutput.Size = pvArrayWriteBlob(uOutput.Data, uOutput.Size, lPtr, lSize)
 End Sub
-
-Private Sub pvBufferWriteEOF(uOutput As UcsBuffer)
-    uOutput.Size = pvArrayWriteEOF(uOutput.Data, uOutput.Size)
-End Sub
-
-Private Sub pvBufferReadBlockStart(uInput As UcsBuffer, Optional ByVal Size As Long = 1, Optional BlockSize As Long)
-    uInput.Pos = pvArrayReadBlockStart(uInput.Data, uInput.Pos, uInput.Stack, Size, BlockSize)
-End Sub
-
-Private Sub pvBufferReadBlockEnd(uInput As UcsBuffer)
-    uInput.Pos = pvArrayReadBlockEnd(uInput.Data, uInput.Pos, uInput.Stack)
-End Sub
-
-Private Sub pvBufferReadLong(uInput As UcsBuffer, lValue As Long, Optional ByVal Size As Long = 1)
-    uInput.Pos = pvArrayReadLong(uInput.Data, uInput.Pos, lValue, Size)
-End Sub
-
-Private Sub pvBufferReadBlob(uInput As UcsBuffer, ByVal lPtr As Long, ByVal lSize As Long)
-    Dim baDest()        As Byte
-    
-    uInput.Pos = pvArrayReadArray(uInput.Data, uInput.Pos, baDest, lSize)
-    lSize = pvArraySize(baDest)
-    If lSize > 0 Then
-        Call CopyMemory(ByVal lPtr, baDest(0), lSize)
-    End If
-End Sub
-
-Private Sub pvBufferReadArray(uInput As UcsBuffer, baDest() As Byte, ByVal lSize As Long)
-    uInput.Pos = pvArrayReadArray(uInput.Data, uInput.Pos, baDest, lSize)
-End Sub
-
-Private Sub pvBufferReadString(uInput As UcsBuffer, sValue As String, ByVal lSize As Long)
-    uInput.Pos = pvArrayReadString(uInput.Data, uInput.Pos, sValue, lSize)
-End Sub
-
-Private Function pvArrayWriteBlockStart(baBuffer() As Byte, ByVal lPos As Long, cStack As Collection, Optional ByVal Size As Long = 1) As Long
-    If cStack Is Nothing Then
-        Set cStack = New Collection
-    End If
-    If cStack.Count = 0 Then
-        cStack.Add lPos
-    Else
-        cStack.Add lPos, Before:=1
-    End If
-    pvArrayWriteBlockStart = pvArrayWriteReserved(baBuffer, lPos, Size)
-    '--- note: keep Size in baBuffer
-    baBuffer(lPos) = (Size And &HFF)
-End Function
-
-Private Function pvArrayWriteBlockEnd(baBuffer() As Byte, ByVal lPos As Long, cStack As Collection) As Long
-    Dim lStart          As Long
-    
-    lStart = cStack.Item(1)
-    cStack.Remove 1
-    pvArrayWriteLong baBuffer, lStart, lPos - lStart - baBuffer(lStart), Size:=baBuffer(lStart)
-    pvArrayWriteBlockEnd = lPos
-End Function
-
-Private Function pvArrayWriteString(baBuffer() As Byte, ByVal lPos As Long, sValue As String) As Long
-    pvArrayWriteString = pvArrayWriteArray(baBuffer, lPos, StrConv(sValue, vbFromUnicode))
-End Function
-
-Private Function pvArrayWriteArray(baBuffer() As Byte, ByVal lPos As Long, baSrc() As Byte) As Long
-    Dim lSize       As Long
-    
-    lSize = pvArraySize(baSrc)
-    If lSize > 0 Then
-        lPos = pvArrayWriteBlob(baBuffer, lPos, VarPtr(baSrc(0)), lSize)
-    End If
-    pvArrayWriteArray = lPos
-End Function
-
-Private Function pvArrayWriteLong(baBuffer() As Byte, ByVal lPos As Long, ByVal lValue As Long, Optional ByVal Size As Long = 1) As Long
-    Static baTemp(0 To 3) As Byte
-
-    If Size <= 1 Then
-        pvArrayWriteLong = pvArrayWriteBlob(baBuffer, lPos, VarPtr(lValue), Size)
-    Else
-        pvArrayWriteLong = pvArrayWriteReserved(baBuffer, lPos, Size)
-        Call CopyMemory(baTemp(0), lValue, 4)
-        baBuffer(lPos + 0) = baTemp(Size - 1)
-        baBuffer(lPos + 1) = baTemp(Size - 2)
-        If Size >= 3 Then baBuffer(lPos + 2) = baTemp(Size - 3)
-        If Size >= 4 Then baBuffer(lPos + 3) = baTemp(Size - 4)
-    End If
-End Function
-
-Private Function pvArrayWriteReserved(baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Long
-    pvArrayWriteReserved = pvArrayWriteBlob(baBuffer, lPos, 0, lSize)
-End Function
 
 Private Function pvArrayWriteBlob(baBuffer() As Byte, ByVal lPos As Long, ByVal lPtr As Long, ByVal lSize As Long) As Long
     Const FUNC_NAME     As String = "pvArrayWriteBlob"
@@ -3345,79 +3298,100 @@ Private Function pvArrayWriteBlob(baBuffer() As Byte, ByVal lPos As Long, ByVal 
     pvArrayWriteBlob = lPos + lSize
 End Function
 
+Private Sub pvBufferWriteEOF(uOutput As UcsBuffer)
+    uOutput.Size = pvArrayWriteEOF(uOutput.Data, uOutput.Size)
+End Sub
+
 Private Function pvArrayWriteEOF(baBuffer() As Byte, ByVal lPos As Long) As Long
+    Const FUNC_NAME     As String = "pvArrayWriteEOF"
+    
     If pvArraySize(baBuffer) <> lPos Then
-        pvArrayReallocate baBuffer, lPos, "pvArrayWriteEOF.baBuffer"
+        pvArrayReallocate baBuffer, lPos, FUNC_NAME & ".baBuffer"
     End If
 End Function
 
-Private Function pvArrayReadBlockStart(baBuffer() As Byte, ByVal lPos As Long, cStack As Collection, Optional ByVal Size As Long = 1, Optional BlockSize As Long) As Long
-    If cStack Is Nothing Then
-        Set cStack = New Collection
-    End If
-    pvArrayReadBlockStart = pvArrayReadLong(baBuffer, lPos, BlockSize, Size)
-    If cStack.Count = 0 Then
-        cStack.Add pvArrayReadBlockStart + BlockSize
-    Else
-        cStack.Add pvArrayReadBlockStart + BlockSize, Before:=1
-    End If
-End Function
+Private Sub pvBufferReadBlockStart(uInput As UcsBuffer, Optional ByVal Size As Long = 1, Optional BlockSize As Long)
+    With uInput
+        If .Stack Is Nothing Then
+            Set .Stack = New Collection
+        End If
+        pvBufferReadLong uInput, BlockSize, Size
+        If .Stack.Count = 0 Then
+            .Stack.Add uInput.Pos + BlockSize
+        Else
+            .Stack.Add uInput.Pos + BlockSize, Before:=1
+        End If
+    End With
+End Sub
 
-Private Function pvArrayReadBlockEnd(baBuffer() As Byte, ByVal lPos As Long, cStack As Collection) As Long
+Private Sub pvBufferReadBlockEnd(uInput As UcsBuffer)
     Dim lEnd          As Long
     
-    #If baBuffer Then '--- touch args
-    #End If
-    lEnd = cStack.Item(1)
-    cStack.Remove 1
-    Debug.Assert lPos = lEnd
-    pvArrayReadBlockEnd = lEnd
-End Function
+    With uInput
+        lEnd = .Stack.Item(1)
+        .Stack.Remove 1
+        Debug.Assert .Pos = lEnd
+    End With
+End Sub
 
-Private Function pvArrayReadLong(baBuffer() As Byte, ByVal lPos As Long, lValue As Long, Optional ByVal Size As Long = 1) As Long
+Private Sub pvBufferReadLong(uInput As UcsBuffer, lValue As Long, Optional ByVal Size As Long = 1)
     Static baTemp(0 To 3) As Byte
     
-    If lPos + Size <= pvArraySize(baBuffer) Then
-        If Size <= 1 Then
-            lValue = baBuffer(lPos)
+    With uInput
+        If .Pos + Size <= pvArraySize(.Data) Then
+            If Size <= 1 Then
+                lValue = .Data(.Pos)
+            Else
+                baTemp(Size - 1) = .Data(.Pos + 0)
+                baTemp(Size - 2) = .Data(.Pos + 1)
+                If Size >= 3 Then baTemp(Size - 3) = .Data(.Pos + 2)
+                If Size >= 4 Then baTemp(Size - 4) = .Data(.Pos + 3)
+                Call CopyMemory(lValue, baTemp(0), Size)
+            End If
         Else
-            baTemp(Size - 1) = baBuffer(lPos + 0)
-            baTemp(Size - 2) = baBuffer(lPos + 1)
-            If Size >= 3 Then baTemp(Size - 3) = baBuffer(lPos + 2)
-            If Size >= 4 Then baTemp(Size - 4) = baBuffer(lPos + 3)
-            Call CopyMemory(lValue, baTemp(0), Size)
+            lValue = 0
         End If
-    Else
-        lValue = 0
-    End If
-    pvArrayReadLong = lPos + Size
-End Function
+        .Pos = .Pos + Size
+    End With
+End Sub
 
-Private Function pvArrayReadArray(baBuffer() As Byte, ByVal lPos As Long, baDest() As Byte, ByVal lSize As Long) As Long
-    Const FUNC_NAME     As String = "pvArrayReadArray"
+Private Sub pvBufferReadBlob(uInput As UcsBuffer, ByVal lPtr As Long, ByVal lSize As Long)
+    Dim baDest()        As Byte
     
-    If lSize < 0 Then
-        lSize = pvArraySize(baBuffer) - lPos
-    End If
+    pvBufferReadArray uInput, baDest, lSize
+    lSize = pvArraySize(baDest)
     If lSize > 0 Then
-        pvArrayAllocate baDest, lSize, FUNC_NAME & ".baDest"
-        If lPos + lSize <= pvArraySize(baBuffer) Then
-            Call CopyMemory(baDest(0), baBuffer(lPos), lSize)
-        ElseIf lPos < pvArraySize(baBuffer) Then
-            Call CopyMemory(baDest(0), baBuffer(lPos), pvArraySize(baBuffer) - lPos)
-        End If
-    Else
-        Erase baDest
+        Call CopyMemory(ByVal lPtr, baDest(0), lSize)
     End If
-    pvArrayReadArray = lPos + lSize
-End Function
+End Sub
 
-Private Function pvArrayReadString(baBuffer() As Byte, ByVal lPos As Long, sValue As String, ByVal lSize As Long) As Long
+Private Sub pvBufferReadArray(uInput As UcsBuffer, baDest() As Byte, ByVal lSize As Long)
+    Const FUNC_NAME     As String = "pvBufferReadArray"
+    
+    With uInput
+        If lSize < 0 Then
+            lSize = pvArraySize(.Data) - .Pos
+        End If
+        If lSize > 0 Then
+            pvArrayAllocate baDest, lSize, FUNC_NAME & ".baDest"
+            If .Pos + lSize <= pvArraySize(.Data) Then
+                Call CopyMemory(baDest(0), .Data(.Pos), lSize)
+            ElseIf .Pos < pvArraySize(.Data) Then
+                Call CopyMemory(baDest(0), .Data(.Pos), pvArraySize(.Data) - .Pos)
+            End If
+        Else
+            Erase baDest
+        End If
+        .Pos = .Pos + lSize
+    End With
+End Sub
+
+Private Sub pvBufferReadString(uInput As UcsBuffer, sValue As String, ByVal lSize As Long)
     Dim baTemp()        As Byte
     
-    pvArrayReadString = pvArrayReadArray(baBuffer, lPos, baTemp(), lSize)
+    pvBufferReadArray uInput, baTemp(), lSize
     sValue = StrConv(baTemp, vbUnicode)
-End Function
+End Sub
 
 '= arrays helpers ========================================================
 
