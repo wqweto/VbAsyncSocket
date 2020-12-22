@@ -223,16 +223,12 @@ Private Const TLS_EXTENSION_POST_HANDSHAKE_AUTH         As Long = 49
 Private Const TLS_EXTENSION_KEY_SHARE                   As Long = 51
 Private Const TLS_EXTENSION_RENEGOTIATION_INFO          As Long = &HFF01
 '--- TLS Cipher Suites from http://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-4
-Private Const TLS_CS_AES_128_GCM_SHA256                 As Long = &H1301
 Private Const TLS_CS_AES_256_GCM_SHA384                 As Long = &H1302
 Private Const TLS_CS_CHACHA20_POLY1305_SHA256           As Long = &H1303
-Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 As Long = &HC02B&
 Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 As Long = &HC02C&
-Private Const TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256  As Long = &HC02F&
 Private Const TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384  As Long = &HC030&
 Private Const TLS_CS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 As Long = &HCCA8&
 Private Const TLS_CS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 As Long = &HCCA9&
-Private Const TLS_CS_RSA_WITH_AES_128_GCM_SHA256        As Long = &H9C
 Private Const TLS_CS_RSA_WITH_AES_256_GCM_SHA384        As Long = &H9D
 '--- TLS Supported Groups from https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-8
 Private Const TLS_GROUP_SECP256R1                       As Long = 23
@@ -277,7 +273,6 @@ Private Const LNG_SHA512_HASHSZ                         As Long = 64
 Private Const LNG_CHACHA20_KEYSZ                        As Long = 32
 Private Const LNG_CHACHA20POLY1305_IVSZ                 As Long = 12
 Private Const LNG_CHACHA20POLY1305_TAGSZ                As Long = 16
-Private Const LNG_AES128_KEYSZ                          As Long = 16
 Private Const LNG_AES256_KEYSZ                          As Long = 32
 Private Const LNG_AESGCM_IVSZ                           As Long = 12
 Private Const LNG_AESGCM_TAGSZ                          As Long = 16
@@ -313,7 +308,7 @@ Private Const ERR_NO_REMOTE_RANDOM                      As String = "Missing rem
 Private Const ERR_NO_SERVER_CERTIFICATE                 As String = "Missing server certificate"
 Private Const ERR_NO_SUPPORTED_CIPHER_SUITE             As String = "Missing supported ciphersuite"
 Private Const ERR_NO_PRIVATE_KEY                        As String = "Missing server private key"
-Private Const ERR_NO_SERVER_COMPILED                    As String = "Server TLS not compiled (ASYNCSOCKET_NO_TLSSERVER = 1)"
+Private Const ERR_NO_SERVER_COMPILED                    As String = "Server-side TLS not compiled (ASYNCSOCKET_NO_TLSSERVER = 1)"
 '--- numeric
 Private Const LNG_OUT_OF_MEMORY                         As Long = 8
 Private Const MAX_RSA_KEY                               As Long = 8192 '--- in bits
@@ -323,12 +318,10 @@ Private m_baHelloRetryRandom()      As Byte
 Public g_oRequestSocket             As Object
 
 Private Enum UcsTlsLocalFeaturesEnum '--- bitmask
-    ucsTlsSupportTls10 = 2 ^ 0
-    ucsTlsSupportTls11 = 2 ^ 1
-    ucsTlsSupportTls12 = 2 ^ 2
-    ucsTlsSupportTls13 = 2 ^ 3
-    ucsTlsIgnoreServerCertificateErrors = 2 ^ 4
-    ucsTlsSupportAll = ucsTlsSupportTls10 Or ucsTlsSupportTls11 Or ucsTlsSupportTls12 Or ucsTlsSupportTls13
+    ucsTlsSupportTls12 = 2 ^ 0
+    ucsTlsSupportTls13 = 2 ^ 1
+    ucsTlsIgnoreServerCertificateErrors = 2 ^ 2
+    ucsTlsSupportAll = ucsTlsSupportTls12 Or ucsTlsSupportTls13
 End Enum
 
 Private Enum UcsTlsStatesEnum '--- sync w/ STR_VL_STATES
@@ -354,8 +347,7 @@ Private Enum UcsTlsCryptoAlgorithmsEnum
     ucsTlsAlgoExchSecp521r1
     ucsTlsAlgoExchCertificate
     '--- ciphers
-    ucsTlsAlgoBulkChacha20Poly1305 = 11 '--- next 3 are authenticated encryption w/ additional data
-    ucsTlsAlgoBulkAesGcm128
+    ucsTlsAlgoBulkChacha20Poly1305 = 11
     ucsTlsAlgoBulkAesGcm256
     '--- hash
     ucsTlsAlgoDigestMd5 = 21
@@ -1834,8 +1826,6 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                             .HelloRetryCipherSuite = .CipherSuite
                         Else
                             Select Case True
-                            Case pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm128)
-                                .HelloRetryCipherSuite = TLS_CS_AES_128_GCM_SHA256
                             Case pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256)
                                 .HelloRetryCipherSuite = TLS_CS_AES_256_GCM_SHA384
                             Case pvCryptoIsSupported(ucsTlsAlgoBulkChacha20Poly1305)
@@ -2596,8 +2586,7 @@ Private Sub pvTlsSetupCipherSuite(uCtx As UcsTlsContext, ByVal lCipherSuite As L
             .DigestSize = 0
             .UseRsaKeyTransport = False
             Select Case lCipherSuite
-            Case TLS_CS_CHACHA20_POLY1305_SHA256, TLS_CS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256, TLS_CS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, _
-                    TLS_CS_AES_128_GCM_SHA256, TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, TLS_CS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, TLS_CS_RSA_WITH_AES_128_GCM_SHA256
+            Case TLS_CS_CHACHA20_POLY1305_SHA256, TLS_CS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256, TLS_CS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
                 .DigestAlgo = ucsTlsAlgoDigestSha256
                 .DigestSize = LNG_SHA256_HASHSZ
             Case TLS_CS_AES_256_GCM_SHA384, TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, TLS_CS_RSA_WITH_AES_256_GCM_SHA384
@@ -2610,14 +2599,6 @@ Private Sub pvTlsSetupCipherSuite(uCtx As UcsTlsContext, ByVal lCipherSuite As L
                 .KeySize = LNG_CHACHA20_KEYSZ
                 .IvSize = LNG_CHACHA20POLY1305_IVSZ
                 .TagSize = LNG_CHACHA20POLY1305_TAGSZ
-            Case TLS_CS_AES_128_GCM_SHA256, TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, TLS_CS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, TLS_CS_RSA_WITH_AES_128_GCM_SHA256
-                .BulkAlgo = ucsTlsAlgoBulkAesGcm128
-                .KeySize = LNG_AES128_KEYSZ
-                .IvSize = LNG_AESGCM_IVSZ
-                If lCipherSuite <> TLS_CS_AES_128_GCM_SHA256 Then
-                    .IvExplicitSize = 8
-                End If
-                .TagSize = LNG_AESGCM_TAGSZ
             Case TLS_CS_AES_256_GCM_SHA384, TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, TLS_CS_RSA_WITH_AES_256_GCM_SHA384
                 .BulkAlgo = ucsTlsAlgoBulkAesGcm256
                 .KeySize = LNG_AES256_KEYSZ
@@ -2628,7 +2609,7 @@ Private Sub pvTlsSetupCipherSuite(uCtx As UcsTlsContext, ByVal lCipherSuite As L
                 .TagSize = LNG_AESGCM_TAGSZ
             End Select
             Select Case lCipherSuite
-            Case TLS_CS_RSA_WITH_AES_128_GCM_SHA256, TLS_CS_RSA_WITH_AES_256_GCM_SHA384
+            Case TLS_CS_RSA_WITH_AES_256_GCM_SHA384
                 .UseRsaKeyTransport = True
             End Select
             If .BulkAlgo = 0 Or .DigestAlgo = 0 Then
@@ -2639,36 +2620,19 @@ Private Sub pvTlsSetupCipherSuite(uCtx As UcsTlsContext, ByVal lCipherSuite As L
 End Sub
 
 Private Function pvTlsGetSortedCipherSuites(ByVal eFilter As UcsTlsLocalFeaturesEnum) As Collection
-    Const PREF      As Long = &H1000
     Dim oRetVal     As Collection
     
     Set oRetVal = New Collection
     If (eFilter And ucsTlsSupportTls13) <> 0 Then
-        '--- first if AES preferred over Chacha20
-        If pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm128) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm128) Then
-            oRetVal.Add TLS_CS_AES_128_GCM_SHA256
-        End If
-        If pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm256) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
+        If pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
             oRetVal.Add TLS_CS_AES_256_GCM_SHA384
         End If
         If pvCryptoIsSupported(ucsTlsAlgoBulkChacha20Poly1305) Then
             oRetVal.Add TLS_CS_CHACHA20_POLY1305_SHA256
         End If
-        '--- least preferred AES
-        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm128) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm128) Then
-            oRetVal.Add TLS_CS_AES_128_GCM_SHA256
-        End If
-        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm256) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
-            oRetVal.Add TLS_CS_AES_256_GCM_SHA384
-        End If
     End If
     If (eFilter And ucsTlsSupportTls12) <> 0 Then
-        '--- first if AES preferred over Chacha20
-        If pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm128) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm128) Then
-            oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
-            oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
-        End If
-        If pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm256) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
+        If pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
             oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
         End If
@@ -2676,20 +2640,8 @@ Private Function pvTlsGetSortedCipherSuites(ByVal eFilter As UcsTlsLocalFeatures
             oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
             oRetVal.Add TLS_CS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
         End If
-        '--- least preferred AES
-        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm128) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm128) Then
-            oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
-            oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
-        End If
-        If Not pvCryptoIsSupported(PREF + ucsTlsAlgoBulkAesGcm256) And pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
-            oRetVal.Add TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
-            oRetVal.Add TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
-        End If
         '--- no perfect forward secrecy -> least preferred
         If pvCryptoIsSupported(ucsTlsAlgoExchCertificate) Then
-            If pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm128) Then
-                oRetVal.Add TLS_CS_RSA_WITH_AES_128_GCM_SHA256
-            End If
             If pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256) Then
                 oRetVal.Add TLS_CS_RSA_WITH_AES_256_GCM_SHA384
             End If
@@ -2997,7 +2949,7 @@ Private Function pvTlsBulkDecrypt(ByVal eBulk As UcsTlsCryptoAlgorithmsEnum, baR
         If Not pvCryptoAeadChacha20Poly1305Decrypt(baRemoteIV, baRemoteKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
             GoTo QH
         End If
-    Case ucsTlsAlgoBulkAesGcm128, ucsTlsAlgoBulkAesGcm256
+    Case ucsTlsAlgoBulkAesGcm256
         If Not pvCryptoAeadAesGcmDecrypt(baRemoteIV, baRemoteKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
             GoTo QH
         End If
@@ -3017,7 +2969,7 @@ Private Sub pvTlsBulkEncrypt(ByVal eBulk As UcsTlsCryptoAlgorithmsEnum, baLocalI
         If Not pvCryptoAeadChacha20Poly1305Encrypt(baLocalIV, baLocalKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
             Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoAeadChacha20Poly1305Encrypt")
         End If
-    Case ucsTlsAlgoBulkAesGcm128, ucsTlsAlgoBulkAesGcm256
+    Case ucsTlsAlgoBulkAesGcm256
         If Not pvCryptoAeadAesGcmEncrypt(baLocalIV, baLocalKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
             Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoAeadAesGcmEncrypt")
         End If
@@ -3064,26 +3016,18 @@ End Function
 
 Private Function pvTlsGetCipherSuiteName(ByVal lCipherSuite As Long) As String
     Select Case lCipherSuite
-    Case TLS_CS_AES_128_GCM_SHA256
-        pvTlsGetCipherSuiteName = "TLS_AES_128_GCM_SHA256"
     Case TLS_CS_AES_256_GCM_SHA384
         pvTlsGetCipherSuiteName = "TLS_AES_256_GCM_SHA384"
     Case TLS_CS_CHACHA20_POLY1305_SHA256
         pvTlsGetCipherSuiteName = "TLS_CHACHA20_POLY1305_SHA256"
-    Case TLS_CS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
-        pvTlsGetCipherSuiteName = "ECDHE-ECDSA-AES128-GCM-SHA256"
     Case TLS_CS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
         pvTlsGetCipherSuiteName = "ECDHE-ECDSA-AES256-GCM-SHA384"
-    Case TLS_CS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
-        pvTlsGetCipherSuiteName = "ECDHE-RSA-AES128-GCM-SHA256"
     Case TLS_CS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
         pvTlsGetCipherSuiteName = "ECDHE-RSA-AES256-GCM-SHA384"
     Case TLS_CS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
         pvTlsGetCipherSuiteName = "ECDHE-RSA-CHACHA20-POLY1305"
     Case TLS_CS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
         pvTlsGetCipherSuiteName = "ECDHE-ECDSA-CHACHA20-POLY1305"
-    Case TLS_CS_RSA_WITH_AES_128_GCM_SHA256
-        pvTlsGetCipherSuiteName = "AES128-GCM-SHA256"
     Case TLS_CS_RSA_WITH_AES_256_GCM_SHA384
         pvTlsGetCipherSuiteName = "AES256-GCM-SHA384"
     Case Else
@@ -3543,19 +3487,10 @@ Private Sub pvArrayByte(baRetVal() As Byte, ParamArray A() As Variant)
     End If
 End Sub
 
-Private Sub pvArrayReverse(baData() As Byte, Optional ByVal NewSize As Long = -1)
-    Const FUNC_NAME     As String = "pvArrayReverse"
+Private Sub pvArrayReverse(baData() As Byte)
     Dim lIdx            As Long
     Dim bTemp           As Byte
-    Dim baCopy()        As Byte
     
-    If NewSize = 0 Then
-        baData = vbNullString
-    ElseIf NewSize > 0 Then
-        baCopy = baData
-        pvArrayAllocate baData, NewSize, FUNC_NAME & ".baData"
-        Call CopyMemory(baData(0), baCopy(0), IIf(NewSize < UBound(baCopy) + 1, NewSize, UBound(baCopy) + 1))
-    End If
     For lIdx = 0 To UBound(baData) \ 2
         bTemp = baData(lIdx)
         baData(lIdx) = baData(UBound(baData) - lIdx)
@@ -3591,18 +3526,13 @@ End Function
 '=========================================================================
 
 Private Function pvCryptoIsSupported(ByVal eAlgo As UcsTlsCryptoAlgorithmsEnum) As Boolean
-    Const PREF          As Long = &H1000
-    
     Select Case eAlgo
     Case ucsTlsAlgoExchSecp256r1, ucsTlsAlgoExchSecp384r1
         #If ImplTlsServer Then
             pvCryptoIsSupported = (RealOsVersion >= ucsOsvWin10)
         #End If
-    Case ucsTlsAlgoBulkAesGcm128, ucsTlsAlgoBulkAesGcm256
-        pvCryptoIsSupported = (crypto_aead_aes256gcm_is_available() <> 0 And eAlgo = ucsTlsAlgoBulkAesGcm256)
-    Case PREF + ucsTlsAlgoBulkAesGcm128, PREF + ucsTlsAlgoBulkAesGcm256
-        '--- signal if AES preferred over Chacha20
-        pvCryptoIsSupported = (crypto_aead_aes256gcm_is_available() <> 0 And eAlgo = PREF + ucsTlsAlgoBulkAesGcm256)
+    Case ucsTlsAlgoBulkAesGcm256
+        pvCryptoIsSupported = (crypto_aead_aes256gcm_is_available() <> 0)
     Case Else
         pvCryptoIsSupported = True
     End Select
@@ -4279,15 +4209,41 @@ QH:
 End Function
 
 Public Function FromBase64Array(sText As String) As Byte()
-    With CreateObject("MSXML2.DOMDocument").createElement("dummy")
-        .DataType = "bin.base64"
-        .Text = sText
-        If IsArray(.NodeTypedValue) Then
-            FromBase64Array = .NodeTypedValue
-        Else
-            FromBase64Array = vbNullString
-        End If
-    End With
+    Const FUNC_NAME     As String = "FromBase64Array"
+    Static Map(0 To &H3FF) As Long
+    Dim baRetVal()      As Byte
+    Dim baInput()       As Byte
+    Dim lIdx            As Long
+    Dim lChar           As Long
+    Dim lSize           As Long
+    Dim lPtr            As Long
+    
+    '--- init decoding maps
+    If Map(65) = 0 Then
+        baInput = StrConv("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", vbFromUnicode)
+        For lIdx = 0 To UBound(baInput)
+            lChar = baInput(lIdx)
+            Map(&H0 + lChar) = lIdx * (2 ^ 2)
+            Map(&H100 + lChar) = (lIdx And &H30) \ (2 ^ 4) Or (lIdx And &HF) * (2 ^ 12)
+            Map(&H200 + lChar) = (lIdx And &H3) * (2 ^ 22) Or (lIdx And &H3C) * (2 ^ 6)
+            Map(&H300 + lChar) = lIdx * (2 ^ 16)
+        Next
+    End If
+    '--- base64 decode loop
+    baInput = StrConv(Replace(Replace(sText, vbCr, vbNullString), vbLf, vbNullString), vbFromUnicode)
+    lSize = ((UBound(baInput) + 1) \ 4) * 3
+    pvArrayAllocate baRetVal, lSize, FUNC_NAME & ".baRetVal"
+    For lIdx = 0 To UBound(baInput) - 3 Step 4
+        lChar = Map(baInput(lIdx + 0)) Or Map(&H100 + baInput(lIdx + 1)) Or Map(&H200 + baInput(lIdx + 2)) Or Map(&H300 + baInput(lIdx + 3))
+        Call CopyMemory(baRetVal(lPtr), lChar, 3)
+        lPtr = lPtr + 3
+    Next
+    If Right$(sText, 2) = "==" Then
+        pvArrayReallocate baRetVal, lSize - 2, FUNC_NAME & ".baRetVal"
+    ElseIf Right$(sText, 1) = "=" Then
+        pvArrayReallocate baRetVal, lSize - 1, FUNC_NAME & ".baRetVal"
+    End If
+    FromBase64Array = baRetVal
 End Function
 
 Private Function UnsignedAdd(ByVal lUnsignedPtr As Long, ByVal lSignedOffset As Long) As Long
