@@ -16,6 +16,7 @@ Private Const MODULE_NAME As String = "mdTlsSodium"
 #Const ImplTlsServer = (ASYNCSOCKET_NO_TLSSERVER = 0)
 #Const ImplUseShared = (ASYNCSOCKET_USE_SHARED <> 0)
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
+#Const ImplUseLibSodium = True
 #Const ImplCaptureTraffic = False
 
 '=========================================================================
@@ -56,6 +57,8 @@ Private Const BCRYPT_ECDH_PRIVATE_P384_MAGIC            As Long = &H344B4345
 Private Const BCRYPT_ECDSA_PRIVATE_P256_MAGIC           As Long = &H32534345
 Private Const BCRYPT_ECDSA_PRIVATE_P384_MAGIC           As Long = &H34534345
 Private Const BCRYPT_ECDSA_PRIVATE_P521_MAGIC           As Long = &H36534345
+Private Const BCRYPT_ECDH_PUBLIC_GENERIC_MAGIC          As Long = &H504B4345
+Private Const BCRYPT_ECDH_PRIVATE_GENERIC_MAGIC         As Long = &H564B4345
 '--- OIDs
 Private Const szOID_RSA_RSA                             As String = "1.2.840.113549.1.1.1"
 Private Const szOID_RSA_SSA_PSS                         As String = "1.2.840.113549.1.1.10"
@@ -106,6 +109,7 @@ Private Declare Function CertFreeCertificateContext Lib "crypt32" (ByVal pCertCo
     Private Declare Function BCryptDeriveKey Lib "bcrypt" (ByVal hSharedSecret As Long, ByVal pwszKDF As Long, ByVal pParameterList As Long, ByVal pbDerivedKey As Long, ByVal cbDerivedKey As Long, ByRef pcbResult As Long, ByVal dwFlags As Long) As Long
     Private Declare Function BCryptGenerateKeyPair Lib "bcrypt" (ByVal hAlgorithm As Long, ByRef hKey As Long, ByVal dwLength As Long, ByVal dwFlags As Long) As Long
     Private Declare Function BCryptFinalizeKeyPair Lib "bcrypt" (ByVal hKey As Long, ByVal dwFlags As Long) As Long
+    Private Declare Function BCryptSetProperty Lib "bcrypt" (ByVal hObject As Long, ByVal pszProperty As Long, ByVal pbInput As Long, ByVal cbInput As Long, ByVal dwFlags As Long) As Long
 #End If
 '--- libsodium
 Private Declare Function sodium_init Lib "libsodium" () As Long
@@ -2513,7 +2517,7 @@ Private Sub pvTlsSetupExchGroup(uCtx As UcsTlsContext, ByVal lExchGroup As Long)
             Case TLS_GROUP_SECP256R1, TLS_GROUP_SECP384R1
                 .ExchAlgo = IIf(lExchGroup = TLS_GROUP_SECP256R1, ucsTlsAlgoExchSecp256r1, ucsTlsAlgoExchSecp384r1)
                 If Not pvCryptoEcdhSecpMakeKey(IIf(.ExchAlgo = ucsTlsAlgoExchSecp256r1, 256, 384), .LocalExchPrivate, .LocalExchPublic) Then
-                    Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_GENER_KEYPAIR_FAILED, "%1", "secp256r1")
+                    Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_GENER_KEYPAIR_FAILED, "%1", IIf(.ExchAlgo = ucsTlsAlgoExchSecp256r1, "secp256r1", "secp384r1"))
                 End If
 #End If
             Case Else
@@ -2989,7 +2993,7 @@ Private Sub pvTlsGetSharedSecret(baRetVal() As Byte, ByVal eKeyX As UcsTlsCrypto
 #If ImplTlsServer Then
     Case ucsTlsAlgoExchSecp256r1, ucsTlsAlgoExchSecp384r1
         If Not pvCryptoEcdhSecpSharedSecret(IIf(eKeyX = ucsTlsAlgoExchSecp256r1, 256, 384), baRetVal, baPriv, baPub) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEcdhP256SharedSecret")
+            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEcdhSecpSharedSecret")
         End If
 #End If
     Case ucsTlsAlgoExchCertificate
@@ -3784,20 +3788,25 @@ QH:
 End Function
 
 Private Function pvCryptoEcdhCurve25519MakeKey(baPrivate() As Byte, baPublic() As Byte) As Boolean
+#If ImplUseLibSodium Then
     Const FUNC_NAME     As String = "CryptoEccCurve25519MakeKey"
     
     pvArrayAllocate baPrivate, LNG_X25519_KEYSZ, FUNC_NAME & ".baPrivate"
     pvArrayAllocate baPublic, LNG_X25519_KEYSZ, FUNC_NAME & ".baPublic"
     pvCryptoRandomBytes VarPtr(baPrivate(0)), LNG_X25519_KEYSZ
     '--- fix privkey randomness
-    baPrivate(0) = baPrivate(0) And 248
-    baPrivate(UBound(baPrivate)) = (baPrivate(UBound(baPrivate)) And 127) Or 64
+    baPrivate(0) = baPrivate(0) And &HF8
+    baPrivate(LNG_X25519_KEYSZ - 1) = (baPrivate(LNG_X25519_KEYSZ - 1) And &H7F) Or &H40
     Call crypto_scalarmult_curve25519_base(baPublic(0), baPrivate(0))
     '--- success
     pvCryptoEcdhCurve25519MakeKey = True
+#Else
+    pvCryptoEcdhCurve25519MakeKey = pvCryptoEcdhSecpMakeKey(0, baPrivate, baPublic)
+#End If
 End Function
 
 Private Function pvCryptoEcdhCurve25519SharedSecret(baRetVal() As Byte, baPrivate() As Byte, baPublic() As Byte) As Boolean
+#If ImplUseLibSodium Then
     Const FUNC_NAME     As String = "CryptoEccCurve25519SharedSecret"
     
     Debug.Assert UBound(baPrivate) >= LNG_X25519_KEYSZ - 1
@@ -3806,6 +3815,9 @@ Private Function pvCryptoEcdhCurve25519SharedSecret(baRetVal() As Byte, baPrivat
     Call crypto_scalarmult_curve25519(baRetVal(0), baPrivate(0), baPublic(0))
     '--- success
     pvCryptoEcdhCurve25519SharedSecret = True
+#Else
+    pvCryptoEcdhCurve25519SharedSecret = pvCryptoEcdhSecpSharedSecret(0, baRetVal, baPrivate, baPublic)
+#End If
 End Function
 
 #If ImplTlsServer Then
@@ -3818,9 +3830,20 @@ Private Function pvCryptoEcdhSecpMakeKey(ByVal lKeySize As Long, baPriv() As Byt
     Dim cbResult        As Long
     
     pvCryptoClearApiError
-    hResult = BCryptOpenAlgorithmProvider(hAlgEcdh, StrPtr("ECDH_P" & lKeySize), 0, 0)
-    If pvCryptoSetApiResult(hResult, "BCryptOpenAlgorithmProvider") Then
-        GoTo QH
+    If lKeySize = 0 Then
+        hResult = BCryptOpenAlgorithmProvider(hAlgEcdh, StrPtr("ECDH"), 0, 0)
+        If pvCryptoSetApiResult(hResult, "BCryptOpenAlgorithmProvider") Then
+            GoTo QH
+        End If
+        hResult = BCryptSetProperty(hAlgEcdh, StrPtr("ECCCurveName"), StrPtr("Curve25519"), 22, 0)
+        If pvCryptoSetApiResult(hResult, "BCryptSetProperty(ECCCurveName)") Then
+            GoTo QH
+        End If
+    Else
+        hResult = BCryptOpenAlgorithmProvider(hAlgEcdh, StrPtr("ECDH_P" & lKeySize), 0, 0)
+        If pvCryptoSetApiResult(hResult, "BCryptOpenAlgorithmProvider") Then
+            GoTo QH
+        End If
     End If
     hResult = BCryptGenerateKeyPair(hAlgEcdh, hKeyPair, lKeySize, 0)
     If pvCryptoSetApiResult(hResult, "BCryptGenerateKeyPair") Then
@@ -3868,9 +3891,20 @@ Private Function pvCryptoEcdhSecpSharedSecret(ByVal lKeySize As Long, baRetVal()
     Dim baBlob()        As Byte
     
     pvCryptoClearApiError
-    hResult = BCryptOpenAlgorithmProvider(hAlgEcdh, StrPtr("ECDH_P" & lKeySize), 0, 0)
-    If pvCryptoSetApiResult(hResult, "BCryptOpenAlgorithmProvider") Then
-        GoTo QH
+    If lKeySize = 0 Then
+        hResult = BCryptOpenAlgorithmProvider(hAlgEcdh, StrPtr("ECDH"), 0, 0)
+        If pvCryptoSetApiResult(hResult, "BCryptOpenAlgorithmProvider") Then
+            GoTo QH
+        End If
+        hResult = BCryptSetProperty(hAlgEcdh, StrPtr("ECCCurveName"), StrPtr("Curve25519"), 22, 0)
+        If pvCryptoSetApiResult(hResult, "BCryptSetProperty(ECCCurveName)") Then
+            GoTo QH
+        End If
+    Else
+        hResult = BCryptOpenAlgorithmProvider(hAlgEcdh, StrPtr("ECDH_P" & lKeySize), 0, 0)
+        If pvCryptoSetApiResult(hResult, "BCryptOpenAlgorithmProvider") Then
+            GoTo QH
+        End If
     End If
     If Not pvCryptoEcdhToKeyBlob(baBlob, baPriv) Then
         GoTo QH
@@ -3921,11 +3955,17 @@ Private Function pvCryptoEcdhToKeyBlob(baRetVal() As Byte, baKey() As Byte, Opti
     Dim lMagic          As Long
     Dim lPartSize       As Long
     Dim lPos            As Long
+    Dim lIdx            As Long
+    Dim lSum            As Long
     
     If lSize < 0 Then
         lSize = pvArraySize(baKey)
     End If
     Select Case lSize
+    Case LNG_X25519_KEYSZ
+        lMagic = BCRYPT_ECDH_PUBLIC_GENERIC_MAGIC
+        lPartSize = LNG_X25519_KEYSZ
+        lSize = 2 * LNG_X25519_KEYSZ
     Case 1 + 2 * LNG_SECP256R1_KEYSZ
         Debug.Assert baKey(0) = TAG_UNCOMPRESSED
         lMagic = BCRYPT_ECDH_PUBLIC_P256_MAGIC
@@ -3937,8 +3977,16 @@ Private Function pvCryptoEcdhToKeyBlob(baRetVal() As Byte, baKey() As Byte, Opti
         lPartSize = LNG_SECP384R1_KEYSZ
         lPos = 1
     Case 3 * LNG_SECP256R1_KEYSZ
-        lMagic = BCRYPT_ECDH_PRIVATE_P256_MAGIC
-        lPartSize = LNG_SECP256R1_KEYSZ
+        For lIdx = LNG_SECP256R1_KEYSZ To 2 * LNG_SECP256R1_KEYSZ - 1
+            lSum = lSum Or baKey(lIdx)
+        Next
+        If lSum = 0 Then
+            lMagic = BCRYPT_ECDH_PRIVATE_GENERIC_MAGIC
+            lPartSize = LNG_X25519_KEYSZ
+        Else
+            lMagic = BCRYPT_ECDH_PRIVATE_P256_MAGIC
+            lPartSize = LNG_SECP256R1_KEYSZ
+        End If
     Case 3 * LNG_SECP384R1_KEYSZ
         lMagic = BCRYPT_ECDH_PRIVATE_P384_MAGIC
         lPartSize = LNG_SECP384R1_KEYSZ
@@ -3948,7 +3996,7 @@ Private Function pvCryptoEcdhToKeyBlob(baRetVal() As Byte, baKey() As Byte, Opti
     pvArrayAllocate baRetVal, 8 + lSize - lPos, FUNC_NAME & ".baRetVal"
     Call CopyMemory(baRetVal(0), lMagic, 4)
     Call CopyMemory(baRetVal(4), lPartSize, 4)
-    Call CopyMemory(baRetVal(8), baKey(lPos), lSize - lPos)
+    Call CopyMemory(baRetVal(8), baKey(lPos), UBound(baKey) + 1 - lPos)
     '--- success
     pvCryptoEcdhToKeyBlob = True
 End Function
@@ -3971,14 +4019,20 @@ Private Function pvCryptoEcdhFromKeyBlob(baRetVal() As Byte, baBlob() As Byte, O
         Debug.Assert lSize >= 8 + 2 * lPartSize
         baRetVal(0) = TAG_UNCOMPRESSED
         Call CopyMemory(baRetVal(1), baBlob(8), 2 * lPartSize)
-    Case BCRYPT_ECDH_PRIVATE_P256_MAGIC, BCRYPT_ECDH_PRIVATE_P384_MAGIC
+    Case BCRYPT_ECDH_PRIVATE_P256_MAGIC, BCRYPT_ECDH_PRIVATE_P384_MAGIC, BCRYPT_ECDH_PRIVATE_GENERIC_MAGIC
         Call CopyMemory(lPartSize, baBlob(4), 4)
         Debug.Assert lPartSize = LNG_SECP256R1_KEYSZ Or lPartSize = LNG_SECP384R1_KEYSZ
         pvArrayAllocate baRetVal, 3 * lPartSize, FUNC_NAME & ".baRetVal"
         Debug.Assert lSize >= 8 + 3 * lPartSize
         Call CopyMemory(baRetVal(0), baBlob(8), 3 * lPartSize)
+    Case BCRYPT_ECDH_PUBLIC_GENERIC_MAGIC
+        Call CopyMemory(lPartSize, baBlob(4), 4)
+        Debug.Assert lPartSize = LNG_X25519_KEYSZ
+        pvArrayAllocate baRetVal, lPartSize, FUNC_NAME & ".baRetVal"
+        Debug.Assert lSize >= 8 + lPartSize
+        Call CopyMemory(baRetVal(0), baBlob(8), lPartSize)
     Case Else
-        Err.Raise vbObjectError, , "Unknown BCrypt magic"
+        Err.Raise vbObjectError, , "Unknown BCrypt magic (&H" & Hex$(lMagic) & ")"
     End Select
     '--- success
     pvCryptoEcdhFromKeyBlob = True
