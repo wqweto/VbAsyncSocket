@@ -28,7 +28,6 @@ Private Const MODULE_NAME As String = "cTlsSocket"
 #Const ImplUseShared = (ASYNCSOCKET_USE_SHARED <> 0)
 #Const ImplSync = Not (ASYNCSOCKET_NO_SYNC <> 0)
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
-#Const ImplUseLibSodium = (ASYNCSOCKET_USE_LIBSODIUM <> 0)
 
 '=========================================================================
 ' Public events
@@ -229,7 +228,7 @@ Private Type CERT_CONTEXT
 End Type
 
 Private Type CRYPT_PRIVATE_KEY_INFO
-    Version             As Long
+    dwVersion           As Long
     Algorithm           As CRYPT_ALGORITHM_IDENTIFIER
     PrivateKey          As CRYPT_BLOB_DATA
     pAttributes         As Long
