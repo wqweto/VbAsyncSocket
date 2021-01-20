@@ -31,6 +31,7 @@ Private Const X509_ASN_ENCODING                         As Long = 1
 Private Const PKCS_7_ASN_ENCODING                       As Long = &H10000
 Private Const PKCS_RSA_PRIVATE_KEY                      As Long = 43
 Private Const PKCS_PRIVATE_KEY_INFO                     As Long = 44
+Private Const X509_ECC_SIGNATURE                        As Long = 47
 Private Const X509_ECC_PRIVATE_KEY                      As Long = 82
 Private Const CRYPT_DECODE_NOCOPY_FLAG                  As Long = &H1
 Private Const CRYPT_DECODE_ALLOC_FLAG                   As Long = &H8000
@@ -42,7 +43,6 @@ Private Const CALG_SHA_384                              As Long = &H800D&
 Private Const CALG_SHA_512                              As Long = &H800E&
 '--- for CryptGet/SetHashParam
 Private Const HP_HASHVAL                                As Long = 2
-Private Const HP_HASHSIZE                               As Long = 4
 Private Const HP_HMAC_INFO                              As Long = 5
 '--- for CryptImportKey
 Private Const PLAINTEXTKEYBLOB                          As Long = 8
@@ -94,6 +94,7 @@ Private Declare Function CryptDestroyHash Lib "advapi32" (ByVal hHash As Long) A
 '--- crypt32
 Private Declare Function CryptImportPublicKeyInfo Lib "crypt32" (ByVal hCryptProv As Long, ByVal dwCertEncodingType As Long, pInfo As Any, phKey As Long) As Long
 Private Declare Function CryptDecodeObjectEx Lib "crypt32" (ByVal dwCertEncodingType As Long, ByVal lpszStructType As Any, pbEncoded As Any, ByVal cbEncoded As Long, ByVal dwFlags As Long, ByVal pDecodePara As Long, pvStructInfo As Any, pcbStructInfo As Long) As Long
+Private Declare Function CryptEncodeObjectEx Lib "crypt32" (ByVal dwCertEncodingType As Long, ByVal lpszStructType As Any, pvStructInfo As Any, ByVal dwFlags As Long, ByVal pEncodePara As Long, pvEncoded As Any, pcbEncoded As Long) As Long
 Private Declare Function CertCreateCertificateContext Lib "crypt32" (ByVal dwCertEncodingType As Long, pbCertEncoded As Any, ByVal cbCertEncoded As Long) As Long
 Private Declare Function CertFreeCertificateContext Lib "crypt32" (ByVal pCertContext As Long) As Long
 '--- bcrypt
@@ -198,6 +199,11 @@ Private Type BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO
     cbData(7)           As Byte
     dwFlags             As Long
     lPad2               As Long
+End Type
+
+Private Type CERT_ECC_SIGNATURE
+    rValue             As CRYPT_BLOB_DATA
+    sValue             As CRYPT_BLOB_DATA
 End Type
 
 '=========================================================================
@@ -3629,15 +3635,12 @@ Private Sub pvBCryptRsaPssSign(baRetVal() As Byte, baKeyBlob() As Byte, ByVal lS
     If Not pvCryptoHash(baHash, lHashAlgId, baMessage) Then
         Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHash")
     End If
-    hResult = BCryptSignHash(hKey, uPadInfo, baHash(0), UBound(baHash) + 1, ByVal 0, 0, lSize, BCRYPT_PAD_PSS)
+    pvArrayAllocate baRetVal, 4096, FUNC_NAME & ".baRetVal"
+    hResult = BCryptSignHash(hKey, uPadInfo, baHash(0), UBound(baHash) + 1, baRetVal(0), UBound(baRetVal) + 1, lSize, BCRYPT_PAD_PSS)
     If pvCryptoSetApiResult(hResult, "BCryptSignHash") Then
         GoTo QH
     End If
-    pvArrayAllocate baRetVal, lSize, FUNC_NAME & ".baRetVal"
-    hResult = BCryptSignHash(hKey, uPadInfo, baHash(0), UBound(baHash) + 1, baRetVal(0), UBound(baRetVal) + 1, lSize, BCRYPT_PAD_PSS)
-    If pvCryptoSetApiResult(hResult, "BCryptSignHash#2") Then
-        GoTo QH
-    End If
+    pvArrayReallocate baRetVal, lSize, FUNC_NAME & ".baRetVal"
 QH:
     If hKey <> 0 Then
         Call BCryptDestroyKey(hKey)
@@ -3659,6 +3662,8 @@ Private Sub pvBCryptEcdsaSign(baRetVal() As Byte, baKeyBlob() As Byte, ByVal lSi
     Dim baHash()        As Byte
     Dim uEccKey         As BCRYPT_ECCKEY_BLOB
     Dim baTemp()        As Byte
+    Dim uEccSig         As CERT_ECC_SIGNATURE
+    Dim lResult         As Long
     
     pvCryptoClearApiError
     Select Case lSignatureScheme
@@ -3691,16 +3696,25 @@ Private Sub pvBCryptEcdsaSign(baRetVal() As Byte, baKeyBlob() As Byte, ByVal lSi
     If pvCryptoSetApiResult(hResult, "BCryptImportKeyPair") Then
         GoTo QH
     End If
-    hResult = BCryptSignHash(hKey, ByVal 0, baHash(0), UBound(baHash) + 1, ByVal 0, 0, lSize, 0)
+    pvArrayAllocate baTemp, 1024, FUNC_NAME & ".baTemp"
+    hResult = BCryptSignHash(hKey, ByVal 0, baHash(0), UBound(baHash) + 1, baTemp(0), UBound(baTemp) + 1, lSize, 0)
     If pvCryptoSetApiResult(hResult, "BCryptSignHash") Then
         GoTo QH
     End If
-    pvArrayAllocate baTemp, lSize, FUNC_NAME & ".baTemp"
-    hResult = BCryptSignHash(hKey, ByVal 0, baHash(0), UBound(baHash) + 1, baTemp(0), UBound(baTemp) + 1, lSize, 0)
-    If pvCryptoSetApiResult(hResult, "BCryptSignHash#2") Then
+    pvArrayReallocate baTemp, lSize, FUNC_NAME & ".baTemp"
+    '--- ASN.1 encode signature
+    pvArrayReverse baTemp
+    uEccSig.rValue.pbData = VarPtr(baTemp(uEccKey.cbKey))
+    uEccSig.rValue.cbData = uEccKey.cbKey
+    uEccSig.sValue.pbData = VarPtr(baTemp(0))
+    uEccSig.sValue.cbData = uEccKey.cbKey
+    lSize = 1024
+    pvArrayAllocate baRetVal, lSize, FUNC_NAME & ".baRetVal"
+    lResult = CryptEncodeObjectEx(X509_ASN_ENCODING, X509_ECC_SIGNATURE, uEccSig, 0, 0, baRetVal(0), lSize)
+    If pvCryptoSetApiError(lResult, "CryptEncodeObjectEx") Then
         GoTo QH
     End If
-    pvAsn1EncodeEcdsaSignature baRetVal, baTemp, uEccKey.cbKey
+    pvArrayReallocate baRetVal, lSize, FUNC_NAME & ".baRetVal"
 QH:
     If hKey <> 0 Then
         Call BCryptDestroyKey(hKey)
@@ -3710,45 +3724,6 @@ QH:
     End If
     pvCryptoCheckApiError FUNC_NAME
 End Sub
-
-Private Function pvAsn1EncodeEcdsaSignature(baRetVal() As Byte, baPlainSig() As Byte, ByVal lPartSize As Long) As Boolean
-    Const LNG_ANS1_TYPE_SEQUENCE As Long = &H30
-    Const LNG_ANS1_TYPE_INTEGER As Long = &H2
-    Dim uOutput         As UcsBuffer
-    Dim lStart          As Long
-    
-    pvBufferWriteLong uOutput, LNG_ANS1_TYPE_SEQUENCE
-    pvBufferWriteBlockStart uOutput
-        pvBufferWriteLong uOutput, LNG_ANS1_TYPE_INTEGER
-        pvBufferWriteBlockStart uOutput
-            For lStart = 0 To lPartSize - 1
-                If baPlainSig(lStart) <> 0 Then
-                    Exit For
-                End If
-            Next
-            If (baPlainSig(lStart) And &H80) <> 0 Then
-                pvBufferWriteLong uOutput, 0
-            End If
-            pvBufferWriteBlob uOutput, VarPtr(baPlainSig(lStart)), lPartSize - lStart
-        pvBufferWriteBlockEnd uOutput
-        pvBufferWriteLong uOutput, LNG_ANS1_TYPE_INTEGER
-        pvBufferWriteBlockStart uOutput
-            For lStart = 0 To lPartSize - 1
-                If baPlainSig(lPartSize + lStart) <> 0 Then
-                    Exit For
-                End If
-            Next
-            If (baPlainSig(lPartSize + lStart) And &H80) <> 0 Then
-                pvBufferWriteLong uOutput, 0
-            End If
-            pvBufferWriteBlob uOutput, VarPtr(baPlainSig(lPartSize + lStart)), lPartSize - lStart
-        pvBufferWriteBlockEnd uOutput
-    pvBufferWriteBlockEnd uOutput
-    pvBufferWriteEOF uOutput
-    '--- success
-    pvAsn1EncodeEcdsaSignature = True
-    baRetVal = uOutput.Data
-End Function
 #End If
 
 Private Function pvAsn1DecodePrivateKey(baPrivKey() As Byte, uRetVal As UcsKeyInfo) As Boolean
@@ -4104,15 +4079,13 @@ Private Function pvCryptoHash(baRetVal() As Byte, ByVal lHashAlgId As Long, baIn
             GoTo QH
         End If
     End If
-    lResult = CryptGetHashParam(hHash, HP_HASHSIZE, lHashSize, 4, 0)
+    lHashSize = 1024
+    pvArrayAllocate baRetVal, lHashSize, FUNC_NAME & ".baRetVal"
+    lResult = CryptGetHashParam(hHash, HP_HASHVAL, baRetVal(0), lHashSize, 0)
     If pvCryptoSetApiError(lResult, "CryptGetHashParam") Then
         GoTo QH
     End If
-    pvArrayAllocate baRetVal, lHashSize, FUNC_NAME & ".baRetVal"
-    lResult = CryptGetHashParam(hHash, HP_HASHVAL, baRetVal(0), lHashSize, 0)
-    If pvCryptoSetApiError(lResult, "CryptGetHashParam#2") Then
-        GoTo QH
-    End If
+    pvArrayReallocate baRetVal, lHashSize, FUNC_NAME & ".baRetVal"
     '--- success
     pvCryptoHash = True
 QH:
@@ -4160,15 +4133,13 @@ Private Function pvCryptoHmac(baRetVal() As Byte, ByVal lHashAlgId As Long, baKe
             GoTo QH
         End If
     End If
-    lResult = CryptGetHashParam(hHash, HP_HASHSIZE, lHashSize, 4, 0)
+    lHashSize = 1024
+    pvArrayAllocate baRetVal, lHashSize, FUNC_NAME & ".baRetVal"
+    lResult = CryptGetHashParam(hHash, HP_HASHVAL, baRetVal(0), lHashSize, 0)
     If pvCryptoSetApiError(lResult, "CryptGetHashParam") Then
         GoTo QH
     End If
-    pvArrayAllocate baRetVal, lHashSize, FUNC_NAME & ".baRetVal"
-    lResult = CryptGetHashParam(hHash, HP_HASHVAL, baRetVal(0), lHashSize, 0)
-    If pvCryptoSetApiError(lResult, "CryptGetHashParam#2") Then
-        GoTo QH
-    End If
+    pvArrayReallocate baRetVal, lHashSize, FUNC_NAME & ".baRetVal"
     '--- success
     pvCryptoHmac = True
 QH:
