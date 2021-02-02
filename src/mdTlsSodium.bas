@@ -298,7 +298,7 @@ Private Const TLS_LEGACY_AAD_SIZE                       As Long = 13    '--- for
 Private Const LNG_X25519_KEYSZ                          As Long = 32
 Private Const LNG_SECP256R1_KEYSZ                       As Long = 32
 Private Const LNG_SECP384R1_KEYSZ                       As Long = 48
-Private Const LNG_SECP521R1_KEYSZ                       As Long = 64
+Private Const LNG_SECP521R1_KEYSZ                       As Long = 66 '--- CEIL(521/8)
 Private Const LNG_MD5_HASHSZ                            As Long = 16
 Private Const LNG_SHA1_HASHSZ                           As Long = 20
 Private Const LNG_SHA224_HASHSZ                         As Long = 28
@@ -802,7 +802,7 @@ Public Function TlsGetLastError(uCtx As UcsTlsContext, Optional LastErrNumber As
     LastErrNumber = uCtx.LastErrNumber
     LastErrSource = uCtx.LastErrSource
     TlsGetLastError = uCtx.LastError
-    If uCtx.LastAlertCode <> -1 Then
+    If uCtx.LastAlertCode <> -1 And uCtx.LastAlertCode <> 0 Then
         TlsGetLastError = IIf(LenB(TlsGetLastError) <> 0, TlsGetLastError & ". ", vbNullString) & Replace(STR_FORMAT_ALERT, "%1", pvTlsGetLastAlert(uCtx))
         '--- warnings
         Select Case uCtx.LastAlertCode
@@ -2541,7 +2541,7 @@ Private Sub pvTlsSetupExchGroup(uCtx As UcsTlsContext, ByVal lExchGroup As Long)
             Select Case lExchGroup
             Case TLS_GROUP_X25519
                 .ExchAlgo = ucsTlsAlgoExchX25519
-#If ImplLibSodum Then
+#If ImplLibSodium Then
                 If Not pvCryptoEcdhCurve25519MakeKey(.LocalExchPrivate, .LocalExchPublic) Then
                     Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_GENER_KEYPAIR_FAILED, "%1", "Curve25519")
                 End If
@@ -3028,7 +3028,7 @@ Private Sub pvTlsGetSharedSecret(baRetVal() As Byte, ByVal eKeyX As UcsTlsCrypto
     
     Select Case eKeyX
     Case ucsTlsAlgoExchX25519
-#If ImplLibSodum Then
+#If ImplLibSodium Then
         If Not pvCryptoEcdhCurve25519SharedSecret(baRetVal, baPriv, baPub) Then
             Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEcdhCurve25519SharedSecret")
         End If

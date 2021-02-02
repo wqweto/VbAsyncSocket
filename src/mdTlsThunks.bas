@@ -818,7 +818,7 @@ Public Function TlsGetLastError(uCtx As UcsTlsContext, Optional LastErrNumber As
     LastErrNumber = uCtx.LastErrNumber
     LastErrSource = uCtx.LastErrSource
     TlsGetLastError = uCtx.LastError
-    If uCtx.LastAlertCode <> -1 Then
+    If uCtx.LastAlertCode <> -1 And uCtx.LastAlertCode <> 0 Then
         TlsGetLastError = IIf(LenB(TlsGetLastError) <> 0, TlsGetLastError & ". ", vbNullString) & Replace(STR_FORMAT_ALERT, "%1", pvTlsGetLastAlert(uCtx))
         '--- warnings
         Select Case uCtx.LastAlertCode
