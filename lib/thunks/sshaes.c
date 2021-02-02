@@ -204,7 +204,7 @@ static FUNC_ISA void cf_aes_ni_key_expand(const unsigned char *key, size_t key_w
                 v = _mm_aeskeygenassist_si128(v, 0);
                 temp = _mm_extract_epi32(v, 1);
 
-                assert(rconpos < lenof(key_setup_round_constants));
+                assert(rconpos < _countof(key_setup_round_constants));
                 temp ^= key_setup_round_constants[rconpos++];
             } else if (only_sub) {
                 __m128i v = _mm_setr_epi32(0,temp,0,0);
@@ -255,11 +255,11 @@ static int cf_aes_ni_setup(cf_aes_ni_context *ctx, const unsigned char *key, int
     /* Ensure the key schedule arrays are 16-byte aligned */
     bufaddr = (size_t)ctx->ks_e;
     ctx->keysched_e = (__m128i *)(ctx->ks_e + (0xF & (~bufaddr+1)) / sizeof(uint32_t));
-    assert((size_t)ctx->keysched % 16 == 0);
+    assert((size_t)ctx->keysched_e % 16 == 0);
 
     bufaddr = (size_t)ctx->ks_d;
     ctx->keysched_d = (__m128i *)(ctx->ks_d + (0xF & (~bufaddr+1)) / sizeof(uint32_t));
-    assert((size_t)ctx->invkeysched % 16 == 0);
+    assert((size_t)ctx->keysched_d % 16 == 0);
 
     cf_aes_ni_key_expand(key, keylen / sizeof(uint32_t), ctx->keysched_e, ctx->keysched_d);
     return 1;

@@ -127,7 +127,16 @@ static int beginOfThunk(int i) {
     return a[b[i]];
 }
 
-__declspec(naked) static thunk_context_t *getContext() {
+#ifdef _WIN64
+#define API_NAKED
+#else
+#define API_NAKED __declspec(naked) 
+#endif
+
+API_NAKED static thunk_context_t *getContext() {
+#ifdef _WIN64
+    return 0;
+#else
     __asm {
         call    _next
 _next:
@@ -137,9 +146,13 @@ _next:
         mov     eax, [eax]
         ret
     }
+#endif
 }
 
-__declspec(naked) static uint8_t *getThunk() {
+API_NAKED static uint8_t *getThunk() {
+#ifdef _WIN64
+    return 0;
+#else
     __asm {
         call    _next
 _next:
@@ -148,6 +161,7 @@ _next:
         add     eax, beginOfThunk
         ret
     }
+#endif
 }
 
 #define DECLARE_PFN(t, f) const t pfn_##f = (t)(getThunk() + (((uint8_t *)f) - ((uint8_t *)beginOfThunk)))
