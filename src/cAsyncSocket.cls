@@ -276,7 +276,7 @@ Private Const STR_HELPER_NAME       As String = "AsyncSocket Helper Window"
 Private Const STR_CHR1              As String = "" '--- CHAR(1)
 Private Const DEF_TIMEOUT           As Long = 5000
 '--- helper window
-Private Const MAX_SOCKETS           As Long = &HC000 - WM_SOCKET_NOTIFY
+Private Const MAX_SOCKETS           As Long = &HC000& - WM_SOCKET_NOTIFY
 
 Private m_hSocket               As Long
 Private m_pCleanup              As IUnknown
