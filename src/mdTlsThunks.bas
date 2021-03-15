@@ -1600,7 +1600,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                     End If
                 End If
             Case TLS_CONTENT_TYPE_APPDATA
-                If .State <> ucsTlsStatePostHandshake Then
+                If .State < ucsTlsStatePostHandshake Then
                     GoTo UnexpectedRecordType
                 End If
                 pvBufferWriteBlob .DecrBuffer, VarPtr(uInput.Data(uInput.Pos)), lEnd - uInput.Pos
