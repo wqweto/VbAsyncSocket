@@ -84,6 +84,8 @@ Private m_dblBytesProgress      As Double
 Private m_dblContentLength      As Double
 Private m_sBoundaryData         As String
 Private m_lBufferSize           As Long
+Private m_sFileFormName         As String
+Private m_sBody                 As String
 
 Private Enum UcsStateEnum
     ucsIdle
@@ -154,16 +156,20 @@ Property Let BufferSize(ByVal lValue As Long)
     End If
 End Property
 
+Property Get Body() As String
+    Body = m_sBody
+End Property
+
 '=========================================================================
 ' Methods
 '=========================================================================
 
 Public Sub DownloadFile(URL As String, LocalFileName As Variant)
-    pvInit URL, LocalFileName, STGM_WRITE Or STGM_CREATE
+    pvInit URL, LocalFileName, STGM_WRITE Or STGM_CREATE, vbNullString
 End Sub
 
-Public Sub UploadFile(URL As String, LocalFileName As Variant)
-    pvInit URL, LocalFileName, STGM_READ
+Public Sub UploadFile(URL As String, LocalFileName As Variant, Optional FileFormName As String)
+    pvInit URL, LocalFileName, STGM_READ, IIf(LenB(FileFormName) <> 0, FileFormName, "file")
 End Sub
 
 Public Sub CancelOperation()
@@ -182,7 +188,7 @@ End Sub
 
 '= private ===============================================================
 
-Private Sub pvInit(URL As String, LocalFileName As Variant, ByVal StreamFlags As Long)
+Private Sub pvInit(URL As String, LocalFileName As Variant, ByVal StreamFlags As Long, FileFormName As String)
     Const FUNC_NAME     As String = "pvInit"
     Dim hResult     As Long
     
@@ -207,6 +213,7 @@ Private Sub pvInit(URL As String, LocalFileName As Variant, ByVal StreamFlags As
             Err.Raise hResult
         End If
     End If
+    m_sFileFormName = FileFormName
     m_dStartDate = Now
     m_eState = ucsIdle
     m_dblBytesProgress = 0
@@ -427,6 +434,7 @@ Private Function pvSendComplete(baBuffer() As Byte) As Boolean
         vSplit = Split(Left$(sHeaders, lPos), vbCrLf)
         Select Case CLng(Val(Mid$(vSplit(0), 10, 3)))
         Case 200 To 299, 300 To 399
+            m_sBody = Mid$(sHeaders, lPos + Len(STR_DELIM))
             RaiseEvent UploadComplete(m_sLocalFileName)
             If m_lCallbackPtr <> 0 Then
                 Call CallbackWeakRef.UploadComplete(Me, m_sLocalFileName)
@@ -567,7 +575,7 @@ Private Sub m_oSocket_OnConnect()
     Else
         m_eState = ucsWaitSendBody
         sPostData = "--" & STR_BOUNDARY & vbCrLf & _
-            "Content-Disposition: form-data; name=""uploadfile""; filename=""" & Mid$(m_sLocalFileName, InStrRev(m_sLocalFileName, "\") + 1) & """" & vbCrLf & _
+            "Content-Disposition: form-data; name=""" & m_sFileFormName & """; filename=""" & Mid$(m_sLocalFileName, InStrRev(m_sLocalFileName, "\") + 1) & """" & vbCrLf & _
             "Content-Type: application/octet-stream" & vbCrLf & vbCrLf
         m_sBoundaryData = vbCrLf & "--" & STR_BOUNDARY & "--"
         If Not m_oSocket.SendText("POST " & m_uRemote.Path & m_uRemote.QueryString & " HTTP/1.0" & vbCrLf & _

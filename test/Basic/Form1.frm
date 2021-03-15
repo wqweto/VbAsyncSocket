@@ -773,7 +773,11 @@ End Sub
 
 Private Sub Command12_Click()
     Set m_oHttpDownload = New cHttpDownload
-    m_oHttpDownload.UploadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://www.unicontsoft.com/upload_errors.php?id=deldeldel", Environ$("TMP") & "\aaa.gif"
+    If chkUseHttps.Value = vbChecked Then
+        m_oHttpDownload.UploadFile "https://x0.at/", Environ$("TMP") & "\aaa.gif"
+    Else
+        m_oHttpDownload.UploadFile "http://www.unicontsoft.com/upload_errors.php?id=deldeldel", Environ$("TMP") & "\aaa.gif", "uploadfile"
+    End If
 End Sub
 
 Private Sub m_oHttpDownload_UploadProgress(ByVal BytesWritten As Double, ByVal BytesTotal As Double)
@@ -789,6 +793,7 @@ End Sub
 Private Sub m_oHttpDownload_UploadComplete(ByVal LocalFileName As String)
     Const FUNC_NAME     As String = "m_oHttpDownload_UploadComplete"
     
-    DebugLog MODULE_NAME, FUNC_NAME, "Upload of " & LocalFileName & " complete"
-    MsgBox "Upload of " & LocalFileName & " complete", vbExclamation
+    DebugLog MODULE_NAME, FUNC_NAME, "Upload of " & LocalFileName & " complete to " & m_oHttpDownload.Body
+    MsgBox "Upload of " & LocalFileName & " complete to " & m_oHttpDownload.Body, vbExclamation
+    Clipboard.Clear: Clipboard.SetText m_oHttpDownload.Body
 End Sub
