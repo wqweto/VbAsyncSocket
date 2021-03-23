@@ -655,11 +655,6 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
     
     On Error GoTo EH
     With uCtx
-        #If ImplCaptureTraffic Then
-            If lSize <> 0 Then
-                .TrafficDump.Add FUNC_NAME & ".Input" & vbCrLf & DesignDumpArray(baInput, Size:=lSize)
-            End If
-        #End If
         If .State = ucsTlsStateClosed Then
             pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_CONNECTION_CLOSED
             Exit Function
@@ -674,6 +669,11 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
             If lSize < 0 Then
                 lSize = pvArraySize(baInput)
             End If
+            #If ImplCaptureTraffic Then
+                If lSize <> 0 Then
+                    .TrafficDump.Add FUNC_NAME & ".Input" & vbCrLf & DesignDumpArray(baInput, Size:=lSize)
+                End If
+            #End If
             If Not pvTlsParsePayload(uCtx, baInput, lSize, .LastError, .LastAlertCode) Then
                 pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, .LastError, .LastAlertCode
                 GoTo QH
@@ -702,14 +702,14 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
     
     On Error GoTo EH
     With uCtx
+        If lSize < 0 Then
+            lSize = pvArraySize(baInput)
+        End If
         #If ImplCaptureTraffic Then
             If lSize <> 0 Then
                 .TrafficDump.Add FUNC_NAME & ".Input (undecrypted)" & vbCrLf & DesignDumpArray(baInput, Size:=lSize)
             End If
         #End If
-        If lSize < 0 Then
-            lSize = pvArraySize(baInput)
-        End If
         If lSize = 0 Then
             '--- flush
             If .DecrBuffer.Size > 0 Then
@@ -2111,12 +2111,12 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
                             End If
                             pvBufferReadLong uInput, lExchGroup, Size:=2
                             pvTlsSetupExchGroup uCtx, lExchGroup
-                            #If ImplUseDebugLog Then
-                                DebugLog MODULE_NAME, FUNC_NAME, "With exchange group " & pvTlsGetExchGroupName(.ExchGroup)
-                            #End If
                             If .HelloRetryRequest Then
                                 .HelloRetryExchGroup = lExchGroup
                             Else
+                                #If ImplUseDebugLog Then
+                                    DebugLog MODULE_NAME, FUNC_NAME, "With exchange group " & pvTlsGetExchGroupName(.ExchGroup)
+                                #End If
                                 If lExtSize <= 4 Then
                                     GoTo InvalidSize
                                 End If
