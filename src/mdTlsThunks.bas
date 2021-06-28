@@ -347,10 +347,11 @@ Private Enum UcsTlsStatesEnum '--- sync w/ STR_VL_STATES
     ucsTlsStateExpectServerFinished = 5     '--- not used in TLS 1.3
 #If ImplTlsServer Then
     ucsTlsStateExpectClientHello = 6
-    ucsTlsStateExpectClientFinished = 7
+    ucsTlsStateExpectClientKeyExchange = 7  '--- not used in TLS 1.3
+    ucsTlsStateExpectClientFinished = 8
 #End If
-    ucsTlsStatePostHandshake = 8
-    ucsTlsStateShutdown = 9
+    ucsTlsStatePostHandshake = 9
+    ucsTlsStateShutdown = 10
 End Enum
 
 Private Enum UcsTlsCryptoAlgorithmsEnum
@@ -611,7 +612,8 @@ Public Function TlsInitServer( _
             Optional RemoteHostName As String, _
             Optional Certificates As Collection, _
             Optional PrivateKey As Collection, _
-            Optional AlpnProtocols As String) As Boolean
+            Optional AlpnProtocols As String, _
+            Optional ByVal LocalFeatures As Long = ucsTlsSupportTls13 Or ucsTlsSupportTls12) As Boolean
 #If Not ImplTlsServer Then
     Err.Raise vbObjectError, , ERR_NO_SERVER_COMPILED
 #Else
@@ -626,7 +628,7 @@ Public Function TlsInitServer( _
         .IsServer = True
         .State = ucsTlsStateExpectClientHello
         .RemoteHostName = RemoteHostName
-        .LocalFeatures = ucsTlsSupportTls13
+        .LocalFeatures = LocalFeatures
         Set .LocalCertificates = Certificates
         Set .LocalPrivateKey = PrivateKey
         .AlpnProtocols = AlpnProtocols
@@ -1286,6 +1288,10 @@ Private Sub pvTlsBuildServerHello(uCtx As UcsTlsContext, uOutput As UcsBuffer)
                             pvBufferWriteLong uOutput, TLS_PROTOCOL_VERSION_TLS13, Size:=2
                         pvBufferWriteBlockEnd uOutput
                     End If
+                    If SearchCollection(.RemoteExtensions, "#" & TLS_EXTENSION_EXTENDED_MASTER_SECRET) Then
+                        pvArrayByte baTemp, 0, TLS_EXTENSION_EXTENDED_MASTER_SECRET, 0, 0
+                        pvBufferWriteArray uOutput, baTemp     '--- supported
+                    End If
                     If .HelloRetryRequest And pvArraySize(.HelloRetryCookie) > 0 Then
                         '--- Extension - HRR Cookie
                         pvBufferWriteLong uOutput, TLS_EXTENSION_COOKIE, Size:=2
@@ -1299,11 +1305,78 @@ Private Sub pvTlsBuildServerHello(uCtx As UcsTlsContext, uOutput As UcsBuffer)
             pvBufferWriteBlockEnd uOutput
             pvTlsAppendHandshakeHash uCtx, uOutput.Data, lMessagePos, uOutput.Size - lMessagePos
         pvBufferWriteRecordEnd uOutput, uCtx
-        If .HelloRetryRequest Or .HelloRetryCipherSuite = 0 Then
+        If (.HelloRetryRequest Or .HelloRetryCipherSuite = 0) And .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
             '--- Legacy Change Cipher Spec
             pvArrayByte baTemp, TLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC, TLS_RECORD_VERSION \ &H100, TLS_RECORD_VERSION, 0, 1, 1
             pvBufferWriteArray uOutput, baTemp
         End If
+    End With
+End Sub
+
+Private Sub pvTlsBuildServerLegacyKeyExchange(uCtx As UcsTlsContext, uOutput As UcsBuffer)
+    Dim lMessagePos     As Long
+    Dim baSignature()   As Byte
+    Dim lIdx            As Long
+    Dim baCert()        As Byte
+    Dim uVerify         As UcsBuffer
+    Dim lSignPos        As Long
+    Dim lSignSize       As Long
+    
+    With uCtx
+        '--- Record Header
+        pvBufferWriteRecordStart uOutput, TLS_CONTENT_TYPE_HANDSHAKE, uCtx
+            '--- Server Certificate
+            lMessagePos = uOutput.Size
+            pvBufferWriteLong uOutput, TLS_HANDSHAKE_CERTIFICATE
+            pvBufferWriteBlockStart uOutput, Size:=3
+                pvBufferWriteBlockStart uOutput, Size:=3
+                    For lIdx = 1 To pvCollectionCount(.LocalCertificates)
+                        pvBufferWriteBlockStart uOutput, Size:=3
+                            baCert = .LocalCertificates.Item(lIdx)
+                            pvBufferWriteArray uOutput, baCert
+                        pvBufferWriteBlockEnd uOutput
+                    Next
+                pvBufferWriteBlockEnd uOutput
+            pvBufferWriteBlockEnd uOutput
+            pvTlsAppendHandshakeHash uCtx, uOutput.Data, lMessagePos, uOutput.Size - lMessagePos
+        pvBufferWriteRecordEnd uOutput, uCtx
+        '--- Record Header
+        pvBufferWriteRecordStart uOutput, TLS_CONTENT_TYPE_HANDSHAKE, uCtx
+            '--- Server Key Exchange
+            lMessagePos = uOutput.Size
+            pvBufferWriteLong uOutput, TLS_HANDSHAKE_SERVER_KEY_EXCHANGE
+            pvBufferWriteBlockStart uOutput, Size:=3
+                '--- Curve Info
+                lSignPos = uOutput.Size
+                pvBufferWriteLong uOutput, 3, Size:=1 '--- 3 = named_curve
+                pvBufferWriteLong uOutput, .ExchGroup, Size:=2
+                '--- Public Key
+                pvBufferWriteBlockStart uOutput
+                    pvBufferWriteArray uOutput, .LocalExchPublic
+                pvBufferWriteBlockEnd uOutput
+                lSignSize = uOutput.Size - lSignPos
+                '--- Signature
+                pvBufferWriteArray uVerify, .RemoteExchRandom
+                pvBufferWriteArray uVerify, .LocalExchRandom
+                pvBufferWriteBlob uVerify, VarPtr(uOutput.Data(lSignPos)), lSignSize
+                pvBufferWriteEOF uVerify
+                pvTlsSignatureSign baSignature, .LocalPrivateKey, .LocalSignatureScheme, uVerify.Data
+                pvBufferWriteLong uOutput, .LocalSignatureScheme, Size:=2
+                pvBufferWriteBlockStart uOutput, Size:=2
+                    pvBufferWriteArray uOutput, baSignature
+                pvBufferWriteBlockEnd uOutput
+            pvBufferWriteBlockEnd uOutput
+            pvTlsAppendHandshakeHash uCtx, uOutput.Data, lMessagePos, uOutput.Size - lMessagePos
+        pvBufferWriteRecordEnd uOutput, uCtx
+        '--- Record Header
+        pvBufferWriteRecordStart uOutput, TLS_CONTENT_TYPE_HANDSHAKE, uCtx
+            '--- Server Hello Done
+            lMessagePos = uOutput.Size
+            pvBufferWriteLong uOutput, TLS_HANDSHAKE_SERVER_HELLO_DONE
+            pvBufferWriteBlockStart uOutput, Size:=3
+            pvBufferWriteBlockEnd uOutput
+            pvTlsAppendHandshakeHash uCtx, uOutput.Data, lMessagePos, uOutput.Size - lMessagePos
+        pvBufferWriteRecordEnd uOutput, uCtx
     End With
 End Sub
 
@@ -1385,6 +1458,28 @@ Private Sub pvTlsBuildServerHandshakeFinished(uCtx As UcsTlsContext, uOutput As 
             pvTlsAppendHandshakeHash uCtx, uOutput.Data, lMessagePos, uOutput.Size - lMessagePos
             '--- Record Type
             pvBufferWriteLong uOutput, TLS_CONTENT_TYPE_HANDSHAKE
+        pvBufferWriteRecordEnd uOutput, uCtx
+    End With
+End Sub
+
+Private Sub pvTlsBuildServerLegacyFinished(uCtx As UcsTlsContext, uOutput As UcsBuffer)
+    Dim baHandshakeHash() As Byte
+    Dim uVerify         As UcsBuffer
+    Dim baTemp()        As Byte
+    
+    With uCtx
+        '--- Change Cipher Spec
+        pvArrayByte baTemp, TLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC, TLS_RECORD_VERSION \ &H100, TLS_RECORD_VERSION, 0, 1, 1
+        pvBufferWriteArray uOutput, baTemp
+        '--- Record Header
+        pvBufferWriteRecordStart uOutput, TLS_CONTENT_TYPE_HANDSHAKE, uCtx
+            '--- Server Handshake Finished
+            pvBufferWriteLong uOutput, TLS_HANDSHAKE_FINISHED
+            pvBufferWriteBlockStart uOutput, Size:=3
+                pvTlsGetHandshakeHash uCtx, baHandshakeHash
+                pvTlsKdfLegacyPrf uVerify.Data, .DigestAlgo, .MasterSecret, "server finished", baHandshakeHash, 12
+                pvBufferWriteArray uOutput, uVerify.Data
+            pvBufferWriteBlockEnd uOutput
         pvBufferWriteRecordEnd uOutput, uCtx
     End With
 End Sub
@@ -1884,39 +1979,52 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                     If Not pvTlsParseHandshakeClientHello(uCtx, uInput, uInput.Pos + lMessageSize, lRecordProtocol, sError, eAlertCode) Then
                         GoTo QH
                     End If
-                    If .ExchGroup = 0 Or .CipherSuite = 0 Then
-                        If .HelloRetryRequest Then
-                            GoTo HelloRetryFailed
-                        End If
-                        .HelloRetryRequest = True
-                        If .ExchGroup <> 0 Then
-                            .HelloRetryExchGroup = .ExchGroup
-                        Else
-                            .HelloRetryExchGroup = pvCollectionFirst(.RemoteSupportedGroups, Array( _
-                                    IIf(pvCryptoIsSupported(ucsTlsAlgoExchX25519), "#" & TLS_GROUP_X25519, vbNullString), _
-                                    IIf(pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1), "#" & TLS_GROUP_SECP256R1, vbNullString), _
-                                    IIf(pvCryptoIsSupported(ucsTlsAlgoExchSecp384r1), "#" & TLS_GROUP_SECP384R1, vbNullString)))
-                            If .HelloRetryExchGroup = 0 Then
+                    If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
+                        If (.ExchGroup = 0 Or .CipherSuite = 0) Then
+                            If .HelloRetryRequest Then
                                 GoTo HelloRetryFailed
                             End If
-                        End If
-                        If .CipherSuite <> 0 Then
-                            .HelloRetryCipherSuite = .CipherSuite
+                            .HelloRetryRequest = True
+                            If .ExchGroup <> 0 Then
+                                .HelloRetryExchGroup = .ExchGroup
+                            Else
+                                .HelloRetryExchGroup = pvCollectionFirst(.RemoteSupportedGroups, Array( _
+                                        IIf(pvCryptoIsSupported(ucsTlsAlgoExchX25519), "#" & TLS_GROUP_X25519, vbNullString), _
+                                        IIf(pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1), "#" & TLS_GROUP_SECP256R1, vbNullString), _
+                                        IIf(pvCryptoIsSupported(ucsTlsAlgoExchSecp384r1), "#" & TLS_GROUP_SECP384R1, vbNullString)))
+                                If .HelloRetryExchGroup = 0 Then
+                                    GoTo HelloRetryFailed
+                                End If
+                            End If
+                            If .CipherSuite <> 0 Then
+                                .HelloRetryCipherSuite = .CipherSuite
+                            Else
+                                Select Case True
+                                Case pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm128)
+                                    .HelloRetryCipherSuite = TLS_CS_AES_128_GCM_SHA256
+                                Case pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256)
+                                    .HelloRetryCipherSuite = TLS_CS_AES_256_GCM_SHA384
+                                Case pvCryptoIsSupported(ucsTlsAlgoBulkChacha20Poly1305)
+                                    .HelloRetryCipherSuite = TLS_CS_CHACHA20_POLY1305_SHA256
+                                Case Else
+                                    GoTo HelloRetryFailed
+                                End Select
+                            End If
                         Else
-                            Select Case True
-                            Case pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm128)
-                                .HelloRetryCipherSuite = TLS_CS_AES_128_GCM_SHA256
-                            Case pvCryptoIsSupported(ucsTlsAlgoBulkAesGcm256)
-                                .HelloRetryCipherSuite = TLS_CS_AES_256_GCM_SHA384
-                            Case pvCryptoIsSupported(ucsTlsAlgoBulkChacha20Poly1305)
-                                .HelloRetryCipherSuite = TLS_CS_CHACHA20_POLY1305_SHA256
-                            Case Else
-                                GoTo HelloRetryFailed
-                            End Select
+                            .HelloRetryRequest = False
+                            .State = ucsTlsStateExpectClientFinished
                         End If
-                    Else
-                        .HelloRetryRequest = False
-                        .State = ucsTlsStateExpectClientFinished
+                    ElseIf .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
+                        If .ExchGroup = 0 Then
+                            If pvCryptoIsSupported(ucsTlsAlgoExchX25519) Then
+                                pvTlsSetupExchGroup uCtx, TLS_GROUP_X25519
+                            ElseIf pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1) Then
+                                pvTlsSetupExchGroup uCtx, TLS_GROUP_SECP256R1
+                            ElseIf pvCryptoIsSupported(ucsTlsAlgoExchSecp384r1) Then
+                                pvTlsSetupExchGroup uCtx, TLS_GROUP_SECP384R1
+                            End If
+                        End If
+                        .State = ucsTlsStateExpectClientKeyExchange
                     End If
                 Case Else
                     GoTo UnexpectedMessageType
@@ -1936,26 +2044,64 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                     pvTlsDeriveHandshakeSecrets uCtx
                     pvTlsBuildServerHandshakeFinished uCtx, .SendBuffer
                 End If
+                If .State = ucsTlsStateExpectClientKeyExchange Then
+                    Debug.Assert Not .UseRsaKeyTransport '--- not impl
+                    pvTlsBuildServerLegacyKeyExchange uCtx, .SendBuffer
+                End If
+            Case ucsTlsStateExpectClientKeyExchange
+                Select Case lMessageType
+                Case TLS_HANDSHAKE_CLIENT_KEY_EXCHANGE
+                    pvBufferReadBlockStart uInput, BlockSize:=lBlockSize
+                        pvBufferReadArray uInput, .RemoteExchPublic, lBlockSize
+                    pvBufferReadBlockEnd uInput
+                    .State = ucsTlsStateExpectClientFinished
+                Case TLS_HANDSHAKE_CERTIFICATE
+                    '--- ToDo: impl
+                Case Else
+                    GoTo UnexpectedMessageType
+                End Select
+                pvTlsAppendHandshakeHash uCtx, uInput.Data, lMessagePos, lMessageSize + 4
+                If .State = ucsTlsStateExpectClientFinished Then
+                    pvTlsDeriveLegacySecrets uCtx
+                End If
             Case ucsTlsStateExpectClientFinished
                 Select Case lMessageType
                 Case TLS_HANDSHAKE_FINISHED
                     pvBufferReadArray uInput, baMessage, lMessageSize
                     pvTlsGetHandshakeHash uCtx, baHandshakeHash
-                    pvTlsHkdfExpandLabel baTemp, .DigestAlgo, .RemoteTrafficSecret, "finished", baEmpty, .DigestSize
-                    pvTlsHkdfExtract uVerify.Data, .DigestAlgo, baTemp, baHandshakeHash
+                    If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
+                        pvTlsHkdfExpandLabel baTemp, .DigestAlgo, .RemoteTrafficSecret, "finished", baEmpty, .DigestSize
+                        pvTlsHkdfExtract uVerify.Data, .DigestAlgo, baTemp, baHandshakeHash
+                    Else
+                        Debug.Assert .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12
+                        pvTlsKdfLegacyPrf uVerify.Data, .DigestAlgo, .MasterSecret, "client finished", baHandshakeHash, 12
+                    End If
                     If InStrB(uVerify.Data, baMessage) = 0 Then
                         GoTo ServerHandshakeFailed
                     End If
                     .State = ucsTlsStatePostHandshake
+                Case TLS_HANDSHAKE_CERTIFICATE_VERIFY
+                    If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
+                        '--- ToDo: impl
+                    Else
+                        GoTo UnexpectedMessageType
+                    End If
                 Case Else
                     GoTo UnexpectedMessageType
                 End Select
+                pvTlsAppendHandshakeHash uCtx, uInput.Data, lMessagePos, lMessageSize + 4
                 '--- post-process ucsTlsStateExpectClientFinished
                 If .State = ucsTlsStatePostHandshake Then
-                    pvTlsGetHandshakeHash uCtx, baHandshakeHash
-                    pvTlsDeriveApplicationSecrets uCtx, baHandshakeHash
-                    pvTlsResetHandshakeHash uCtx
-                    Set .RemoteTickets = New Collection
+                    If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
+                        pvTlsGetHandshakeHash uCtx, baHandshakeHash
+                        pvTlsDeriveApplicationSecrets uCtx, baHandshakeHash
+                        pvTlsResetHandshakeHash uCtx
+                        Set .RemoteTickets = New Collection
+                    Else
+                        Debug.Assert .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12
+                        pvTlsBuildServerLegacyFinished uCtx, .SendBuffer
+                        pvTlsResetHandshakeHash uCtx
+                    End If
                 End If
 #End If
             Case ucsTlsStatePostHandshake
@@ -2200,18 +2346,18 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
     Dim lKeySize        As Long
     
     On Error GoTo EH
-    Set cCipherPrefs = New Collection
-    For Each vElem In pvTlsGetSortedCipherSuites(ucsTlsSupportTls13)
-        cCipherPrefs.Add cCipherPrefs.Count, "#" & vElem
-    Next
-    lCipherPref = 1000
     With uCtx
+        Set cCipherPrefs = New Collection
+        For Each vElem In pvTlsGetSortedCipherSuites(.LocalFeatures)
+            cCipherPrefs.Add cCipherPrefs.Count, "#" & vElem
+        Next
+        lCipherPref = 1000
         If SearchCollection(.LocalPrivateKey, 1, RetVal:=baPrivKey) Then
             If Not pvAsn1DecodePrivateKey(baPrivKey, uKeyInfo) Then
                 GoTo UnsupportedCertificate
             End If
         End If
-        .ProtocolVersion = lRecordProtocol
+        .ProtocolVersion = Clamp(lRecordProtocol, TLS_PROTOCOL_VERSION_TLS12)
         pvBufferReadLong uInput, lLegacyVersion, Size:=2
         If lLegacyVersion < TLS_PROTOCOL_VERSION_TLS12 Then
             GoTo UnsupportedProtocol
@@ -3005,24 +3151,51 @@ Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext)
             pvTlsGetHandshakeHash uCtx, baHandshakeHash
             pvTlsKdfLegacyPrf .MasterSecret, .DigestAlgo, baPreMasterSecret, "extended master secret", baHandshakeHash, TLS_HELLO_RANDOM_SIZE + TLS_HELLO_RANDOM_SIZE \ 2    '--- always 48
         Else
-            pvBufferWriteArray uRandom, .LocalExchRandom
-            pvBufferWriteArray uRandom, .RemoteExchRandom
+            If uCtx.IsServer Then
+                pvBufferWriteArray uRandom, .RemoteExchRandom
+                pvBufferWriteArray uRandom, .LocalExchRandom
+            Else
+                pvBufferWriteArray uRandom, .LocalExchRandom
+                pvBufferWriteArray uRandom, .RemoteExchRandom
+            End If
             pvBufferWriteEOF uRandom
             pvTlsKdfLegacyPrf .MasterSecret, .DigestAlgo, baPreMasterSecret, "master secret", uRandom.Data, TLS_HELLO_RANDOM_SIZE + TLS_HELLO_RANDOM_SIZE \ 2    '--- always 48
         End If
         uRandom.Size = 0
-        pvBufferWriteArray uRandom, .RemoteExchRandom
-        pvBufferWriteArray uRandom, .LocalExchRandom
+        If uCtx.IsServer Then
+            pvBufferWriteArray uRandom, .LocalExchRandom
+            pvBufferWriteArray uRandom, .RemoteExchRandom
+        Else
+            pvBufferWriteArray uRandom, .RemoteExchRandom
+            pvBufferWriteArray uRandom, .LocalExchRandom
+        End If
         pvBufferWriteEOF uRandom
         pvTlsKdfLegacyPrf uExpanded.Data, .DigestAlgo, .MasterSecret, "key expansion", uRandom.Data, 2 * (.MacSize + .KeySize + .IvSize)
-        pvBufferReadArray uExpanded, .LocalMacKey, .MacSize         '--- not used w/ AEAD
-        pvBufferReadArray uExpanded, .RemoteMacKey, .MacSize        '--- not used w/ AEAD
-        pvBufferReadArray uExpanded, .LocalTrafficKey, .KeySize
-        pvBufferReadArray uExpanded, .RemoteLegacyNextTrafficKey, .KeySize
-        pvTlsGetRandom .LocalTrafficIV, .IvSize
-        pvBufferReadBlob uExpanded, VarPtr(.LocalTrafficIV(0)), .IvSize - .IvExplicitSize
-        pvTlsGetRandom .RemoteLegacyNextTrafficIV, .IvSize
-        pvBufferReadBlob uExpanded, VarPtr(.RemoteLegacyNextTrafficIV(0)), .IvSize - .IvExplicitSize
+        If uCtx.IsServer Then
+            pvBufferReadArray uExpanded, .RemoteMacKey, .MacSize        '--- not used w/ AEAD
+            pvBufferReadArray uExpanded, .LocalMacKey, .MacSize         '--- not used w/ AEAD
+        Else
+            pvBufferReadArray uExpanded, .LocalMacKey, .MacSize         '--- not used w/ AEAD
+            pvBufferReadArray uExpanded, .RemoteMacKey, .MacSize        '--- not used w/ AEAD
+        End If
+        If uCtx.IsServer Then
+            pvBufferReadArray uExpanded, .RemoteLegacyNextTrafficKey, .KeySize
+            pvBufferReadArray uExpanded, .LocalTrafficKey, .KeySize
+        Else
+            pvBufferReadArray uExpanded, .LocalTrafficKey, .KeySize
+            pvBufferReadArray uExpanded, .RemoteLegacyNextTrafficKey, .KeySize
+        End If
+        If uCtx.IsServer Then
+            pvTlsGetRandom .RemoteLegacyNextTrafficIV, .IvSize
+            pvBufferReadBlob uExpanded, VarPtr(.RemoteLegacyNextTrafficIV(0)), .IvSize - .IvExplicitSize
+            pvTlsGetRandom .LocalTrafficIV, .IvSize
+            pvBufferReadBlob uExpanded, VarPtr(.LocalTrafficIV(0)), .IvSize - .IvExplicitSize
+        Else
+            pvTlsGetRandom .LocalTrafficIV, .IvSize
+            pvBufferReadBlob uExpanded, VarPtr(.LocalTrafficIV(0)), .IvSize - .IvExplicitSize
+            pvTlsGetRandom .RemoteLegacyNextTrafficIV, .IvSize
+            pvBufferReadBlob uExpanded, VarPtr(.RemoteLegacyNextTrafficIV(0)), .IvSize - .IvExplicitSize
+        End If
         .LocalTrafficSeqNo = 0
     End With
 End Sub

@@ -8,7 +8,7 @@ Base class `cAsyncSocket` wraps OS non-blocking sockets that can be used to impl
 
 Additionally there is a source-compatible `cTlsSocket` class for transparent TLS transport layer encryption with several crypto backend implementations:
 
-1. `mdTlsThunks` is a pure VB6 with ASM thunks implementation for TLS 1.3 and (legacy) TLS 1.2 client-side and server-side (TLS 1.3 only) support with no dependency on external libraries (like openssl)
+1. `mdTlsThunks` is a pure VB6 with ASM thunks implementation for TLS 1.3 and (legacy) TLS 1.2 client-side and server-side support with no dependency on external libraries (like openssl)
 
 2. `mdTlsNative` is a native client-side and server-side TLS support using OS provided SSPI/Schannel library for all available protocol versions.
 
@@ -20,7 +20,7 @@ The VB6 with thunks backend implementation auto-detects AES-NI and PCLMULQDQ ins
 
 Start by including `src\cAsyncSocket.cls` in your project to have a convenient wrapper of most WinSock API functions.
 
-Optionally you can add `src\cTlsSocket.cls` and `src\mdTlsThunks.bas` pair of source files to your project for TLS 1.3 secured connections using VB6 with thunks backend or add `src\cTlsSocket.cls` and `src\mdTlsNative.bas` pair of source files for an alternative backend using native OS provided SSPI/Schannel library.
+Optionally you can add `src\cTlsSocket.cls` and `src\mdTlsThunks.bas` pair of source files to your project for TLS secured connections using VB6 with thunks backend or add `src\cTlsSocket.cls` and `src\mdTlsNative.bas` pair of source files for an alternative backend using native OS provided SSPI/Schannel library.
 
 #### Sample SMTP with STARTTLS
 
