@@ -595,7 +595,8 @@ Public Function TlsInitServer( _
             Optional RemoteHostName As String, _
             Optional Certificates As Collection, _
             Optional PrivateKey As Collection, _
-            Optional AlpnProtocols As String) As Boolean
+            Optional AlpnProtocols As String, _
+            Optional ByVal LocalFeatures As Long = ucsTlsSupportAll) As Boolean
 #If Not ImplTlsServer Then
     Err.Raise vbObjectError, , ERR_NO_SERVER_COMPILED
 #Else
@@ -610,7 +611,7 @@ Public Function TlsInitServer( _
         .IsServer = True
         .State = ucsTlsStateExpectClientHello
         .RemoteHostName = RemoteHostName
-        .LocalFeatures = ucsTlsSupportTls13
+        .LocalFeatures = LocalFeatures
         Set .LocalCertificates = Certificates
         Set .LocalPrivateKey = PrivateKey
         .AlpnProtocols = AlpnProtocols

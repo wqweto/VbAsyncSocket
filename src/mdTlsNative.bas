@@ -458,7 +458,8 @@ Public Function TlsInitServer( _
             Optional RemoteHostName As String, _
             Optional Certificates As Collection, _
             Optional PrivateKey As Collection, _
-            Optional AlpnProtocols As String) As Boolean
+            Optional AlpnProtocols As String, _
+            Optional ByVal LocalFeatures As Long = ucsTlsSupportAll) As Boolean
     Dim uEmpty          As UcsTlsContext
     
     On Error GoTo EH
@@ -467,7 +468,7 @@ Public Function TlsInitServer( _
         .IsServer = True
         .State = ucsTlsStateHandshakeStart
         .RemoteHostName = RemoteHostName
-        .LocalFeatures = ucsTlsSupportAll
+        .LocalFeatures = LocalFeatures
         Set .LocalCertificates = Certificates
         Set .LocalPrivateKey = PrivateKey
         If RealOsVersion >= [ucsOsvWin8.1] Then

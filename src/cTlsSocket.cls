@@ -533,7 +533,8 @@ Public Function InitServerTls( _
             Optional Password As String, _
             Optional Certificates As Collection, _
             Optional PrivateKey As Collection, _
-            Optional AlpnProtocols As String) As Boolean
+            Optional AlpnProtocols As String, _
+            Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum) As Boolean
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
     
@@ -562,9 +563,13 @@ StartTls:
     m_bUseTls = True
     m_bIsServer = True
     m_oSocket.GetPeerName m_sRemoteHostName, 0
-    m_eLocalFeatures = ucsTlsSupportTls13
     m_sAlpnProtocols = AlpnProtocols
-    If Not TlsInitServer(m_uCtx, m_sRemoteHostName, cCerts, cPrivKey, m_sAlpnProtocols) Then
+    If (LocalFeatures And ucsTlsSupportAll) = 0 Then
+        m_eLocalFeatures = LocalFeatures Or ucsTlsSupportAll
+    Else
+        m_eLocalFeatures = LocalFeatures
+    End If
+    If Not TlsInitServer(m_uCtx, m_sRemoteHostName, cCerts, cPrivKey, m_sAlpnProtocols, m_eLocalFeatures) Then
         GoTo QH
     End If
     '--- success
@@ -576,8 +581,7 @@ Public Function Accept( _
             ConnectedSocket As cTlsSocket, _
             Optional SocketAddress As String, _
             Optional SocketPort As Long, _
-            Optional ByVal UseTls As Boolean = True, _
-            Optional AlpnProtocols As String) As Boolean
+            Optional ByVal UseTls As Boolean = True) As Boolean
     Const FUNC_NAME     As String = "Accept"
     
     On Error GoTo EH
@@ -588,7 +592,7 @@ Public Function Accept( _
         GoTo QH
     End If
     If UseTls Then
-        If Not ConnectedSocket.InitServerTls(Certificates:=LocalCertificates, PrivateKey:=LocalPrivateKey, AlpnProtocols:=AlpnProtocols) Then
+        If Not ConnectedSocket.InitServerTls(Certificates:=LocalCertificates, PrivateKey:=LocalPrivateKey, AlpnProtocols:=m_sAlpnProtocols, LocalFeatures:=m_eLocalFeatures) Then
             GoTo QH
         End If
     End If

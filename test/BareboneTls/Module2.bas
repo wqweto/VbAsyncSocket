@@ -39,7 +39,8 @@ Public Function TlsInitServer( _
             Optional RemoteHostName As String, _
             Optional Certificates As Collection, _
             Optional PrivateKey As Collection, _
-            Optional AlpnProtocols As String) As Boolean
+            Optional AlpnProtocols As String, _
+            Optional ByVal LocalFeatures As Long) As Boolean
 
 End Function
 

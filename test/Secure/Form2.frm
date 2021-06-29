@@ -406,7 +406,7 @@ Private Sub m_oServerSocket_OnAccept()
     Dim sKey            As String
     
     On Error GoTo EH
-    If Not m_oServerSocket.Accept(oSocket, AlpnProtocols:="http/1.1") Then
+    If Not m_oServerSocket.Accept(oSocket) Then
         GoTo QH
     End If
     Set oHandler = New cRequestHandler
