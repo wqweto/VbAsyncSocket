@@ -251,6 +251,7 @@ Private Const TLS_SERVER_NAME_TYPE_HOSTNAME             As Long = 0
 Private Const TLS_MAX_PLAINTEXT_RECORD_SIZE             As Long = 16384
 Private Const TLS_MAX_ENCRYPTED_RECORD_SIZE             As Long = (TLS_MAX_PLAINTEXT_RECORD_SIZE + 1 + 255) '-- 1 byte content type + 255 bytes AEAD padding
 Private Const TLS_HELLO_RANDOM_SIZE                     As Long = 32
+Private Const TLS_LEGACY_SECRET_SIZE                    As Long = 48
 Private Const TLS_AAD_SIZE                              As Long = 5     '--- size of additional authenticated data for TLS 1.3
 Private Const TLS_LEGACY_AAD_SIZE                       As Long = 13    '--- for TLS 1.2
 'Private Const TLS_PSK_KE_MODE_PSK_DHE                   As Long = 1
@@ -1344,34 +1345,36 @@ Private Sub pvTlsBuildServerLegacyKeyExchange(uCtx As UcsTlsContext, uOutput As 
             pvBufferWriteBlockEnd uOutput
             pvTlsAppendHandshakeHash uCtx, uOutput.Data, lMessagePos, uOutput.Size - lMessagePos
         pvBufferWriteRecordEnd uOutput, uCtx
-        '--- Record Header
-        pvBufferWriteRecordStart uOutput, TLS_CONTENT_TYPE_HANDSHAKE, uCtx
-            '--- Server Key Exchange
-            lMessagePos = uOutput.Size
-            pvBufferWriteLong uOutput, TLS_HANDSHAKE_SERVER_KEY_EXCHANGE
-            pvBufferWriteBlockStart uOutput, Size:=3
-                '--- Curve Info
-                lSignPos = uOutput.Size
-                pvBufferWriteLong uOutput, 3, Size:=1 '--- 3 = named_curve
-                pvBufferWriteLong uOutput, .ExchGroup, Size:=2
-                '--- Public Key
-                pvBufferWriteBlockStart uOutput
-                    pvBufferWriteArray uOutput, .LocalExchPublic
+        If Not .UseRsaKeyTransport Then
+            '--- Record Header
+            pvBufferWriteRecordStart uOutput, TLS_CONTENT_TYPE_HANDSHAKE, uCtx
+                '--- Server Key Exchange
+                lMessagePos = uOutput.Size
+                pvBufferWriteLong uOutput, TLS_HANDSHAKE_SERVER_KEY_EXCHANGE
+                pvBufferWriteBlockStart uOutput, Size:=3
+                    '--- Curve Info
+                    lSignPos = uOutput.Size
+                    pvBufferWriteLong uOutput, 3, Size:=1 '--- 3 = named_curve
+                    pvBufferWriteLong uOutput, .ExchGroup, Size:=2
+                    '--- Public Key
+                    pvBufferWriteBlockStart uOutput
+                        pvBufferWriteArray uOutput, .LocalExchPublic
+                    pvBufferWriteBlockEnd uOutput
+                    lSignSize = uOutput.Size - lSignPos
+                    '--- Signature
+                    pvBufferWriteArray uVerify, .RemoteExchRandom
+                    pvBufferWriteArray uVerify, .LocalExchRandom
+                    pvBufferWriteBlob uVerify, VarPtr(uOutput.Data(lSignPos)), lSignSize
+                    pvBufferWriteEOF uVerify
+                    pvTlsSignatureSign baSignature, .LocalPrivateKey, .LocalSignatureScheme, uVerify.Data
+                    pvBufferWriteLong uOutput, .LocalSignatureScheme, Size:=2
+                    pvBufferWriteBlockStart uOutput, Size:=2
+                        pvBufferWriteArray uOutput, baSignature
+                    pvBufferWriteBlockEnd uOutput
                 pvBufferWriteBlockEnd uOutput
-                lSignSize = uOutput.Size - lSignPos
-                '--- Signature
-                pvBufferWriteArray uVerify, .RemoteExchRandom
-                pvBufferWriteArray uVerify, .LocalExchRandom
-                pvBufferWriteBlob uVerify, VarPtr(uOutput.Data(lSignPos)), lSignSize
-                pvBufferWriteEOF uVerify
-                pvTlsSignatureSign baSignature, .LocalPrivateKey, .LocalSignatureScheme, uVerify.Data
-                pvBufferWriteLong uOutput, .LocalSignatureScheme, Size:=2
-                pvBufferWriteBlockStart uOutput, Size:=2
-                    pvBufferWriteArray uOutput, baSignature
-                pvBufferWriteBlockEnd uOutput
-            pvBufferWriteBlockEnd uOutput
-            pvTlsAppendHandshakeHash uCtx, uOutput.Data, lMessagePos, uOutput.Size - lMessagePos
-        pvBufferWriteRecordEnd uOutput, uCtx
+                pvTlsAppendHandshakeHash uCtx, uOutput.Data, lMessagePos, uOutput.Size - lMessagePos
+            pvBufferWriteRecordEnd uOutput, uCtx
+        End If
         '--- Record Header
         pvBufferWriteRecordStart uOutput, TLS_CONTENT_TYPE_HANDSHAKE, uCtx
             '--- Server Hello Done
@@ -2037,15 +2040,21 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                     pvTlsBuildServerHandshakeFinished uCtx, .SendBuffer
                 End If
                 If .State = ucsTlsStateExpectClientKeyExchange Then
-                    Debug.Assert Not .UseRsaKeyTransport '--- not impl
                     pvTlsBuildServerLegacyKeyExchange uCtx, .SendBuffer
                 End If
             Case ucsTlsStateExpectClientKeyExchange
                 Select Case lMessageType
                 Case TLS_HANDSHAKE_CLIENT_KEY_EXCHANGE
-                    pvBufferReadBlockStart uInput, BlockSize:=lBlockSize
-                        pvBufferReadArray uInput, .RemoteExchPublic, lBlockSize
-                    pvBufferReadBlockEnd uInput
+                    If .UseRsaKeyTransport Then
+                        pvBufferReadBlockStart uInput, BlockSize:=lBlockSize, Size:=2
+                            pvBufferReadArray uInput, baTemp, lBlockSize
+                        pvBufferReadBlockEnd uInput
+                        pvTlsSetupExchRsaPreMasterSecret uCtx, baTemp
+                    Else
+                        pvBufferReadBlockStart uInput, BlockSize:=lBlockSize
+                            pvBufferReadArray uInput, .RemoteExchPublic, lBlockSize
+                        pvBufferReadBlockEnd uInput
+                    End If
                     .State = ucsTlsStateExpectClientFinished
                 Case TLS_HANDSHAKE_CERTIFICATE
                     '--- ToDo: impl
@@ -2077,11 +2086,13 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                 Case Else
                     GoTo UnexpectedMessageType
                 End Select
-                pvTlsGetHandshakeHash uCtx, baHandshakeHash
-                pvTlsAppendHandshakeHash uCtx, uInput.Data, lMessagePos, lMessageSize + 4
+                If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
+                    pvTlsAppendHandshakeHash uCtx, uInput.Data, lMessagePos, lMessageSize + 4
+                End If
                 '--- post-process ucsTlsStateExpectClientFinished
                 If .State = ucsTlsStatePostHandshake Then
                     If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
+                        pvTlsGetHandshakeHash uCtx, baHandshakeHash
                         pvTlsDeriveApplicationSecrets uCtx, baHandshakeHash
                         pvTlsResetHandshakeHash uCtx
                         Set .RemoteTickets = New Collection
@@ -2751,7 +2762,7 @@ Private Sub pvTlsSetupExchRsaCertificate(uCtx As UcsTlsContext, baCert() As Byte
     
     With uCtx
         .ExchAlgo = ucsTlsAlgoExchCertificate
-        pvTlsGetRandom .LocalExchPrivate, TLS_HELLO_RANDOM_SIZE + TLS_HELLO_RANDOM_SIZE \ 2 '--- always 48
+        pvTlsGetRandom .LocalExchPrivate, TLS_LEGACY_SECRET_SIZE
         Call CopyMemory(.LocalExchPrivate(0), TLS_LOCAL_LEGACY_VERSION, 2)
         If Not pvAsn1DecodeCertificate(baCert, uCertInfo) Then
             Err.Raise vbObjectError, FUNC_NAME, ERR_UNSUPPORTED_CERTIFICATE
@@ -2761,6 +2772,34 @@ Private Sub pvTlsSetupExchRsaCertificate(uCtx As UcsTlsContext, baCert() As Byte
         End If
         If Not pvCryptoRsaModExp(baEnc, uCertInfo.PubExp, uCertInfo.Modulus, .LocalExchRsaEncrPriv) Then
             Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoRsaModExp")
+        End If
+    End With
+End Sub
+
+Private Sub pvTlsSetupExchRsaPreMasterSecret(uCtx As UcsTlsContext, baEnc() As Byte)
+    Const FUNC_NAME     As String = "pvTlsSetupExchRsaPreMasterSecret"
+    Dim baPrivKey()     As Byte
+    Dim uKeyInfo        As UcsKeyInfo
+    Dim baDec()         As Byte
+    Dim lVersion        As Long
+    
+    With uCtx
+        .ExchAlgo = ucsTlsAlgoExchCertificate
+        If Not SearchCollection(.LocalPrivateKey, 1, RetVal:=baPrivKey) Then
+            Err.Raise vbObjectError, FUNC_NAME, ERR_NO_PRIVATE_KEY
+        End If
+        If Not pvAsn1DecodePrivateKey(baPrivKey, uKeyInfo) Then
+            Err.Raise vbObjectError, FUNC_NAME, ERR_UNSUPPORTED_PRIVATE_KEY
+        End If
+        If Not pvCryptoRsaCrtModExp(baEnc, uKeyInfo.PrivExp, uKeyInfo.Modulus, uKeyInfo.Prime1, uKeyInfo.Prime2, uKeyInfo.Coefficient, baDec) Then
+            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoRsaCrtModExp")
+        End If
+        If Not pvCryptoEmePkcs1Decode(.LocalExchPrivate, baDec, TLS_LEGACY_SECRET_SIZE) Then
+            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEmePkcs1Decode")
+        End If
+        Call CopyMemory(lVersion, .LocalExchPrivate(0), 2)
+        If lVersion <> TLS_LOCAL_LEGACY_VERSION Then
+            pvTlsGetRandom .LocalExchPrivate, TLS_LEGACY_SECRET_SIZE
         End If
     End With
 End Sub
@@ -3167,7 +3206,7 @@ Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext)
         pvTlsGetSharedSecret baPreMasterSecret, .ExchAlgo, .LocalExchPrivate, .RemoteExchPublic
         If SearchCollection(.RemoteExtensions, "#" & TLS_EXTENSION_EXTENDED_MASTER_SECRET) Then
             pvTlsGetHandshakeHash uCtx, baHandshakeHash
-            pvTlsKdfLegacyPrf .MasterSecret, .DigestAlgo, baPreMasterSecret, "extended master secret", baHandshakeHash, TLS_HELLO_RANDOM_SIZE + TLS_HELLO_RANDOM_SIZE \ 2    '--- always 48
+            pvTlsKdfLegacyPrf .MasterSecret, .DigestAlgo, baPreMasterSecret, "extended master secret", baHandshakeHash, TLS_LEGACY_SECRET_SIZE
         Else
             If uCtx.IsServer Then
                 pvBufferWriteArray uRandom, .RemoteExchRandom
@@ -3177,7 +3216,7 @@ Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext)
                 pvBufferWriteArray uRandom, .RemoteExchRandom
             End If
             pvBufferWriteEOF uRandom
-            pvTlsKdfLegacyPrf .MasterSecret, .DigestAlgo, baPreMasterSecret, "master secret", uRandom.Data, TLS_HELLO_RANDOM_SIZE + TLS_HELLO_RANDOM_SIZE \ 2    '--- always 48
+            pvTlsKdfLegacyPrf .MasterSecret, .DigestAlgo, baPreMasterSecret, "master secret", uRandom.Data, TLS_LEGACY_SECRET_SIZE
         End If
         uRandom.Size = 0
         If uCtx.IsServer Then
@@ -4179,6 +4218,22 @@ Private Function pvCryptoEmePkcs1Encode(baRetVal() As Byte, baMessage() As Byte,
     Call CopyMemory(baRetVal(UBound(baRetVal) - UBound(baMessage)), baMessage(0), UBound(baMessage) + 1)
     '--- success
     pvCryptoEmePkcs1Encode = True
+QH:
+End Function
+
+Private Function pvCryptoEmePkcs1Decode(baRetVal() As Byte, baMessage() As Byte, ByVal lSize As Long) As Boolean
+    Const FUNC_NAME     As String = "CryptoEmePkcs1Decode"
+    
+    If baMessage(0) <> 0 Or baMessage(1) <> 2 Then
+        GoTo QH
+    End If
+    If lSize > pvArraySize(baMessage) - 11 Then
+        GoTo QH
+    End If
+    pvArrayAllocate baRetVal, lSize, FUNC_NAME & ".baRetVal"
+    Call CopyMemory(baRetVal(0), baMessage(UBound(baMessage) - UBound(baRetVal)), UBound(baRetVal) + 1)
+    '--- success
+    pvCryptoEmePkcs1Decode = True
 QH:
 End Function
 
