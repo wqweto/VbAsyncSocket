@@ -1260,7 +1260,11 @@ Private Sub pvTlsBuildServerHello(uCtx As UcsTlsContext, uOutput As UcsBuffer)
                 End If
                 '--- Legacy Session ID
                 pvBufferWriteBlockStart uOutput
-                    pvBufferWriteArray uOutput, .RemoteSessionID
+                    If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
+                        pvBufferWriteArray uOutput, .RemoteSessionID
+                    Else
+                        pvBufferWriteArray uOutput, .LocalSessionID
+                    End If
                 pvBufferWriteBlockEnd uOutput
                 '--- Cipher Suite
                 pvBufferWriteLong uOutput, IIf(.HelloRetryRequest, .HelloRetryCipherSuite, .CipherSuite), Size:=2
@@ -2011,13 +2015,14 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                         End If
                     ElseIf .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
                         If .ExchGroup = 0 Then
-                            If pvCryptoIsSupported(ucsTlsAlgoExchX25519) Then
-                                pvTlsSetupExchGroup uCtx, TLS_GROUP_X25519
-                            ElseIf pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1) Then
-                                pvTlsSetupExchGroup uCtx, TLS_GROUP_SECP256R1
-                            ElseIf pvCryptoIsSupported(ucsTlsAlgoExchSecp384r1) Then
-                                pvTlsSetupExchGroup uCtx, TLS_GROUP_SECP384R1
+                            lExchGroup = pvCollectionFirst(.RemoteSupportedGroups, Array( _
+                                    IIf(pvCryptoIsSupported(ucsTlsAlgoExchX25519), "#" & TLS_GROUP_X25519, vbNullString), _
+                                    IIf(pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1), "#" & TLS_GROUP_SECP256R1, vbNullString), _
+                                    IIf(pvCryptoIsSupported(ucsTlsAlgoExchSecp384r1), "#" & TLS_GROUP_SECP384R1, vbNullString)))
+                            If lExchGroup = 0 Then
+                                lExchGroup = TLS_GROUP_X25519
                             End If
+                            pvTlsSetupExchGroup uCtx, lExchGroup
                         End If
                         .State = ucsTlsStateExpectClientKeyExchange
                     End If
