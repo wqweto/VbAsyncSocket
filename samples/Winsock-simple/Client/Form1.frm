@@ -257,7 +257,6 @@ Private Sub ctxWinsock_DataArrival(ByVal bytesTotal As Long)
     Dim sBuffer         As String
     
     DebugToConsole "DataArrival", bytesTotal
-    ctxWinsock.PeekData sBuffer
     ctxWinsock.GetData sBuffer
     DebugToConsole sBuffer
 End Sub
