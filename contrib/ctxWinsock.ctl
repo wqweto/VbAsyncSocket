@@ -582,6 +582,9 @@ Private Sub m_oSocket_OnResolve(IpAddress As String)
 End Sub
 
 Private Sub m_oSocket_OnReceive()
+    If m_eState = 0 Then
+        m_oSocket_OnConnect
+    End If
     RaiseEvent DataArrival(pvSocket.AvailableBytes)
 End Sub
 
@@ -590,6 +593,9 @@ Private Sub m_oSocket_OnSend()
     Dim lSent           As Long
     
     On Error GoTo EH
+    If m_eState = 0 Then
+        m_oSocket_OnConnect
+    End If
     Do While m_lSendPos <= UBound(m_baSendBuffer)
         lSent = pvSocket.Send(VarPtr(m_baSendBuffer(m_lSendPos)), UBound(m_baSendBuffer) + 1 - m_lSendPos, m_sRemoteHost, m_lRemotePort)
         If lSent < 0 Then
@@ -602,7 +608,7 @@ Private Sub m_oSocket_OnSend()
             RaiseEvent SendProgress(m_lSendPos, UBound(m_baSendBuffer) + 1)
         End If
     Loop
-    If m_lSendPos > UBound(m_baSendBuffer) Then
+    If m_lSendPos > UBound(m_baSendBuffer) And m_lSendPos > 0 Then
         m_lSendPos = 0
         m_baSendBuffer = vbNullString
         RaiseEvent SendComplete
