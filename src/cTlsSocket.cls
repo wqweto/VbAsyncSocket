@@ -449,7 +449,7 @@ End Function
 
 Public Property Get IsClosed() As Boolean
     If m_bUseTls Then
-        IsClosed = TlsIsClosed(m_uCtx)
+        IsClosed = TlsIsClosed(m_uCtx) Or TlsIsShutdown(m_uCtx)
     Else
         IsClosed = (m_oSocket.SocketHandle = INVALID_SOCKET)
     End If
