@@ -120,6 +120,8 @@ Private Const HDR_LOCATION          As String = "Location"
 Private Const HDR_DELIM             As String = vbCrLf & vbCrLf
 Private Const DEF_BUFFER_SIZE       As Long = 256& * 1024
 Private Const DEF_USER_AGENT        As String = "Mozilla/4.0 (compatible; Win32; VbAsyncSocket)"
+Private Const DEF_CONTENT_TYPE      As String = "text/plain"
+Private Const DEF_CHARSET           As String = "charset=utf-8"
 
 #If ImplUseTls Then
 Private WithEvents m_oSocket    As cTlsSocket
@@ -144,9 +146,11 @@ Private m_sStatusText           As String
 Private m_sAllResponseHeaders   As String
 Private m_oResponseHeaders      As Object
 Private m_pResponseStream       As IUnknown
+Private m_vResponseText         As Variant
 Private m_dblContentLength      As Double
 Private m_dblBytesProgress      As Double
 Private m_lCurrentRedirect      As Long
+Private m_sTransferEncoding     As String
 '--- i/o buffers
 Private m_uSendBuffer           As UcsBuffer
 Private m_uRecvBuffer           As UcsBuffer
@@ -212,7 +216,29 @@ Public Property Get ResponseStream() As Variant
 End Property
 
 Public Property Get ResponseText() As String
-    ResponseText = m_oSocket.FromTextArray(ResponseBody, ucsScpUtf8)
+    Dim eCodePage       As UcsAsyncSocketCodePageEnum
+    Dim vSplit          As Variant
+    Dim vElem           As Variant
+    
+    If IsEmpty(m_vResponseText) Then
+        eCodePage = ucsScpUtf8
+        If m_oResponseHeaders.Exists(HDR_CONTENT_TYPE) Then
+            vSplit = Split(m_oRequestHeaders.Item(HDR_CONTENT_TYPE), ";")
+            If UBound(vSplit) > 0 Then
+                For Each vElem In vSplit
+                    vElem = Split(vElem, "=", Limit:=2)
+                    If UBound(vElem) > 0 Then
+                        If LCase$(Trim$(vElem(0))) = "charset" Then
+                            eCodePage = pvMapCharset(LCase$(Trim$(vElem(1))))
+                            Exit For
+                        End If
+                    End If
+                Next
+            End If
+        End If
+        m_vResponseText = m_oSocket.FromTextArray(ResponseBody, eCodePage)
+    End If
+    ResponseText = m_vResponseText
 End Property
 
 Public Property Get Status() As Long
@@ -274,6 +300,7 @@ Public Sub Open_(ByVal Method As String, ByVal Url As String, Optional ByVal Asy
     m_dblBytesProgress = 0
     m_dblContentLength = -1
     m_lCurrentRedirect = 0
+    m_sTransferEncoding = vbNullString
     '--- initial headers
     SetRequestHeader "Host", m_uRemote.Host
     SetRequestHeader "Connection", "Keep-Alive"
@@ -287,26 +314,55 @@ End Sub
 Public Sub Send(Optional ByVal Body As Variant)
     Const FUNC_NAME     As String = "Send"
     Dim baBuffer()      As Byte
+    Dim vSplit          As Variant
+    Dim vElem           As Variant
+    Dim eCodePage       As UcsAsyncSocketCodePageEnum
     
     On Error GoTo EH
     '--- preapare request stream from body
     If IsObject(Body) Then
-        Set m_pRequestStream = Body
-    ElseIf VarType(Body) = vbByte + vbArray Then
-        Set m_pRequestStream = SHCreateMemStream(Body(0), UBound(Body) + 1)
-    ElseIf VarType(Body) = vbString Then
-        baBuffer = m_oSocket.ToTextArray(CStr(Body), ucsScpUtf8)
-        Set m_pRequestStream = SHCreateMemStream(baBuffer(0), UBound(baBuffer) + 1)
-    ElseIf IsMissing(Body) Or IsEmpty(Body) Then
+        On Error GoTo 0
+        Set m_pRequestStream = AsIStream(Body)
+        On Error GoTo EH
+    ElseIf IsMissing(Body) Or IsEmpty(Body) Or IsNull(Body) Then
         Set m_pRequestStream = Nothing
+    ElseIf VarType(Body) = vbByte + vbArray Then
+        If UBound(Body) >= 0 Then
+            Set m_pRequestStream = SHCreateMemStream(Body(0), UBound(Body) + 1)
+        Else
+            Set m_pRequestStream = Nothing
+        End If
+    ElseIf VarType(Body) = vbString Then
+        If LenB(Body) <> 0 Then
+            eCodePage = ucsScpUtf8
+            If Not m_oRequestHeaders.Exists(HDR_CONTENT_TYPE) Then
+                SetRequestHeader HDR_CONTENT_TYPE, DEF_CONTENT_TYPE & "; " & DEF_CHARSET
+            Else
+                vSplit = Split(m_oRequestHeaders.Item(HDR_CONTENT_TYPE), ";")
+                If UBound(vSplit) > 0 Then
+                    For Each vElem In vSplit
+                        vElem = Split(vElem, "=", Limit:=2)
+                        If UBound(vElem) > 0 Then
+                            If LCase$(Trim$(vElem(0))) = "charset" Then
+                                eCodePage = pvMapCharset(LCase$(Trim$(vElem(1))))
+                                Exit For
+                            End If
+                        End If
+                    Next
+                Else
+                    SetRequestHeader HDR_CONTENT_TYPE, Trim$(vSplit(0)) & "; " & DEF_CHARSET
+                End If
+            End If
+            baBuffer = m_oSocket.ToTextArray(CStr(Body), eCodePage)
+            Set m_pRequestStream = SHCreateMemStream(baBuffer(0), UBound(baBuffer) + 1)
+        Else
+            Set m_pRequestStream = Nothing
+        End If
     Else
         On Error GoTo 0
         Err.Raise ERROR_INVALID_PARAMETER, , m_oSocket.GetErrorDescription(ERROR_INVALID_PARAMETER)
     End If
     If Not m_pRequestStream Is Nothing Then
-        If Not m_oRequestHeaders.Exists(HDR_CONTENT_TYPE) Then
-            SetRequestHeader HDR_CONTENT_TYPE, "application/x-www-form-urlencoded"
-        End If
         SetRequestHeader HDR_CONTENT_LENGTH, pvGetStreamSize(m_pRequestStream)
     End If
     '--- try to reuse socket if not closed (keep-alive)
@@ -377,6 +433,7 @@ Public Sub Abort()
     Set m_oSocket = pvInitSocket
     Set m_pRequestStream = Nothing
     Set m_pResponseStream = Nothing
+    m_vResponseText = Empty
     Exit Sub
 EH:
     PrintError FUNC_NAME
@@ -543,23 +600,9 @@ Private Function pvRecvHeaders(baBuffer() As Byte, uRecv As UcsBuffer) As Boolea
         m_lStatus = Val(Mid$(vSplit(0), 1 + sizeof_HTTP_VER + 1, sizeof_HTTP_STATUS))
         m_sStatusText = Mid$(vSplit(0), 1 + sizeof_HTTP_VER + 1 + sizeof_HTTP_STATUS + 1)
         Select Case m_lStatus
-        Case 200 To 299
-TryDownload:
-            If m_oResponseHeaders.Exists(HDR_CONTENT_LENGTH) Then
-                m_dblContentLength = Val(m_oResponseHeaders.Item(HDR_CONTENT_LENGTH))
-            End If
-            m_eState = ucsWaitRecvBody
-            lPos = lPos + sizeof_HDR_DELIM - 1
-            If uRecv.Size <= lPos Then
-                baBuffer = vbNullString
-            Else
-                ReDim baBuffer(0 To uRecv.Size - lPos - 1) As Byte
-                Call CopyMemory(baBuffer(0), uRecv.Data(lPos), UBound(baBuffer) + 1)
-            End If
-            RaiseEvent OnResponseStart(m_lStatus, m_oResponseHeaders.Item(HDR_CONTENT_TYPE))
-            uRecv.Size = 0
-            Set m_pResponseStream = SHCreateMemStream(ByVal 0, 0)
-            pvRecvBody baBuffer, uRecv
+        Case 0
+            pvSetError ERROR_WINHTTP_INVALID_SERVER_RESPONSE, MODULE_NAME & "." & FUNC_NAME
+            GoTo QH
         Case 300 To 399
             If Not Option_(WinHttpRequestOption_EnableRedirects) Or Not m_oResponseHeaders.Exists(HDR_LOCATION) Then
                 GoTo TryDownload
@@ -610,8 +653,24 @@ TryDownload:
                 m_oSocket.PostEvent ucsSfdWrite
             End If
         Case Else
-            pvSetError ERROR_WINHTTP_INVALID_SERVER_RESPONSE, MODULE_NAME & "." & FUNC_NAME
-            GoTo QH
+TryDownload:
+            If m_oResponseHeaders.Exists(HDR_CONTENT_LENGTH) Then
+                m_dblContentLength = Val(m_oResponseHeaders.Item(HDR_CONTENT_LENGTH))
+            End If
+            m_sTransferEncoding = LCase$(GetResponseHeader("Transfer-Encoding"))
+            m_eState = ucsWaitRecvBody
+            lPos = lPos + sizeof_HDR_DELIM - 1
+            If uRecv.Size <= lPos Then
+                baBuffer = vbNullString
+            Else
+                ReDim baBuffer(0 To uRecv.Size - lPos - 1) As Byte
+                Call CopyMemory(baBuffer(0), uRecv.Data(lPos), UBound(baBuffer) + 1)
+            End If
+            RaiseEvent OnResponseStart(m_lStatus, m_oResponseHeaders.Item(HDR_CONTENT_TYPE))
+            uRecv.Size = 0
+            Set m_pResponseStream = SHCreateMemStream(ByVal 0, 0)
+            m_vResponseText = Empty
+            pvRecvBody baBuffer, uRecv
         End Select
     ElseIf uRecv.Size > Option_(WinHttpRequestOption_MaxResponseHeaderSize) Then
         pvSetError ERROR_WINHTTP_INVALID_SERVER_RESPONSE, MODULE_NAME & "." & FUNC_NAME
@@ -637,7 +696,7 @@ Private Function pvRecvBody(baBuffer() As Byte, uRecv As UcsBuffer, Optional ByV
     
     On Error GoTo EH
     If UBound(baBuffer) >= 0 Then
-        If LCase$(GetResponseHeader("Transfer-Encoding")) = "chunked" Then
+        If m_sTransferEncoding = "chunked" Then
             pvBufferWriteArray m_uChunkBuffer, baBuffer
             For Each vElem In pvParseChunks(m_uChunkBuffer)
                 lPos = vElem(0) + vElem(1) + sizeof_CrLf
@@ -648,7 +707,7 @@ Private Function pvRecvBody(baBuffer() As Byte, uRecv As UcsBuffer, Optional ByV
                 End If
                 ReDim baTemp(0 To vElem(1) - 1) As Byte
                 Call CopyMemory(baTemp(0), m_uChunkBuffer.Data(vElem(0)), UBound(baTemp) + 1)
-                m_dblBytesProgress = m_dblBytesProgress + pvArraySize(baTemp)
+                m_dblBytesProgress = m_dblBytesProgress + UBound(baTemp) + 1
                 RaiseEvent OnResponseDataAvailable(baTemp)
                 pvBufferWriteArray uRecv, baTemp
             Next
@@ -660,7 +719,7 @@ Private Function pvRecvBody(baBuffer() As Byte, uRecv As UcsBuffer, Optional ByV
                 m_uChunkBuffer.Size = lSize
             End If
         Else
-            m_dblBytesProgress = m_dblBytesProgress + pvArraySize(baBuffer)
+            m_dblBytesProgress = m_dblBytesProgress + UBound(baBuffer) + 1
             RaiseEvent OnResponseDataAvailable(baBuffer)
             pvBufferWriteArray uRecv, baBuffer
             If m_dblBytesProgress >= m_dblContentLength And m_dblContentLength >= 0 Then
@@ -878,6 +937,19 @@ Private Function pvGetStreamSize(pStream As IUnknown) As Double
     pvGetStreamSize = CDbl(cPos) * 10000#
 End Function
 
+Private Function pvMapCharset(sCharset As String) As UcsAsyncSocketCodePageEnum
+    Select Case sCharset
+    Case "iso-8859-1", "windows-1252"
+        pvMapCharset = 1252
+    Case "windows-1251"
+        pvMapCharset = 1251
+    Case "utf-8"
+        pvMapCharset = ucsScpUtf8
+    Case Else
+        pvMapCharset = ucsScpAcp
+    End Select
+End Function
+
 Private Property Get TimerEx() As Double
     Dim cFreq           As Currency
     Dim cValue          As Currency
@@ -886,6 +958,19 @@ Private Property Get TimerEx() As Double
     Call QueryPerformanceCounter(cValue)
     TimerEx = cValue / cFreq
 End Property
+
+Private Function AsIStream(ByVal pUnk As IUnknown) As IUnknown
+    Const IDX_QueryInterface As Long = 0
+    Dim IID_IStream(0 To 3) As Long
+    Dim hResult         As Long
+    
+    IID_IStream(0) = &HC: IID_IStream(1) = &H0
+    IID_IStream(2) = &HC0: IID_IStream(3) = &H46000000
+    hResult = DispCallByVtbl(pUnk, IDX_QueryInterface, VarPtr(IID_IStream(0)), VarPtr(AsIStream))
+    If hResult < 0 Then
+        Err.Raise hResult, "IUnknown.QueryInterface(IID_IStream)"
+    End If
+End Function
 
 Private Function IStream_Read(pstm As IUnknown, baBuffer() As Byte, Optional BytesRead As Long) As Long
     If Not pstm Is Nothing And UBound(baBuffer) >= 0 Then

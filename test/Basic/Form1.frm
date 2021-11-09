@@ -156,8 +156,6 @@ Private WithEvents m_oSocket As cAsyncSocket
 Attribute m_oSocket.VB_VarHelpID = -1
 Private WithEvents m_oHttpDownload As cHttpDownload
 Attribute m_oHttpDownload.VB_VarHelpID = -1
-Private WithEvents m_oHttpUpload As cHttpDownload
-Attribute m_oHttpUpload.VB_VarHelpID = -1
 Private m_oRateLimiter As cRateLimiter
 Private m_dblStartTimerEx As Double
 Private m_dblNextTimerEx As Double
@@ -204,7 +202,7 @@ Private Sub Command2_Click()
     Const FUNC_NAME     As String = "Command2_Click"
      
     On Error GoTo EH
-    pvTestHowsMySssl
+    pvTestHowsMySsl
     If m_oRequest Is Nothing Then
         Set m_oRequest = New cHttpRequest
     End If
@@ -218,7 +216,7 @@ EH:
     MsgBox Err.Description, vbCritical, FUNC_NAME
 End Sub
 
-Private Sub pvTestHowsMySssl()
+Private Sub pvTestHowsMySsl()
        
     ' Create a reference to MSXML6 if you want to use the next line,
     ' and rem out the two lines that follow this
