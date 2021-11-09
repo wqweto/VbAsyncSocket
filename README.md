@@ -22,6 +22,12 @@ Start by including `src\cAsyncSocket.cls` in your project to have a convenient w
 
 Optionally you can add `src\cTlsSocket.cls` and `src\mdTlsThunks.bas` pair of source files to your project for TLS secured connections using VB6 with thunks backend or add `src\cTlsSocket.cls` and `src\mdTlsNative.bas` pair of source files for an alternative backend using native OS provided SSPI/Schannel library.
 
+#### WinHttpRequest Replacement Class
+
+Start by including `src\cAsyncSocket.cls`, `src\cTlsSocket.cls` and `src\mdTlsThunks.bas` backend for TLS support (or any other backend) and finally add `contrib\cHttpRequest.cls` for the TLS 1.3 capable source-compatible replacement class.
+
+Notice that the original `Open` method and `Option` property of the `WinHttpRequest` object have been suffixed with an underscore (`_`) in the replacement implementation (a limitation of the VB6 IDE) so some source-code fixes will be required to integrate the replacement `cHttpRequest` class.
+
 #### Sample SMTP with STARTTLS
 
 Here is a working sample with error checking omitted for brevity for accessing smtp.gmail.com over port 587.
@@ -57,29 +63,29 @@ This list includes cipher suites as implemented in the ASM thunks backend while 
 
 Cipher Suite | First&nbsp;In | Selection String | Notes
 --|--|--|--
-TLS_AES_128_GCM_SHA256                          |TLS 1.3|EECDH+AESGCM|AEAD
-TLS_AES_256_GCM_SHA384                          |TLS 1.3|EECDH+AESGCM|AEAD
-TLS_CHACHA20_POLY1305_SHA256                    |TLS 1.3|EECDH+AESGCM|AEAD
-TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256         |TLS 1.2|EECDH+AESGCM|AEAD
-TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256           |TLS 1.2|EECDH+AESGCM|AEAD
-TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384         |TLS 1.2|EECDH+AESGCM|AEAD
-TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384           |TLS 1.2|EECDH+AESGCM|AEAD
-TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256   |TLS 1.2|EECDH+CHACHA20|AEAD
-TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256     |TLS 1.2|EECDH+CHACHA20|AEAD
-TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256         |TLS 1.2|EECDH+AES+SHA256|Exotic
-TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256           |TLS 1.2|EECDH+AES+SHA256|Exotic
-TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384         |TLS 1.2|EECDH+AES+SHA384|Exotic
-TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384           |TLS 1.2|EECDH+AES+SHA384|Exotic
-TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA            |TLSv1|EECDH+AES+SHA1|HMAC-SHA1
-TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA              |TLSv1|EECDH+AES+SHA1|HMAC-SHA1
-TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA            |TLSv1|EECDH+AES+SHA1|HMAC-SHA1
-TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA              |TLSv1|EECDH+AES+SHA1|HMAC-SHA1
-TLS_RSA_WITH_AES_128_GCM_SHA256                 |TLS 1.2|RSA+AESGCM|No FS
-TLS_RSA_WITH_AES_256_GCM_SHA384                 |TLS 1.2|RSA+AESGCM|No FS
-TLS_RSA_WITH_AES_128_CBC_SHA256                 |TLS 1.2|RSA+AES+SHA256|No FS, Exotic
-TLS_RSA_WITH_AES_256_CBC_SHA256                 |TLS 1.2|RSA+AES+SHA256|No FS, Exotic
-TLS_RSA_WITH_AES_128_CBC_SHA                    |SSLv3|RSA+AES+SHA1|No FS, HMAC-SHA1
-TLS_RSA_WITH_AES_256_CBC_SHA                    |SSLv3|RSA+AES+SHA1|No FS, HMAC-SHA1
+<sub><sup>TLS_AES_128_GCM_SHA256                          </sup></sub>|TLS 1.3|EECDH+AESGCM|AEAD
+<sub><sup>TLS_AES_256_GCM_SHA384                          </sup></sub>|TLS 1.3|EECDH+AESGCM|AEAD
+<sub><sup>TLS_CHACHA20_POLY1305_SHA256                    </sup></sub>|TLS 1.3|EECDH+AESGCM|AEAD
+<sub><sup>TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256         </sup></sub>|TLS 1.2|EECDH+AESGCM|AEAD
+<sub><sup>TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256           </sup></sub>|TLS 1.2|EECDH+AESGCM|AEAD
+<sub><sup>TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384         </sup></sub>|TLS 1.2|EECDH+AESGCM|AEAD
+<sub><sup>TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384           </sup></sub>|TLS 1.2|EECDH+AESGCM|AEAD
+<sub><sup>TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256   </sup></sub>|TLS 1.2|EECDH+CHACHA20|AEAD
+<sub><sup>TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256     </sup></sub>|TLS 1.2|EECDH+CHACHA20|AEAD
+<sub><sup>TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256         </sup></sub>|TLS 1.2|EECDH+AES+SHA256|Exotic
+<sub><sup>TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256           </sup></sub>|TLS 1.2|EECDH+AES+SHA256|Exotic
+<sub><sup>TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384         </sup></sub>|TLS 1.2|EECDH+AES+SHA384|Exotic
+<sub><sup>TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384           </sup></sub>|TLS 1.2|EECDH+AES+SHA384|Exotic
+<sub><sup>TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA            </sup></sub>|TLSv1|EECDH+AES+SHA1|HMAC-SHA1
+<sub><sup>TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA              </sup></sub>|TLSv1|EECDH+AES+SHA1|HMAC-SHA1
+<sub><sup>TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA            </sup></sub>|TLSv1|EECDH+AES+SHA1|HMAC-SHA1
+<sub><sup>TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA              </sup></sub>|TLSv1|EECDH+AES+SHA1|HMAC-SHA1
+<sub><sup>TLS_RSA_WITH_AES_128_GCM_SHA256                 </sup></sub>|TLS 1.2|RSA+AESGCM|No FS
+<sub><sup>TLS_RSA_WITH_AES_256_GCM_SHA384                 </sup></sub>|TLS 1.2|RSA+AESGCM|No FS
+<sub><sup>TLS_RSA_WITH_AES_128_CBC_SHA256                 </sup></sub>|TLS 1.2|RSA+AES+SHA256|No FS, Exotic
+<sub><sup>TLS_RSA_WITH_AES_256_CBC_SHA256                 </sup></sub>|TLS 1.2|RSA+AES+SHA256|No FS, Exotic
+<sub><sup>TLS_RSA_WITH_AES_128_CBC_SHA                    </sup></sub>|SSLv3|RSA+AES+SHA1|No FS, HMAC-SHA1
+<sub><sup>TLS_RSA_WITH_AES_256_CBC_SHA                    </sup></sub>|SSLv3|RSA+AES+SHA1|No FS, HMAC-SHA1
 
 Note that "exotic" cipher suites are included behind a conditional compilation flag only (off by default).
 
