@@ -322,11 +322,11 @@ End Sub
 ' Properties
 '=========================================================================
 
-Property Get SocketHandle() As Long
+Public Property Get SocketHandle() As Long
     SocketHandle = m_hSocket
 End Property
 
-Property Get LastError() As Long
+Public Property Get LastError() As Long
     LastError = m_lLastError
 End Property
 
@@ -334,38 +334,42 @@ Friend Property Let frLastError(ByVal lValue As Long)
     m_lLastError = lValue
 End Property
 
-Property Get SockOpt(ByVal OptionName As UcsAsyncSocketOptionNameEnum, Optional ByVal Level As UcsAsyncSocketOptionLevelEnum = ucsSolSocket) As Long
+Public Property Get SockOpt(ByVal OptionName As UcsAsyncSocketOptionNameEnum, Optional ByVal Level As UcsAsyncSocketOptionLevelEnum = ucsSolSocket) As Long
     Call ws_getsockopt(m_hSocket, Level, OptionName, SockOpt, 4)
     m_lLastError = Err.LastDllError
 End Property
 
-Property Let SockOpt(ByVal OptionName As UcsAsyncSocketOptionNameEnum, Optional ByVal Level As UcsAsyncSocketOptionLevelEnum = ucsSolSocket, ByVal Value As Long)
+Public Property Let SockOpt(ByVal OptionName As UcsAsyncSocketOptionNameEnum, Optional ByVal Level As UcsAsyncSocketOptionLevelEnum = ucsSolSocket, ByVal Value As Long)
     Call ws_setsockopt(m_hSocket, Level, OptionName, Value, 4)
     m_lLastError = Err.LastDllError
 End Property
 
-Property Get AvailableBytes() As Long
-    If Not IOCtl(FIONREAD, AvailableBytes) Then
+Public Property Get AvailableBytes() As Long
+     If Not IOCtl(FIONREAD, AvailableBytes) Then
         AvailableBytes = SOCKET_ERROR
     End If
 End Property
 
-Property Get BlockingMode() As Long
+Public Property Get BlockingMode() As Long
     If Not IOCtl(FIONBIO, BlockingMode) Then
         BlockingMode = SOCKET_ERROR
     End If
 End Property
 
-Property Get LastSendBytes() As Long
+Public Property Get LastSendBytes() As Long
     LastSendBytes = m_lLastSendBytes
 End Property
 
-Property Get HasPendingEvent() As Boolean
+Public Property Get HasPendingEvent() As Boolean
     HasPendingEvent = (m_lLastError = WSAEWOULDBLOCK)
 End Property
 
-Property Get HasPendingResolve() As Boolean
+Public Property Get HasPendingResolve() As Boolean
     HasPendingResolve = pvResolveHandle <> 0
+End Property
+
+Public Property Get IsClosed() As Boolean
+    IsClosed = (m_hSocket = INVALID_SOCKET)
 End Property
 
 '= helper window =========================================================
@@ -913,7 +917,10 @@ Public Function GetErrorDescription(ByVal ErrorCode As Long) As String
     GetErrorDescription = Space$(2000)
     lSize = FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM Or FORMAT_MESSAGE_IGNORE_INSERTS, 0, ErrorCode, 0, GetErrorDescription, Len(GetErrorDescription), 0)
     If lSize = 0 Then
-        lSize = FormatMessage(FORMAT_MESSAGE_FROM_HMODULE Or FORMAT_MESSAGE_IGNORE_INSERTS, LoadLibrary("mswsock"), ErrorCode, 0, GetErrorDescription, Len(GetErrorDescription), 0)
+        lSize = FormatMessage(FORMAT_MESSAGE_FROM_HMODULE Or FORMAT_MESSAGE_IGNORE_INSERTS, LoadLibrary("mswsock"), ErrorCode And &HFFFF&, 0, GetErrorDescription, Len(GetErrorDescription), 0)
+    End If
+    If lSize = 0 Then
+        lSize = FormatMessage(FORMAT_MESSAGE_FROM_HMODULE Or FORMAT_MESSAGE_IGNORE_INSERTS, LoadLibrary("winhttp"), ErrorCode And &HFFFF&, 0, GetErrorDescription, Len(GetErrorDescription), 0)
     End If
     If lSize > 2 Then
         If Mid$(GetErrorDescription, lSize - 1, 2) = vbCrLf Then
