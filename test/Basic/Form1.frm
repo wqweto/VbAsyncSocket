@@ -1,14 +1,22 @@
 VERSION 5.00
 Begin VB.Form Form1 
    Caption         =   "Form1"
-   ClientHeight    =   4968
+   ClientHeight    =   5424
    ClientLeft      =   108
    ClientTop       =   456
    ClientWidth     =   5448
    LinkTopic       =   "Form1"
-   ScaleHeight     =   4968
+   ScaleHeight     =   5424
    ScaleWidth      =   5448
    StartUpPosition =   3  'Windows Default
+   Begin VB.CommandButton Command2 
+      Caption         =   "HTTP Request"
+      Height          =   432
+      Left            =   168
+      TabIndex        =   15
+      Top             =   4872
+      Width           =   2364
+   End
    Begin VB.CheckBox chkUseHttps 
       Caption         =   "Use HTTPS"
       Height          =   264
@@ -148,11 +156,15 @@ Private WithEvents m_oSocket As cAsyncSocket
 Attribute m_oSocket.VB_VarHelpID = -1
 Private WithEvents m_oHttpDownload As cHttpDownload
 Attribute m_oHttpDownload.VB_VarHelpID = -1
+Private WithEvents m_oHttpUpload As cHttpDownload
+Attribute m_oHttpUpload.VB_VarHelpID = -1
 Private m_oRateLimiter As cRateLimiter
 Private m_dblStartTimerEx As Double
 Private m_dblNextTimerEx As Double
 Private WithEvents m_oClientSocket As cTlsSocket
 Attribute m_oClientSocket.VB_VarHelpID = -1
+Private WithEvents m_oRequest As cHttpRequest
+Attribute m_oRequest.VB_VarHelpID = -1
 
 Private Type UcsParsedUrl
     Protocol        As String
@@ -186,6 +198,52 @@ Private Sub Command1_Click()
     Exit Sub
 EH:
     MsgBox Err.Description, vbCritical, FUNC_NAME
+End Sub
+
+Private Sub Command2_Click()
+    Const FUNC_NAME     As String = "Command2_Click"
+     
+    On Error GoTo EH
+    pvTestHowsMySssl
+    If m_oRequest Is Nothing Then
+        Set m_oRequest = New cHttpRequest
+    End If
+    m_oRequest.SetTimeouts 5000, 5000, 5000, 5000
+    m_oRequest.Option_(WinHttpRequestOption_EnableHttpsToHttpRedirects) = True
+    m_oRequest.Open_ "GET", IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://www.unicontsoft.com" ' /bg/download.html
+    m_oRequest.Send
+    DebugLog MODULE_NAME, FUNC_NAME, Len(m_oRequest.ResponseText)
+    Exit Sub
+EH:
+    MsgBox Err.Description, vbCritical, FUNC_NAME
+End Sub
+
+Private Sub pvTestHowsMySssl()
+       
+    ' Create a reference to MSXML6 if you want to use the next line,
+    ' and rem out the two lines that follow this
+    ' Dim objhttp As New MSXML2.ServerXMLHTTP60
+    
+    Dim objhttp As cHttpRequest
+    Set objhttp = New cHttpRequest
+    objhttp.Open_ "GET", "https://howsmyssl.com/a/check", False
+    objhttp.SetRequestHeader "User-Agent", "Mozilla/5.0 (Windows NT 5.1; rv:31.0) Gecko/20100101 Firefox/31.0"
+    objhttp.SetRequestHeader "Content-type", "text/html"
+    objhttp.Send
+    Debug.Print objhttp.GetAllResponseHeaders
+    Debug.Print objhttp.ResponseText
+End Sub
+
+Private Sub m_oRequest_OnResponseStart(Status As Long, ContentType As String)
+    DebugLog MODULE_NAME, "m_oRequest_OnResponseStart", "Status=" & Status & ", ContentType=" & ContentType
+End Sub
+
+Private Sub m_oRequest_OnResponseDataAvailable(Data() As Byte)
+    DebugLog MODULE_NAME, "m_oRequest_OnResponseDataAvailable", "sizeof(Data)=" & UBound(Data) + 1
+End Sub
+
+Private Sub m_oRequest_OnResponseFinished()
+    DebugLog MODULE_NAME, "m_oRequest_OnResponseFinished", "Len(m_oRequest.ResponseText)=" & Len(m_oRequest.ResponseText)
 End Sub
 
 Private Sub m_oSocket_OnConnect()
