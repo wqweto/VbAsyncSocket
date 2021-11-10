@@ -22,9 +22,11 @@ Attribute VB_Exposed = False
 '
 '=========================================================================
 Option Explicit
-Const MODULE_NAME As String = "cHttpRequest"
+DefObj A-Z
+Private Const MODULE_NAME As String = "cHttpRequest"
 
-#Const ImplUseTls = True
+#Const ImplUseTls = (USE_TLS <> 0)
+#Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
 
 '=========================================================================
 ' Public enums
@@ -78,7 +80,7 @@ Public Enum WinHttpRequestSecureProtocols '--- bitmask
 End Enum
 
 '=========================================================================
-' Public events
+' Events
 '=========================================================================
 
 Event OnResponseStart(Status As Long, ContentType As String)
@@ -92,7 +94,6 @@ Event OnError(ErrorNumber As Long, ErrorDescription As String)
 
 '--- for IStream_Seek
 Private Const STREAM_SEEK_SET               As Long = 0
-'Private Const STREAM_SEEK_CUR               As Long = 1
 Private Const STREAM_SEEK_END               As Long = 2
 '--- errors
 Private Const WINHTTP_ERROR_BASE                    As Long = &H80070000 + 12000
@@ -101,6 +102,8 @@ Private Const ERROR_WINHTTP_INVALID_URL             As Long = (WINHTTP_ERROR_BAS
 Private Const ERROR_WINHTTP_UNRECOGNIZED_SCHEME     As Long = (WINHTTP_ERROR_BASE + 6)
 Private Const ERROR_WINHTTP_INVALID_SERVER_RESPONSE As Long = (WINHTTP_ERROR_BASE + 152)
 Private Const ERROR_INVALID_PARAMETER               As Long = &H80070057
+Private Const E_NOTIMPL                             As Long = &H80004001
+Private Const E_POINTER                             As Long = &H80004003
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
@@ -109,6 +112,7 @@ Private Declare Function DispCallFunc Lib "oleaut32" (ByVal pvInstance As Long, 
 Private Declare Function SHCreateMemStream Lib "shlwapi" Alias "#12" (pInit As Any, ByVal cbInit As Long) As stdole.IUnknown
 Private Declare Function QueryPerformanceCounter Lib "kernel32" (lpPerformanceCount As Currency) As Long
 Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
+Private Declare Function UrlEscape Lib "shlwapi" Alias "UrlEscapeW" (ByVal pszURL As Long, ByVal pszEscaped As Long, pcchEscaped As Long, ByVal dwFlags As Long) As Long
 
 '=========================================================================
 ' Constants and member variables
@@ -146,11 +150,12 @@ Private m_sStatusText           As String
 Private m_sAllResponseHeaders   As String
 Private m_oResponseHeaders      As Object
 Private m_pResponseStream       As IUnknown
-Private m_vResponseText         As Variant
+Private m_sResponseText         As String
 Private m_dblContentLength      As Double
 Private m_dblBytesProgress      As Double
 Private m_lCurrentRedirect      As Long
 Private m_sTransferEncoding     As String
+Private m_aTransferChunks()     As UcsBuffer
 '--- i/o buffers
 Private m_uSendBuffer           As UcsBuffer
 Private m_uRecvBuffer           As UcsBuffer
@@ -186,29 +191,45 @@ End Type
 '=========================================================================
 
 Private Sub PrintError(sFunction As String)
-    Debug.Print "Critical error: " & Err.Description & " [" & MODULE_NAME & "." & sFunction & "]"
+    #If ImplUseDebugLog Then
+        DebugLog MODULE_NAME, sFunction & "(" & Erl & ")", Err.Description & " &H" & Hex$(Err.Number), vbLogEventTypeError
+    #Else
+        Debug.Print "Critical error: " & Err.Description & " [" & MODULE_NAME & "." & sFunction & "]"
+    #End If
+End Sub
+
+Private Sub RaiseError(sFunction As String)
+    Dim vErr                As Variant
+    
+    vErr = Array(Err.Number, Err.Source, Err.Description)
+    #If ImplUseDebugLog Then
+        DebugLog MODULE_NAME, sFunction & "(" & Erl & ")", Err.Description & " &H" & Hex$(Err.Number), vbLogEventTypeError
+    #Else
+        Debug.Print "Critical error: " & Err.Description & " [" & MODULE_NAME & "." & sFunction & "]"
+    #End If
+    Err.Raise vErr(0), MODULE_NAME & "." & sFunction & vbCrLf & vErr(1), vErr(2)
 End Sub
 
 '=========================================================================
 ' Properties
 '=========================================================================
 
-Public Property Get ResponseBody() As Variant
+Public Property Get ResponseBody() As Byte()
     Dim lSize               As Long
-    Dim baBuffer()          As Byte
+    Dim baRetVal()          As Byte
     Dim hResult             As Long
     
     lSize = pvGetStreamSize(m_pResponseStream)
     If lSize > 0 Then
-        ReDim baBuffer(0 To lSize - 1) As Byte
-        hResult = IStream_Read(m_pResponseStream, baBuffer)
+        ReDim baRetVal(0 To lSize - 1) As Byte
+        hResult = IStream_Read(m_pResponseStream, baRetVal)
         If hResult < 0 Then
             Err.Raise vbObjectError, "IStream_Read", m_oSocket.GetErrorDescription(hResult)
         End If
     Else
-        baBuffer = vbNullString
+        baRetVal = vbNullString
     End If
-    ResponseBody = baBuffer
+    ResponseBody = baRetVal
 End Property
 
 Public Property Get ResponseStream() As Variant
@@ -220,7 +241,7 @@ Public Property Get ResponseText() As String
     Dim vSplit          As Variant
     Dim vElem           As Variant
     
-    If IsEmpty(m_vResponseText) Then
+    If m_sResponseText = vbNullChar Then
         eCodePage = ucsScpUtf8
         If m_oResponseHeaders.Exists(HDR_CONTENT_TYPE) Then
             vSplit = Split(m_oRequestHeaders.Item(HDR_CONTENT_TYPE), ";")
@@ -236,9 +257,9 @@ Public Property Get ResponseText() As String
                 Next
             End If
         End If
-        m_vResponseText = m_oSocket.FromTextArray(ResponseBody, eCodePage)
+        m_sResponseText = m_oSocket.FromTextArray(ResponseBody, eCodePage)
     End If
-    ResponseText = m_vResponseText
+    ResponseText = m_sResponseText
 End Property
 
 Public Property Get Status() As Long
@@ -271,10 +292,13 @@ End Property
 
 Public Sub Open_(ByVal Method As String, ByVal Url As String, Optional ByVal Async As Variant)
     Const FUNC_NAME     As String = "Open"
+    Dim sEscaped        As String
     Dim uRemote         As UcsParsedUrl
     
     On Error GoTo EH
-    If Not pvParseUrl(Url, uRemote, "http") Then
+    sEscaped = pvEscapeUrl(Url)
+    Option_(WinHttpRequestOption_URL) = sEscaped
+    If Not pvParseUrl(sEscaped, uRemote, "http") Then
         On Error GoTo 0
         Err.Raise ERROR_WINHTTP_INVALID_URL, , m_oSocket.GetErrorDescription(ERROR_WINHTTP_INVALID_URL)
     End If
@@ -283,9 +307,10 @@ Public Sub Open_(ByVal Method As String, ByVal Url As String, Optional ByVal Asy
         Err.Raise ERROR_WINHTTP_UNRECOGNIZED_SCHEME, , m_oSocket.GetErrorDescription(ERROR_WINHTTP_UNRECOGNIZED_SCHEME)
     End If
     m_sMethod = Method
-    Option_(WinHttpRequestOption_URL) = Url
-    If m_uRemote.Host <> uRemote.Host Or m_uRemote.Port <> uRemote.Port Or m_uRemote.Protocol <> uRemote.Protocol Then
-        Set m_oSocket = pvInitSocket
+    If LenB(m_uRemote.Host) <> 0 Then
+        If m_uRemote.Host <> uRemote.Host Or m_uRemote.Port <> uRemote.Port Or m_uRemote.Protocol <> uRemote.Protocol Then
+            Set m_oSocket = pvInitSocket
+        End If
     End If
     m_uRemote = uRemote
     m_bAsync = IIf(Not IsMissing(Async), Async, False)
@@ -301,14 +326,16 @@ Public Sub Open_(ByVal Method As String, ByVal Url As String, Optional ByVal Asy
     m_dblContentLength = -1
     m_lCurrentRedirect = 0
     m_sTransferEncoding = vbNullString
-    '--- initial headers
+    '--- init headers
     SetRequestHeader "Host", m_uRemote.Host
-    SetRequestHeader "Connection", "Keep-Alive"
     SetRequestHeader "User-Agent", Option_(WinHttpRequestOption_UserAgentString)
+    If Option_(WinHttpRequestOption_EnableHttp1_1) Then
+        SetRequestHeader "Connection", "Keep-Alive"
+    End If
     SetRequestHeader "Accept", "*.*"
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    RaiseError FUNC_NAME
 End Sub
 
 Public Sub Send(Optional ByVal Body As Variant)
@@ -319,11 +346,12 @@ Public Sub Send(Optional ByVal Body As Variant)
     Dim eCodePage       As UcsAsyncSocketCodePageEnum
     
     On Error GoTo EH
+    '--- keep headers
+    SetRequestHeader "Host", m_uRemote.Host
+    SetRequestHeader "User-Agent", Option_(WinHttpRequestOption_UserAgentString)
     '--- preapare request stream from body
     If IsObject(Body) Then
-        On Error GoTo 0
         Set m_pRequestStream = AsIStream(Body)
-        On Error GoTo EH
     ElseIf IsMissing(Body) Or IsEmpty(Body) Or IsNull(Body) Then
         Set m_pRequestStream = Nothing
     ElseIf VarType(Body) = vbByte + vbArray Then
@@ -401,7 +429,7 @@ Public Sub Send(Optional ByVal Body As Variant)
     End If
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    RaiseError FUNC_NAME
 End Sub
 
 Public Sub SetTimeouts(ByVal ResolveTimeout As Long, ByVal ConnectTimeout As Long, ByVal SendTimeout As Long, ByVal ReceiveTimeout As Long)
@@ -422,7 +450,7 @@ Public Sub SetRequestHeader(ByVal Header As String, ByVal Value As String)
     End If
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    RaiseError FUNC_NAME
 End Sub
 
 Public Sub Abort()
@@ -433,10 +461,10 @@ Public Sub Abort()
     Set m_oSocket = pvInitSocket
     Set m_pRequestStream = Nothing
     Set m_pResponseStream = Nothing
-    m_vResponseText = Empty
+    m_sResponseText = vbNullChar
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    RaiseError FUNC_NAME
 End Sub
 
 Public Function WaitForResponse(Optional ByVal Timeout As Variant) As Boolean
@@ -493,27 +521,27 @@ End Function
 '= not implemented =======================================================
 
 Public Sub SetAutoLogonPolicy(ByVal AutoLogonPolicy As WinHttpRequestAutoLogonPolicy)
-    #If AutoLogonPolicy Then '--- touch args
+    #If AutoLogonPolicy Then '--- touch args for MZ-Tools
     #End If
-    Err.Raise vbObjectError, , "Not implemented"
+    Err.Raise E_NOTIMPL, , m_oSocket.GetErrorDescription(E_NOTIMPL)
 End Sub
 
 Public Sub SetClientCertificate(ByVal ClientCertificate As String)
-    #If ClientCertificate Then '--- touch args
+    #If ClientCertificate Then
     #End If
-    Err.Raise vbObjectError, , "Not implemented"
+    Err.Raise E_NOTIMPL, , m_oSocket.GetErrorDescription(E_NOTIMPL)
 End Sub
 
 Public Sub SetCredentials(ByVal UserName As String, ByVal Password As String, ByVal Flags As Long)
-    #If UserName And Password And Flags Then '--- touch args
+    #If UserName And Password And Flags Then
     #End If
-    Err.Raise vbObjectError, , "Not implemented"
+    Err.Raise E_NOTIMPL, , m_oSocket.GetErrorDescription(E_NOTIMPL)
 End Sub
 
 Public Sub SetProxy(ByVal ProxySetting As Long, Optional ByVal ProxyServer As Variant, Optional ByVal BypassList As Variant)
-    #If ProxySetting And ProxyServer And BypassList Then '--- touch args
+    #If ProxySetting And ProxyServer And BypassList Then
     #End If
-    Err.Raise vbObjectError, , "Not implemented"
+    Err.Raise E_NOTIMPL, , m_oSocket.GetErrorDescription(E_NOTIMPL)
 End Sub
 
 '= private ===============================================================
@@ -566,8 +594,7 @@ Private Function pvSendBody(uSend As UcsBuffer) As Boolean
 QH:
     Exit Function
 EH:
-    PrintError FUNC_NAME
-    Resume QH
+    pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Err.Description
 End Function
 
 Private Function pvRecvHeaders(baBuffer() As Byte, uRecv As UcsBuffer) As Boolean
@@ -580,6 +607,7 @@ Private Function pvRecvHeaders(baBuffer() As Byte, uRecv As UcsBuffer) As Boolea
     Dim vElem           As Variant
     Dim uRedirect       As UcsParsedUrl
     Dim lIdx            As Long
+    Dim sEscaped        As String
     
     On Error GoTo EH
     pvBufferWriteArray uRecv, baBuffer
@@ -611,8 +639,12 @@ Private Function pvRecvHeaders(baBuffer() As Byte, uRecv As UcsBuffer) As Boolea
             If m_lCurrentRedirect > Option_(WinHttpRequestOption_MaxAutomaticRedirects) Then
                 GoTo TryDownload
             End If
-            vElem = m_oResponseHeaders.Item(HDR_LOCATION)
-            If Not pvParseUrl(CStr(vElem), uRedirect, m_uRemote.Protocol) Then
+            sEscaped = pvEscapeUrl(m_oResponseHeaders.Item(HDR_LOCATION))
+            Option_(WinHttpRequestOption_URL) = sEscaped
+            #If ImplUseDebugLog Then
+                DebugLog MODULE_NAME, FUNC_NAME, "Redirecting to " & sEscaped
+            #End If
+            If Not pvParseUrl(sEscaped, uRedirect, m_uRemote.Protocol) Then
                 pvSetError ERROR_WINHTTP_INVALID_URL, MODULE_NAME & "." & FUNC_NAME
                 GoTo QH
             End If
@@ -627,8 +659,6 @@ Private Function pvRecvHeaders(baBuffer() As Byte, uRecv As UcsBuffer) As Boolea
                     GoTo TryDownload
                 End If
             End If
-'            DebugLog MODULE_NAME, FUNC_NAME, "Redirecting to " & vElem
-            Option_(WinHttpRequestOption_URL) = vElem
             If m_uRemote.Host <> uRedirect.Host Or m_uRemote.Port <> uRedirect.Port Or m_uRemote.Protocol <> uRedirect.Protocol Then
                 Set m_oSocket = pvInitSocket
             End If
@@ -669,7 +699,7 @@ TryDownload:
             RaiseEvent OnResponseStart(m_lStatus, m_oResponseHeaders.Item(HDR_CONTENT_TYPE))
             uRecv.Size = 0
             Set m_pResponseStream = SHCreateMemStream(ByVal 0, 0)
-            m_vResponseText = Empty
+            m_sResponseText = vbNullChar
             pvRecvBody baBuffer, uRecv
         End Select
     ElseIf uRecv.Size > Option_(WinHttpRequestOption_MaxResponseHeaderSize) Then
@@ -681,32 +711,34 @@ TryDownload:
 QH:
     Exit Function
 EH:
-    PrintError FUNC_NAME
-    Resume QH
+    pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Err.Description
 End Function
 
 Private Function pvRecvBody(baBuffer() As Byte, uRecv As UcsBuffer, Optional ByVal Flush As Boolean) As Boolean
     Const FUNC_NAME     As String = "pvRecvBody"
     Const sizeof_CrLf   As Long = 2
-    Dim vElem           As Variant
     Dim hResult         As Long
     Dim baTemp()        As Byte
     Dim lPos            As Long
     Dim lSize           As Long
+    Dim lIdx            As Long
+    Dim uChunk          As UcsBuffer
     
     On Error GoTo EH
     If UBound(baBuffer) >= 0 Then
         If m_sTransferEncoding = "chunked" Then
             pvBufferWriteArray m_uChunkBuffer, baBuffer
-            For Each vElem In pvParseChunks(m_uChunkBuffer)
-                lPos = vElem(0) + vElem(1) + sizeof_CrLf
-                If vElem(1) = 0 Then
+            pvParseChunks m_uChunkBuffer, m_aTransferChunks, lSize
+            For lIdx = 0 To lSize - 1
+                uChunk = m_aTransferChunks(lIdx)
+                lPos = uChunk.Pos + uChunk.Size + sizeof_CrLf
+                If uChunk.Size = 0 Then
                     m_eState = ucsIdle
                     Flush = True
                     Exit For
                 End If
-                ReDim baTemp(0 To vElem(1) - 1) As Byte
-                Call CopyMemory(baTemp(0), m_uChunkBuffer.Data(vElem(0)), UBound(baTemp) + 1)
+                ReDim baTemp(0 To uChunk.Size - 1) As Byte
+                Call CopyMemory(baTemp(0), m_uChunkBuffer.Data(uChunk.Pos), UBound(baTemp) + 1)
                 m_dblBytesProgress = m_dblBytesProgress + UBound(baTemp) + 1
                 RaiseEvent OnResponseDataAvailable(baTemp)
                 pvBufferWriteArray uRecv, baTemp
@@ -749,8 +781,59 @@ Private Function pvRecvBody(baBuffer() As Byte, uRecv As UcsBuffer, Optional ByV
 QH:
     Exit Function
 EH:
-    PrintError FUNC_NAME
-    Resume QH
+    pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Err.Description
+End Function
+
+Private Function pvEscapeUrl(sUrl As String) As String
+    Const URL_ESCAPE_PERCENT As Long = &H1000
+    Dim sEncoded        As String
+    Dim lFlags          As Long
+    Dim vSplit          As Variant
+    
+    sEncoded = StrConv(m_oSocket.ToTextArray(sUrl, Option_(WinHttpRequestOption_URLCodePage)), vbUnicode)
+    If Not Option_(WinHttpRequestOption_UrlEscapeDisable) Then
+        If Option_(WinHttpRequestOption_EscapePercentInURL) Then
+            lFlags = lFlags Or URL_ESCAPE_PERCENT
+        End If
+        vSplit = Split(sEncoded, "?", Limit:=2)
+        pvEscapeUrl = pvEscapePart(vSplit(0), lFlags)
+        '--- append query string and anchor
+        If UBound(vSplit) > 0 Then
+            If Not Option_(WinHttpRequestOption_UrlEscapeDisableQuery) Then
+                pvEscapeUrl = pvEscapeUrl & "?" & pvEscapePart(vSplit(1), lFlags)
+            Else
+                pvEscapeUrl = pvEscapeUrl & "?" & vSplit(1)
+            End If
+        End If
+    Else
+        pvEscapeUrl = sEncoded
+    End If
+End Function
+
+Private Function pvEscapePart(ByVal sPart As String, ByVal lFlags As Long) As String
+    Dim sOutput         As String
+    Dim lSize           As Long
+    Dim hResult         As Long
+    Dim baTemp()        As Byte
+    
+    lSize = Len(sPart)
+    sOutput = String$(lSize, 0)
+    hResult = UrlEscape(StrPtr(sPart), StrPtr(sOutput), lSize, lFlags)
+    If hResult = E_POINTER Then
+        sOutput = String$(lSize, 0)
+        hResult = UrlEscape(StrPtr(sPart), StrPtr(sOutput), lSize, lFlags)
+    End If
+    If hResult < 0 Then
+        Err.Raise hResult, "UrlEscape", m_oSocket.GetErrorDescription(hResult)
+    End If
+    baTemp = m_oSocket.ToTextArray(Left$(sOutput, lSize), ucsScpAcp)
+    For lSize = 0 To UBound(baTemp)
+        If baTemp(lSize) < &H80 Then
+            pvEscapePart = pvEscapePart & Chr$(baTemp(lSize))
+        Else
+            pvEscapePart = pvEscapePart & "%" & Right$("0" & Hex$(baTemp(lSize)), 2)
+        End If
+    Next
 End Function
 
 Private Function pvIsProtocolSupported(sProtocol As String) As Boolean
@@ -827,7 +910,9 @@ Private Sub pvSetError(ByVal ErrNumber As Long, Optional ErrSource As String, Op
             ErrDescription = "Error " & ErrNumber
         End If
     End If
-'    DebugLog MODULE_NAME, "pvSetError", Hex$(ErrNumber) & " " & ErrDescription
+    #If ImplUseDebugLog Then
+        DebugLog MODULE_NAME, "pvSetError", Hex$(ErrNumber) & " " & ErrDescription
+    #End If
     RaiseEvent OnError(ErrNumber, ErrDescription & " [" & Replace(ErrSource, vbCrLf, "; ") & "]")
     Abort
     Exit Sub
@@ -853,16 +938,20 @@ EH:
     PrintError FUNC_NAME
 End Function
 
-Private Function pvParseChunks(uChunk As UcsBuffer) As Collection
+Private Sub pvParseChunks(uChunk As UcsBuffer, aOutput() As UcsBuffer, lOutSize As Long)
     Const FUNC_NAME     As String = "pvParseChunks"
     Const sizeof_CrLf   As Long = 2
+    Dim lPtr            As Long
     Dim lStart          As Long
     Dim lPos            As Long
     Dim sTemp           As String
     Dim lSize           As Long
     
     On Error GoTo EH
-    Set pvParseChunks = New Collection
+    Call CopyMemory(lPtr, ByVal ArrPtr(aOutput), 4)
+    If lPtr = 0 Then
+        ReDim aOutput(0 To 7) As UcsBuffer
+    End If
     lStart = 1
     lPos = InStrB(lStart, uChunk.Data, StrConv(vbCrLf, vbFromUnicode))
     Do While lPos > 0 And lPos < uChunk.Size
@@ -872,14 +961,24 @@ Private Function pvParseChunks(uChunk As UcsBuffer) As Collection
         If lPos + sizeof_CrLf + lSize > m_uChunkBuffer.Size Then
             Exit Do
         End If
-        pvParseChunks.Add Array(lPos + sizeof_CrLf - 1, lSize)
+        If UBound(aOutput) < lOutSize Then
+            ReDim Preserve aOutput(0 To 2 * UBound(aOutput) + 1) As UcsBuffer
+        End If
+        With aOutput(lOutSize)
+            .Pos = lPos + sizeof_CrLf - 1
+            .Size = lSize
+        End With
+        lOutSize = lOutSize + 1
+        If lSize = 0 Then
+            Exit Do
+        End If
         lStart = lPos + sizeof_CrLf + lSize + sizeof_CrLf
         lPos = InStrB(lStart, uChunk.Data, StrConv(vbCrLf, vbFromUnicode))
     Loop
-    Exit Function
+    Exit Sub
 EH:
     PrintError FUNC_NAME
-End Function
+End Sub
 
 Private Function pvParseUrl(sUrl As String, uParsed As UcsParsedUrl, Optional DefProtocol As String) As Boolean
     With CreateObject("VBScript.RegExp")
@@ -1061,8 +1160,8 @@ Private Sub m_oSocket_OnSend()
         m_uSendBuffer.Size = 0
         m_uSendBuffer.Pos = 0
         pvBufferWriteArray m_uSendBuffer, m_oSocket.ToTextArray( _
-            m_sMethod & " " & m_uRemote.Path & m_uRemote.QueryString & " HTTP/1." & IIf(Option_(WinHttpRequestOption_EnableHttp1_1), "1", "0") & vbCrLf & _
-            pvJoinHeaders(m_oRequestHeaders) & HDR_DELIM, Option_(WinHttpRequestOption_URLCodePage))
+            m_sMethod & " " & m_uRemote.Path & m_uRemote.QueryString & m_uRemote.Anchor & " HTTP/1." & IIf(Option_(WinHttpRequestOption_EnableHttp1_1), "1", "0") & vbCrLf & _
+            pvJoinHeaders(m_oRequestHeaders) & HDR_DELIM, ucsScpAcp)
         m_eState = ucsWaitSendBody
     End If
     If m_eState = ucsWaitSendBody Then
@@ -1073,7 +1172,7 @@ Private Sub m_oSocket_OnSend()
 QH:
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Err.Description
 End Sub
 
 Private Sub m_oSocket_OnReceive()
@@ -1110,7 +1209,7 @@ Private Sub m_oSocket_OnReceive()
 QH:
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Err.Description
 End Sub
 
 Private Sub m_oSocket_OnClose()
@@ -1131,7 +1230,7 @@ Private Sub m_oSocket_OnClose()
     m_oSocket.Close_
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Err.Description
 End Sub
 
 Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
@@ -1153,7 +1252,7 @@ Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsy
     #End If
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Err.Description
 End Sub
 
 '=========================================================================
@@ -1164,18 +1263,18 @@ Private Sub Class_Initialize()
     Set m_oSocket = pvInitSocket
     Option_(WinHttpRequestOption_UserAgentString) = DEF_USER_AGENT
     Option_(WinHttpRequestOption_URLCodePage) = 65001
-    Option_(WinHttpRequestOption_EscapePercentInURL) = False                '--- ignored
+    Option_(WinHttpRequestOption_EscapePercentInURL) = False
     Option_(WinHttpRequestOption_SslErrorIgnoreFlags) = 0
     'Option_(WinHttpRequestOption_SelectCertificate) = ?
     Option_(WinHttpRequestOption_EnableRedirects) = True
-    Option_(WinHttpRequestOption_UrlEscapeDisable) = False                  '--- ignored
-    Option_(WinHttpRequestOption_UrlEscapeDisableQuery) = True              '--- ignored
+    Option_(WinHttpRequestOption_UrlEscapeDisable) = False
+    Option_(WinHttpRequestOption_UrlEscapeDisableQuery) = True
     Option_(WinHttpRequestOption_SecureProtocols) = SecureProtocol_ALL
     Option_(WinHttpRequestOption_EnableTracing) = False                     '--- ignored
     Option_(WinHttpRequestOption_RevertImpersonationOverSsl) = True         '--- ignored
     Option_(WinHttpRequestOption_EnableHttpsToHttpRedirects) = False
     Option_(WinHttpRequestOption_EnablePassportAuthentication) = False      '--- ignored
-    Option_(WinHttpRequestOption_MaxAutomaticRedirects) = 10                '--- ignored
+    Option_(WinHttpRequestOption_MaxAutomaticRedirects) = 10
     Option_(WinHttpRequestOption_MaxResponseHeaderSize) = 65536
     Option_(WinHttpRequestOption_MaxResponseDrainSize) = 1024000
     Option_(WinHttpRequestOption_EnableHttp1_1) = True

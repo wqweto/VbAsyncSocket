@@ -202,6 +202,7 @@ Private Sub Command2_Click()
     Const FUNC_NAME     As String = "Command2_Click"
      
     On Error GoTo EH
+    pvTestSeecaoCom
     pvTestHowsMySsl
     If m_oRequest Is Nothing Then
         Set m_oRequest = New cHttpRequest
@@ -209,6 +210,7 @@ Private Sub Command2_Click()
     m_oRequest.SetTimeouts 5000, 5000, 5000, 5000
     m_oRequest.Option_(WinHttpRequestOption_EnableHttpsToHttpRedirects) = True
     m_oRequest.Open_ "GET", IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://www.unicontsoft.com" ' /bg/download.html
+'    m_oRequest.Open_ "GET", "http://localhost/ТоваПапка?Параметър1&Парам2#Анкор"
     m_oRequest.Send
     DebugLog MODULE_NAME, FUNC_NAME, Len(m_oRequest.ResponseText)
     Exit Sub
@@ -231,6 +233,22 @@ Private Sub pvTestHowsMySsl()
     Debug.Print objhttp.GetAllResponseHeaders
     Debug.Print objhttp.ResponseText
 End Sub
+
+Private Sub pvTestSeecaoCom()
+Dim req As New cHttpRequest
+Dim Body As String, Url As String
+Url = "https://auctions.seecao.com/api/DailyAuction/GetDailyAuctionList"
+Body = "{""parameters"":{""dayFrom"":""2021-05-12"",""dayTill"":""2021-05-12"",""auctionState"":[0,3,4,5,6,7,9]}}"
+
+With req
+    .Open_ "POST", Url, False
+    .SetRequestHeader "Content-Type", "application/json"
+    .Option_(WinHttpRequestOption_SslErrorIgnoreFlags) = 13056 '&H3300
+    .Send Body
+    Debug.Print .ResponseText
+End With
+End Sub
+
 
 Private Sub m_oRequest_OnResponseStart(Status As Long, ContentType As String)
     DebugLog MODULE_NAME, "m_oRequest_OnResponseStart", "Status=" & Status & ", ContentType=" & ContentType
