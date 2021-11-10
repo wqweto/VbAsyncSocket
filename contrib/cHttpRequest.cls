@@ -25,6 +25,7 @@ Option Explicit
 DefObj A-Z
 Private Const MODULE_NAME As String = "cHttpRequest"
 
+#Const ImplUseShared = (ASYNCSOCKET_USE_SHARED <> 0)
 #Const ImplUseTls = (USE_TLS <> 0)
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
 
@@ -101,6 +102,7 @@ Private Const ERROR_WINHTTP_TIMEOUT                 As Long = (WINHTTP_ERROR_BAS
 Private Const ERROR_WINHTTP_INVALID_URL             As Long = (WINHTTP_ERROR_BASE + 5)
 Private Const ERROR_WINHTTP_UNRECOGNIZED_SCHEME     As Long = (WINHTTP_ERROR_BASE + 6)
 Private Const ERROR_WINHTTP_INVALID_SERVER_RESPONSE As Long = (WINHTTP_ERROR_BASE + 152)
+Private Const ERROR_WINHTTP_HEADER_SIZE_OVERFLOW    As Long = (WINHTTP_ERROR_BASE + 182)
 Private Const ERROR_INVALID_PARAMETER               As Long = &H80070057
 Private Const E_NOTIMPL                             As Long = &H80004001
 Private Const E_POINTER                             As Long = &H80004003
@@ -270,20 +272,12 @@ Public Property Get StatusText() As String
     StatusText = m_sStatusText
 End Property
 
-Public Property Let Option_(ByVal eOption As WinHttpRequestOption, ByVal RHS As Variant)
-    If IsObject(RHS) Then
-        Set m_vOptions(eOption) = RHS
-    Else
-        m_vOptions(eOption) = RHS
-    End If
+Public Property Get Option_(ByVal eOption As WinHttpRequestOption) As Variant
+    Option_ = m_vOptions(eOption)
 End Property
 
-Public Property Get Option_(ByVal eOption As WinHttpRequestOption) As Variant
-    If IsObject(m_vOptions(eOption)) Then
-        Set Option_ = m_vOptions(eOption)
-    Else
-        Option_ = m_vOptions(eOption)
-    End If
+Public Property Let Option_(ByVal eOption As WinHttpRequestOption, ByVal RHS As Variant)
+    m_vOptions(eOption) = RHS
 End Property
 
 '=========================================================================
@@ -305,6 +299,10 @@ Public Sub Open_(ByVal Method As String, ByVal Url As String, Optional ByVal Asy
     If Not pvIsProtocolSupported(uRemote.Protocol) Then
         On Error GoTo 0
         Err.Raise ERROR_WINHTTP_UNRECOGNIZED_SCHEME, , m_oSocket.GetErrorDescription(ERROR_WINHTTP_UNRECOGNIZED_SCHEME)
+    End If
+    If Option_(WinHttpRequestOption_RejectUserpwd) Then
+        uRemote.User = vbNullString
+        uRemote.Pass = vbNullString
     End If
     m_sMethod = Method
     If LenB(m_uRemote.Host) <> 0 Then
@@ -346,9 +344,14 @@ Public Sub Send(Optional ByVal Body As Variant)
     Dim eCodePage       As UcsAsyncSocketCodePageEnum
     
     On Error GoTo EH
-    '--- keep headers
+    '--- restore headers
     SetRequestHeader "Host", m_uRemote.Host
     SetRequestHeader "User-Agent", Option_(WinHttpRequestOption_UserAgentString)
+    '--- prepare auth header
+    If LenB(m_uRemote.User) <> 0 Or LenB(m_uRemote.Pass) <> 0 Then
+        SetRequestHeader "Authorization", "Basic " & Replace(ToBase64Array( _
+            pvToTextArray(m_uRemote.User & ":" & m_uRemote.Pass, ucsScpAcp)), vbCrLf, vbNullString)
+    End If
     '--- preapare request stream from body
     If IsObject(Body) Then
         Set m_pRequestStream = AsIStream(Body)
@@ -381,7 +384,7 @@ Public Sub Send(Optional ByVal Body As Variant)
                     SetRequestHeader HDR_CONTENT_TYPE, Trim$(vSplit(0)) & "; " & DEF_CHARSET
                 End If
             End If
-            baBuffer = m_oSocket.ToTextArray(CStr(Body), eCodePage)
+            baBuffer = pvToTextArray(CStr(Body), eCodePage)
             Set m_pRequestStream = SHCreateMemStream(baBuffer(0), UBound(baBuffer) + 1)
         Else
             Set m_pRequestStream = Nothing
@@ -518,6 +521,15 @@ Public Function GetResponseHeader(ByVal Header As String) As String
     End If
 End Function
 
+Public Sub SetCredentials(ByVal UserName As String, ByVal Password As String, ByVal Flags As Long)
+    Const HTTPREQUEST_SETCREDENTIALS_FOR_SERVER As Long = 0
+    
+    If Flags = HTTPREQUEST_SETCREDENTIALS_FOR_SERVER Then
+        m_uRemote.User = UserName
+        m_uRemote.Pass = Password
+    End If
+End Sub
+
 '= not implemented =======================================================
 
 Public Sub SetAutoLogonPolicy(ByVal AutoLogonPolicy As WinHttpRequestAutoLogonPolicy)
@@ -528,12 +540,6 @@ End Sub
 
 Public Sub SetClientCertificate(ByVal ClientCertificate As String)
     #If ClientCertificate Then
-    #End If
-    Err.Raise E_NOTIMPL, , m_oSocket.GetErrorDescription(E_NOTIMPL)
-End Sub
-
-Public Sub SetCredentials(ByVal UserName As String, ByVal Password As String, ByVal Flags As Long)
-    #If UserName And Password And Flags Then
     #End If
     Err.Raise E_NOTIMPL, , m_oSocket.GetErrorDescription(E_NOTIMPL)
 End Sub
@@ -703,7 +709,7 @@ TryDownload:
             pvRecvBody baBuffer, uRecv
         End Select
     ElseIf uRecv.Size > Option_(WinHttpRequestOption_MaxResponseHeaderSize) Then
-        pvSetError ERROR_WINHTTP_INVALID_SERVER_RESPONSE, MODULE_NAME & "." & FUNC_NAME
+        pvSetError ERROR_WINHTTP_HEADER_SIZE_OVERFLOW, MODULE_NAME & "." & FUNC_NAME
         GoTo QH
     End If
     '--- success
@@ -790,7 +796,7 @@ Private Function pvEscapeUrl(sUrl As String) As String
     Dim lFlags          As Long
     Dim vSplit          As Variant
     
-    sEncoded = StrConv(m_oSocket.ToTextArray(sUrl, Option_(WinHttpRequestOption_URLCodePage)), vbUnicode)
+    sEncoded = StrConv(pvToTextArray(sUrl, Option_(WinHttpRequestOption_URLCodePage)), vbUnicode)
     If Not Option_(WinHttpRequestOption_UrlEscapeDisable) Then
         If Option_(WinHttpRequestOption_EscapePercentInURL) Then
             lFlags = lFlags Or URL_ESCAPE_PERCENT
@@ -826,7 +832,7 @@ Private Function pvEscapePart(ByVal sPart As String, ByVal lFlags As Long) As St
     If hResult < 0 Then
         Err.Raise hResult, "UrlEscape", m_oSocket.GetErrorDescription(hResult)
     End If
-    baTemp = m_oSocket.ToTextArray(Left$(sOutput, lSize), ucsScpAcp)
+    baTemp = pvToTextArray(Left$(sOutput, lSize), ucsScpAcp)
     For lSize = 0 To UBound(baTemp)
         If baTemp(lSize) < &H80 Then
             pvEscapePart = pvEscapePart & Chr$(baTemp(lSize))
@@ -1049,14 +1055,9 @@ Private Function pvMapCharset(sCharset As String) As UcsAsyncSocketCodePageEnum
     End Select
 End Function
 
-Private Property Get TimerEx() As Double
-    Dim cFreq           As Currency
-    Dim cValue          As Currency
-    
-    Call QueryPerformanceFrequency(cFreq)
-    Call QueryPerformanceCounter(cValue)
-    TimerEx = cValue / cFreq
-End Property
+Private Function pvToTextArray(sText As String, Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As Byte()
+    pvToTextArray = m_oSocket.ToTextArray(sText, CodePage)
+End Function
 
 Private Function AsIStream(ByVal pUnk As IUnknown) As IUnknown
     Const IDX_QueryInterface As Long = 0
@@ -1148,6 +1149,27 @@ Private Function pvArrayWriteBlob(baArray() As Byte, ByVal lPos As Long, ByVal l
     pvArrayWriteBlob = lPos + lSize
 End Function
 
+'= shared ================================================================
+
+#If Not ImplUseShared Then
+Private Property Get TimerEx() As Double
+    Dim cFreq           As Currency
+    Dim cValue          As Currency
+    
+    Call QueryPerformanceFrequency(cFreq)
+    Call QueryPerformanceCounter(cValue)
+    TimerEx = cValue / cFreq
+End Property
+
+Private Function ToBase64Array(baData() As Byte) As String
+    With CreateObject("MSXML2.DOMDocument").createElement("dummy")
+        .DataType = "bin.base64"
+        .NodeTypedValue = baData
+        ToBase64Array = .Text
+    End With
+End Function
+#End If
+
 '=========================================================================
 ' Socket events
 '=========================================================================
@@ -1159,7 +1181,7 @@ Private Sub m_oSocket_OnSend()
     If m_eState = ucsConnecting Then
         m_uSendBuffer.Size = 0
         m_uSendBuffer.Pos = 0
-        pvBufferWriteArray m_uSendBuffer, m_oSocket.ToTextArray( _
+        pvBufferWriteArray m_uSendBuffer, pvToTextArray( _
             m_sMethod & " " & m_uRemote.Path & m_uRemote.QueryString & m_uRemote.Anchor & " HTTP/1." & IIf(Option_(WinHttpRequestOption_EnableHttp1_1), "1", "0") & vbCrLf & _
             pvJoinHeaders(m_oRequestHeaders) & HDR_DELIM, ucsScpAcp)
         m_eState = ucsWaitSendBody
@@ -1279,7 +1301,7 @@ Private Sub Class_Initialize()
     Option_(WinHttpRequestOption_MaxResponseDrainSize) = 1024000
     Option_(WinHttpRequestOption_EnableHttp1_1) = True
     Option_(WinHttpRequestOption_EnableCertificateRevocationCheck) = False
-    Option_(WinHttpRequestOption_RejectUserpwd) = False                     '--- ignored
+    Option_(WinHttpRequestOption_RejectUserpwd) = False
     SetTimeouts 5000, 5000, 15000, 15000
 End Sub
 
