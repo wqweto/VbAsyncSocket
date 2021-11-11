@@ -26,7 +26,7 @@ DefObj A-Z
 Private Const MODULE_NAME As String = "cHttpRequest"
 
 #Const ImplUseShared = (ASYNCSOCKET_USE_SHARED <> 0)
-#Const ImplUseTls = (USE_TLS <> 0)
+#Const ImplUseTls = True
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
 
 '=========================================================================
@@ -130,10 +130,10 @@ Private Const DEF_CONTENT_TYPE      As String = "text/plain"
 Private Const DEF_CHARSET           As String = "charset=utf-8"
 
 #If ImplUseTls Then
-Private WithEvents m_oSocket    As cTlsSocket
+    Private WithEvents m_oSocket As cTlsSocket
 Attribute m_oSocket.VB_VarHelpID = -1
 #Else
-Private WithEvents m_oSocket    As cAsyncSocket
+    Private WithEvents m_oSocket As cAsyncSocket
 Attribute m_oSocket.VB_VarHelpID = -1
 #End If
 Private m_lResolveTimeout       As Long
@@ -216,6 +216,10 @@ End Sub
 ' Properties
 '=========================================================================
 
+Public Property Get ResponseStream() As Variant
+    Set ResponseStream = m_pResponseStream
+End Property
+
 Public Property Get ResponseBody() As Byte()
     Dim lSize               As Long
     Dim baRetVal()          As Byte
@@ -234,29 +238,16 @@ Public Property Get ResponseBody() As Byte()
     ResponseBody = baRetVal
 End Property
 
-Public Property Get ResponseStream() As Variant
-    Set ResponseStream = m_pResponseStream
-End Property
-
 Public Property Get ResponseText() As String
     Dim eCodePage       As UcsAsyncSocketCodePageEnum
-    Dim vSplit          As Variant
-    Dim vElem           As Variant
+    Dim sCharset        As String
     
     If m_sResponseText = vbNullChar Then
         eCodePage = ucsScpUtf8
         If m_oResponseHeaders.Exists(HDR_CONTENT_TYPE) Then
-            vSplit = Split(m_oRequestHeaders.Item(HDR_CONTENT_TYPE), ";")
-            If UBound(vSplit) > 0 Then
-                For Each vElem In vSplit
-                    vElem = Split(vElem, "=", Limit:=2)
-                    If UBound(vElem) > 0 Then
-                        If LCase$(Trim$(vElem(0))) = "charset" Then
-                            eCodePage = pvMapCharset(LCase$(Trim$(vElem(1))))
-                            Exit For
-                        End If
-                    End If
-                Next
+            sCharset = pvGetHeaderAttrib(m_oResponseHeaders.Item(HDR_CONTENT_TYPE), "charset")
+            If LenB(sCharset) <> 0 Then
+                eCodePage = pvMapCharset(sCharset)
             End If
         End If
         m_sResponseText = m_oSocket.FromTextArray(ResponseBody, eCodePage)
@@ -277,6 +268,14 @@ Public Property Get Option_(ByVal eOption As WinHttpRequestOption) As Variant
 End Property
 
 Public Property Let Option_(ByVal eOption As WinHttpRequestOption, ByVal RHS As Variant)
+    Select Case VarType(m_vOptions(eOption))
+    Case vbBoolean
+        RHS = CBool(RHS)
+    Case vbLong
+        RHS = CLng(RHS)
+    Case vbString
+        RHS = CStr(RHS)
+    End Select
     m_vOptions(eOption) = RHS
 End Property
 
@@ -307,7 +306,7 @@ Public Sub Open_(ByVal Method As String, ByVal Url As String, Optional ByVal Asy
     m_sMethod = Method
     If LenB(m_uRemote.Host) <> 0 Then
         If m_uRemote.Host <> uRemote.Host Or m_uRemote.Port <> uRemote.Port Or m_uRemote.Protocol <> uRemote.Protocol Then
-            Set m_oSocket = pvInitSocket
+            Set m_oSocket = pvCreateNewSocket
         End If
     End If
     m_uRemote = uRemote
@@ -339,9 +338,8 @@ End Sub
 Public Sub Send(Optional ByVal Body As Variant)
     Const FUNC_NAME     As String = "Send"
     Dim baBuffer()      As Byte
-    Dim vSplit          As Variant
-    Dim vElem           As Variant
     Dim eCodePage       As UcsAsyncSocketCodePageEnum
+    Dim sCharset        As String
     
     On Error GoTo EH
     '--- restore headers
@@ -369,19 +367,11 @@ Public Sub Send(Optional ByVal Body As Variant)
             If Not m_oRequestHeaders.Exists(HDR_CONTENT_TYPE) Then
                 SetRequestHeader HDR_CONTENT_TYPE, DEF_CONTENT_TYPE & "; " & DEF_CHARSET
             Else
-                vSplit = Split(m_oRequestHeaders.Item(HDR_CONTENT_TYPE), ";")
-                If UBound(vSplit) > 0 Then
-                    For Each vElem In vSplit
-                        vElem = Split(vElem, "=", Limit:=2)
-                        If UBound(vElem) > 0 Then
-                            If LCase$(Trim$(vElem(0))) = "charset" Then
-                                eCodePage = pvMapCharset(LCase$(Trim$(vElem(1))))
-                                Exit For
-                            End If
-                        End If
-                    Next
+                sCharset = pvGetHeaderAttrib(m_oRequestHeaders.Item(HDR_CONTENT_TYPE), "charset")
+                If LenB(sCharset) <> 0 Then
+                    eCodePage = pvMapCharset(sCharset)
                 Else
-                    SetRequestHeader HDR_CONTENT_TYPE, Trim$(vSplit(0)) & "; " & DEF_CHARSET
+                    SetRequestHeader HDR_CONTENT_TYPE, m_oRequestHeaders.Item(HDR_CONTENT_TYPE) & "; " & DEF_CHARSET
                 End If
             End If
             baBuffer = pvToTextArray(CStr(Body), eCodePage)
@@ -403,11 +393,7 @@ Public Sub Send(Optional ByVal Body As Variant)
             On Error GoTo 0
             Err.Raise vbObjectError, , m_oSocket.GetErrorDescription(m_oSocket.LastError)
         End If
-#If ImplUseTls Then
-        If Not m_oSocket.Connect(m_uRemote.Host, m_uRemote.Port, UseTls:=pvIsProtocolSecure(m_uRemote.Protocol), LocalFeatures:=pvGetLocalFeatures()) Then
-#Else
-        If Not m_oSocket.Connect(m_uRemote.Host, m_uRemote.Port) Then
-#End If
+        If Not pvConnectRemote(m_uRemote) Then
             On Error GoTo 0
             Err.Raise vbObjectError, , m_oSocket.GetErrorDescription(m_oSocket.LastError)
         End If
@@ -461,7 +447,7 @@ Public Sub Abort()
     
     On Error GoTo EH
     m_eState = ucsIdle
-    Set m_oSocket = pvInitSocket
+    Set m_oSocket = pvCreateNewSocket
     Set m_pRequestStream = Nothing
     Set m_pResponseStream = Nothing
     m_sResponseText = vbNullChar
@@ -487,11 +473,7 @@ Public Function WaitForResponse(Optional ByVal Timeout As Variant) As Boolean
                 GoTo QH
             End If
         End If
-#If ImplUseTls Then
-        With m_oSocket.Socket
-#Else
-        With m_oSocket
-#End If
+        With pvGetAsyncSocket
             If Not .SyncWaitForEvent(lTimeout) Then
                 GoTo QH
             End If
@@ -666,7 +648,7 @@ Private Function pvRecvHeaders(baBuffer() As Byte, uRecv As UcsBuffer) As Boolea
                 End If
             End If
             If m_uRemote.Host <> uRedirect.Host Or m_uRemote.Port <> uRedirect.Port Or m_uRemote.Protocol <> uRedirect.Protocol Then
-                Set m_oSocket = pvInitSocket
+                Set m_oSocket = pvCreateNewSocket
             End If
             m_uRemote = uRedirect
             SetRequestHeader "Host", m_uRemote.Host
@@ -676,11 +658,7 @@ Private Function pvRecvHeaders(baBuffer() As Byte, uRecv As UcsBuffer) As Boolea
                     pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.Create"
                     GoTo QH
                 End If
-#If ImplUseTls Then
-                If Not m_oSocket.Connect(m_uRemote.Host, m_uRemote.Port, UseTls:=pvIsProtocolSecure(m_uRemote.Protocol), LocalFeatures:=pvGetLocalFeatures()) Then
-#Else
-                If Not m_oSocket.Connect(m_uRemote.Host, m_uRemote.Port) Then
-#End If
+                If Not pvConnectRemote(m_uRemote) Then
                     pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.Connect"
                     GoTo QH
                 End If
@@ -702,7 +680,7 @@ TryDownload:
                 ReDim baBuffer(0 To uRecv.Size - lPos - 1) As Byte
                 Call CopyMemory(baBuffer(0), uRecv.Data(lPos), UBound(baBuffer) + 1)
             End If
-            RaiseEvent OnResponseStart(m_lStatus, m_oResponseHeaders.Item(HDR_CONTENT_TYPE))
+            RaiseEvent OnResponseStart(m_lStatus, GetResponseHeader(HDR_CONTENT_TYPE))
             uRecv.Size = 0
             Set m_pResponseStream = SHCreateMemStream(ByVal 0, 0)
             m_sResponseText = vbNullChar
@@ -842,6 +820,48 @@ Private Function pvEscapePart(ByVal sPart As String, ByVal lFlags As Long) As St
     Next
 End Function
 
+Private Function pvCreateNewSocket() As Object
+    #If ImplUseTls Then
+        Set pvCreateNewSocket = New cTlsSocket
+    #Else
+        Set pvCreateNewSocket = New cAsyncSocket
+    #End If
+End Function
+
+Private Function pvGetAsyncSocket() As cAsyncSocket
+    #If ImplUseTls Then
+        Set pvGetAsyncSocket = m_oSocket.Socket
+    #Else
+        Set pvGetAsyncSocket = m_oSocket
+    #End If
+End Function
+
+Private Function pvConnectRemote(uRemote As UcsParsedUrl) As Boolean
+    #If ImplUseTls Then
+        Dim eProt           As WinHttpRequestSecureProtocols
+        Dim eFeatures       As UcsTlsLocalFeaturesEnum
+        
+        eProt = Option_(WinHttpRequestOption_SecureProtocols)
+        If eProt = SecureProtocol_ALL Then
+            eFeatures = ucsTlsSupportAll
+        Else
+            eFeatures = ucsTlsSupportTls13 * -((eProt And SecureProtocol_TLS1_3) <> 0) _
+                Or ucsTlsSupportTls12 * -((eProt And SecureProtocol_TLS1_2) <> 0) _
+                Or ucsTlsSupportTls11 * -((eProt And SecureProtocol_TLS1_1) <> 0) _
+                Or ucsTlsSupportTls10 * -((eProt And SecureProtocol_TLS1) <> 0)
+        End If
+        If Option_(WinHttpRequestOption_SslErrorIgnoreFlags) <> 0 Then
+            eFeatures = eFeatures Or ucsTlsIgnoreServerCertificateErrors
+        End If
+        If Not Option_(WinHttpRequestOption_EnableCertificateRevocationCheck) Then
+            eFeatures = eFeatures Or ucsTlsIgnoreServerCertificateRevocation
+        End If
+        pvConnectRemote = m_oSocket.Connect(uRemote.Host, uRemote.Port, UseTls:=pvIsProtocolSecure(uRemote.Protocol), LocalFeatures:=eFeatures)
+    #Else
+        pvConnectRemote = m_oSocket.Connect(uRemote.Host, uRemote.Port)
+    #End If
+End Function
+
 Private Function pvIsProtocolSupported(sProtocol As String) As Boolean
     #If ImplUseTls Then
         pvIsProtocolSupported = (LCase$(sProtocol) = "http" Or LCase$(sProtocol) = "https")
@@ -854,35 +874,11 @@ Private Function pvIsProtocolSecure(sProtocol As String) As Boolean
     pvIsProtocolSecure = (LCase$(sProtocol) = "https")
 End Function
 
-Private Function pvGetLocalFeatures() As UcsTlsLocalFeaturesEnum
-    Dim eProt           As WinHttpRequestSecureProtocols
-    
-    eProt = Option_(WinHttpRequestOption_SecureProtocols)
-    If eProt = SecureProtocol_ALL Then
-        pvGetLocalFeatures = ucsTlsSupportAll
-    Else
-        pvGetLocalFeatures = ucsTlsSupportTls13 * -((eProt And SecureProtocol_TLS1_3) <> 0) _
-            Or ucsTlsSupportTls12 * -((eProt And SecureProtocol_TLS1_2) <> 0) _
-            Or ucsTlsSupportTls11 * -((eProt And SecureProtocol_TLS1_1) <> 0) _
-            Or ucsTlsSupportTls10 * -((eProt And SecureProtocol_TLS1) <> 0)
-    End If
-    If Option_(WinHttpRequestOption_SslErrorIgnoreFlags) <> 0 Then
-        pvGetLocalFeatures = pvGetLocalFeatures Or ucsTlsIgnoreServerCertificateErrors
-    End If
-    If Not Option_(WinHttpRequestOption_EnableCertificateRevocationCheck) Then
-        pvGetLocalFeatures = pvGetLocalFeatures Or ucsTlsIgnoreServerCertificateRevocation
-    End If
-End Function
-
 Private Sub pvDrainKeepAlive()
     Dim baBuffer()      As Byte
     Dim lTotal          As Long
     
-#If ImplUseTls Then
-    With m_oSocket.Socket
-#Else
-    With m_oSocket
-#End If
+    With pvGetAsyncSocket
         .ReceiveArray baBuffer
         lTotal = pvArraySize(baBuffer)
         If lTotal > 0 Then
@@ -896,14 +892,6 @@ Private Sub pvDrainKeepAlive()
         End If
     End With
 End Sub
-
-Private Function pvInitSocket() As Object
-#If ImplUseTls Then
-    Set pvInitSocket = New cTlsSocket
-#Else
-    Set pvInitSocket = New cAsyncSocket
-#End If
-End Function
 
 Private Sub pvSetError(ByVal ErrNumber As Long, Optional ErrSource As String, Optional ErrDescription As String)
     Const FUNC_NAME     As String = "pvSetError"
@@ -1042,8 +1030,27 @@ Private Function pvGetStreamSize(pStream As IUnknown) As Double
     pvGetStreamSize = CDbl(cPos) * 10000#
 End Function
 
+Private Function pvGetHeaderAttrib(sHeader As String, sAttrib As String) As String
+    Dim vSplit          As Variant
+    Dim vElem           As Variant
+    
+    '--- TODO: need regex parser for semi-colons in quoted values
+    vSplit = Split(sHeader, ";")
+    If UBound(vSplit) > 0 Then
+        For Each vElem In vSplit
+            vElem = Split(vElem, "=", Limit:=2)
+            If UBound(vElem) > 0 Then
+                If LCase$(Trim$(vElem(0))) = LCase$(sAttrib) Then
+                    pvGetHeaderAttrib = Trim$(vElem(1))
+                    Exit For
+                End If
+            End If
+        Next
+    End If
+End Function
+
 Private Function pvMapCharset(sCharset As String) As UcsAsyncSocketCodePageEnum
-    Select Case sCharset
+    Select Case LCase$(sCharset)
     Case "iso-8859-1", "windows-1252"
         pvMapCharset = 1252
     Case "windows-1251"
@@ -1282,26 +1289,26 @@ End Sub
 '=========================================================================
 
 Private Sub Class_Initialize()
-    Set m_oSocket = pvInitSocket
-    Option_(WinHttpRequestOption_UserAgentString) = DEF_USER_AGENT
-    Option_(WinHttpRequestOption_URLCodePage) = 65001
-    Option_(WinHttpRequestOption_EscapePercentInURL) = False
-    Option_(WinHttpRequestOption_SslErrorIgnoreFlags) = 0
-    'Option_(WinHttpRequestOption_SelectCertificate) = ?
-    Option_(WinHttpRequestOption_EnableRedirects) = True
-    Option_(WinHttpRequestOption_UrlEscapeDisable) = False
-    Option_(WinHttpRequestOption_UrlEscapeDisableQuery) = True
-    Option_(WinHttpRequestOption_SecureProtocols) = SecureProtocol_ALL
-    Option_(WinHttpRequestOption_EnableTracing) = False                     '--- ignored
-    Option_(WinHttpRequestOption_RevertImpersonationOverSsl) = True         '--- ignored
-    Option_(WinHttpRequestOption_EnableHttpsToHttpRedirects) = False
-    Option_(WinHttpRequestOption_EnablePassportAuthentication) = False      '--- ignored
-    Option_(WinHttpRequestOption_MaxAutomaticRedirects) = 10
-    Option_(WinHttpRequestOption_MaxResponseHeaderSize) = 65536
-    Option_(WinHttpRequestOption_MaxResponseDrainSize) = 1024000
-    Option_(WinHttpRequestOption_EnableHttp1_1) = True
-    Option_(WinHttpRequestOption_EnableCertificateRevocationCheck) = False
-    Option_(WinHttpRequestOption_RejectUserpwd) = False
+    Set m_oSocket = pvCreateNewSocket
+    m_vOptions(WinHttpRequestOption_UserAgentString) = DEF_USER_AGENT
+    m_vOptions(WinHttpRequestOption_URLCodePage) = CLng(65001)
+    m_vOptions(WinHttpRequestOption_EscapePercentInURL) = False
+    m_vOptions(WinHttpRequestOption_SslErrorIgnoreFlags) = 0
+    m_vOptions(WinHttpRequestOption_SelectCertificate) = vbNullString
+    m_vOptions(WinHttpRequestOption_EnableRedirects) = True
+    m_vOptions(WinHttpRequestOption_UrlEscapeDisable) = False
+    m_vOptions(WinHttpRequestOption_UrlEscapeDisableQuery) = True
+    m_vOptions(WinHttpRequestOption_SecureProtocols) = SecureProtocol_ALL
+    m_vOptions(WinHttpRequestOption_EnableTracing) = False                     '--- ignored
+    m_vOptions(WinHttpRequestOption_RevertImpersonationOverSsl) = True         '--- ignored
+    m_vOptions(WinHttpRequestOption_EnableHttpsToHttpRedirects) = False
+    m_vOptions(WinHttpRequestOption_EnablePassportAuthentication) = False      '--- ignored
+    m_vOptions(WinHttpRequestOption_MaxAutomaticRedirects) = CLng(10)
+    m_vOptions(WinHttpRequestOption_MaxResponseHeaderSize) = CLng(65536)
+    m_vOptions(WinHttpRequestOption_MaxResponseDrainSize) = CLng(1024000)
+    m_vOptions(WinHttpRequestOption_EnableHttp1_1) = True
+    m_vOptions(WinHttpRequestOption_EnableCertificateRevocationCheck) = False
+    m_vOptions(WinHttpRequestOption_RejectUserpwd) = False
     SetTimeouts 5000, 5000, 15000, 15000
 End Sub
 
