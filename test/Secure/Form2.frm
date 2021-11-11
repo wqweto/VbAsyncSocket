@@ -152,7 +152,7 @@ Private Sub Form_Load()
         cobUrl.Text = sAddr
     End If
     Set m_oRootCa = New cTlsSocket
-    m_oRootCa.PkiPemImportRootCaCertStore App.Path & "\ca-bundle.pem"
+    m_oRootCa.ImportPemRootCaCertStore App.Path & "\ca-bundle.pem"
     Set m_oServerSocket = New cTlsSocket
     ChDir App.Path
     If Not m_oServerSocket.InitServerTls(PemFiles:=PEM_FILES, PfxFile:=PFX_FILE, Password:=PFX_PASSWORD) Then
@@ -440,7 +440,7 @@ Private Sub m_oSocket_OnClientCertificate(CaDn As Object, Confirmed As Boolean)
                 DebugLog MODULE_NAME, "m_oSocket_OnClientCertificate", "Certificate authority DN for client certificate:" & vbCrLf & DesignDumpArray(baDName)
             #End If
         End If
-        Confirmed = m_oSocket.PkiPkcs12ImportCertificates(App.Path & "\client1.full.pfx")
+        Confirmed = m_oSocket.ImportPkcs12Certificates(App.Path & "\client1.full.pfx")
     End If
 End Sub
 
