@@ -1578,7 +1578,7 @@ Public Function ImportPkcs12Certificates(PfxFile As String, Optional Password As
     End If
 End Function
 
-Public Function ImportSystemStoreCertificate(SubjectOrRDN As Variant) As Boolean
+Public Function ImportSystemStoreCertificates(SubjectOrRDN As Variant) As Boolean
     Dim baRDN()         As Byte
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
@@ -1596,7 +1596,7 @@ Public Function ImportSystemStoreCertificate(SubjectOrRDN As Variant) As Boolean
     Set LocalCertificates = cCerts
     Set LocalPrivateKey = cPrivKey
     '--- success
-    ImportSystemStoreCertificate = True
+    ImportSystemStoreCertificates = True
 QH:
 End Function
 
@@ -1750,12 +1750,15 @@ Public Function pvPkiImportCertificateByRDN(baRDN() As Byte, cCerts As Collectio
     End If
     pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, 0, CERT_FIND_ISSUER_NAME, ByVal lNamePtr, 0)
     If pCertContext <> 0 Then
-        If pvPkiAppendCertContext(pCertContext, cCerts, cPrivKey) Then
+        If pvPkiAppendCertChain(pCertContext, hCertStore, cCerts, cPrivKey) Then
             '--- success
             pvPkiImportCertificateByRDN = True
         End If
     End If
 QH:
+    If pCertContext <> 0 Then
+        Call CertFreeCertificateContext(pCertContext)
+    End If
     If lNamePtr <> 0 Then
         Call LocalFree(lNamePtr)
     End If
@@ -1805,12 +1808,15 @@ Public Function pvPkiImportCertificateBySubject(ByVal Subject As String, cCerts 
         End If
     End If
     If pCertContext <> 0 Then
-        If pvPkiAppendCertContext(pCertContext, cCerts, cPrivKey) Then
+        If pvPkiAppendCertChain(pCertContext, hCertStore, cCerts, cPrivKey) Then
             '--- success
             pvPkiImportCertificateBySubject = True
         End If
     End If
 QH:
+    If pCertContext <> 0 Then
+        Call CertFreeCertificateContext(pCertContext)
+    End If
     If hCertStore <> 0 Then
         Call CertCloseStore(hCertStore, 0)
     End If
@@ -2081,6 +2087,43 @@ Private Function pvPkiPemGetTextPortions(sContents As String, sBoundary As Strin
         End If
     Next
     Set pvPkiPemGetTextPortions = RetVal
+End Function
+
+Private Function pvPkiAppendCertChain(ByVal pCertContext As Long, ByVal hCertStore As Long, cCerts As Collection, cPrivKey As Collection) As Boolean
+    Const FUNC_NAME     As String = "pvPkiImportCertificateBySubject"
+    Dim pChainContext   As Long
+    Dim uChain          As CERT_CHAIN_CONTEXT
+    Dim uChainParams    As CERT_CHAIN_PARA
+    Dim uChainElem      As CERT_CHAIN_ELEMENT
+    Dim lPtr            As Long
+    Dim lIdx            As Long
+    Dim hResult         As Long
+    Dim sApiSource      As String
+    
+    uChainParams.cbSize = Len(uChainParams)
+    If CertGetCertificateChain(0, pCertContext, 0, hCertStore, uChainParams, 0, 0, pChainContext) = 0 Then
+        hResult = Err.LastDllError
+        sApiSource = "CertGetCertificateChain"
+        GoTo QH
+    End If
+    Call CopyMemory(uChain, ByVal pChainContext, Len(uChain))       '--- dereference pChainContext->rgpChain[0]
+    Call CopyMemory(lPtr, ByVal uChain.rgElem, 4)
+    Call CopyMemory(uChain, ByVal lPtr, Len(uChain))
+    For lIdx = 0 To IIf(uChain.cElems = 1, 0, uChain.cElems - 2)
+        Call CopyMemory(lPtr, ByVal UnsignedAdd(uChain.rgElem, lIdx * 4), 4)
+        Call CopyMemory(uChainElem, ByVal lPtr, Len(uChainElem))
+        If pvPkiAppendCertContext(uChainElem.pCertContext, cCerts, cPrivKey) Then
+            '--- success
+            pvPkiAppendCertChain = True
+        End If
+    Next
+QH:
+    If pChainContext <> 0 Then
+        Call CertFreeCertificateChain(pChainContext)
+    End If
+    If LenB(sApiSource) <> 0 Then
+        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+    End If
 End Function
 
 Private Function pvPkiAppendCertContext(ByVal pCertContext As Long, cCerts As Collection, cPrivKey As Collection) As Boolean

@@ -522,7 +522,7 @@ End Sub
 Public Sub SetClientCertificate(ByVal ClientCertificate As String)
     #If ImplUseTls Then
         With New cTlsSocket
-            If Not .ImportSystemStoreCertificate(ClientCertificate) Then
+            If Not .ImportSystemStoreCertificates(ClientCertificate) Then
                 Err.Raise ERROR_WINHTTP_SECURE_INVALID_CERT, , m_oSocket.GetErrorDescription(ERROR_WINHTTP_SECURE_INVALID_CERT)
             End If
         End With
@@ -1306,13 +1306,13 @@ Private Sub m_oSocket_OnClientCertificate(Issuers As Object, Confirmed As Boolea
     
     On Error GoTo EH
     If LenB(Option_(WinHttpRequestOption_SelectCertificate)) <> 0 Then
-        If m_oSocket.ImportSystemStoreCertificate(Option_(WinHttpRequestOption_SelectCertificate)) Then
+        If m_oSocket.ImportSystemStoreCertificates(Option_(WinHttpRequestOption_SelectCertificate)) Then
             Confirmed = True
         End If
     Else
         '--- try to match a client certificate in CURRENT_USER\MY certificate store by Issuer's RDN
         For Each vElem In Issuers
-            If m_oSocket.ImportSystemStoreCertificate(vElem) Then
+            If m_oSocket.ImportSystemStoreCertificates(vElem) Then
                 Confirmed = True
                 Exit For
             End If
