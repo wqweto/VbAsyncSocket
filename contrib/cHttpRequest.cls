@@ -102,6 +102,7 @@ Private Const ERROR_WINHTTP_TIMEOUT                 As Long = (WINHTTP_ERROR_BAS
 Private Const ERROR_WINHTTP_INVALID_URL             As Long = (WINHTTP_ERROR_BASE + 5)
 Private Const ERROR_WINHTTP_UNRECOGNIZED_SCHEME     As Long = (WINHTTP_ERROR_BASE + 6)
 Private Const ERROR_WINHTTP_INVALID_SERVER_RESPONSE As Long = (WINHTTP_ERROR_BASE + 152)
+Private Const ERROR_WINHTTP_SECURE_INVALID_CERT     As Long = (WINHTTP_ERROR_BASE + 169)
 Private Const ERROR_WINHTTP_HEADER_SIZE_OVERFLOW    As Long = (WINHTTP_ERROR_BASE + 182)
 Private Const ERROR_INVALID_PARAMETER               As Long = &H80070057
 Private Const E_NOTIMPL                             As Long = &H80004001
@@ -136,6 +137,7 @@ Attribute m_oSocket.VB_VarHelpID = -1
     Private WithEvents m_oSocket As cAsyncSocket
 Attribute m_oSocket.VB_VarHelpID = -1
 #End If
+Private m_vLastError            As Variant
 Private m_lResolveTimeout       As Long
 Private m_lConnectTimeout       As Long
 Private m_lSendTimeout          As Long
@@ -462,6 +464,7 @@ Public Function WaitForResponse(Optional ByVal Timeout As Variant) As Boolean
     Dim lTimeout        As Long
     
     On Error GoTo EH
+    m_vLastError = Empty
     dblTimerEx = TimerEx
     If IsMissing(Timeout) Then
         Timeout = -1
@@ -483,6 +486,10 @@ Public Function WaitForResponse(Optional ByVal Timeout As Variant) As Boolean
     '--- success
     WaitForResponse = True
 QH:
+    If IsArray(m_vLastError) Then
+        On Error GoTo 0
+        Err.Raise m_vLastError(0), m_vLastError(1), m_vLastError(2)
+    End If
     Exit Function
 EH:
     PrintError FUNC_NAME
@@ -512,16 +519,23 @@ Public Sub SetCredentials(ByVal UserName As String, ByVal Password As String, By
     End If
 End Sub
 
+Public Sub SetClientCertificate(ByVal ClientCertificate As String)
+    #If ImplUseTls Then
+        With New cTlsSocket
+            If Not .ImportSystemStoreCertificate(ClientCertificate) Then
+                Err.Raise ERROR_WINHTTP_SECURE_INVALID_CERT, , m_oSocket.GetErrorDescription(ERROR_WINHTTP_SECURE_INVALID_CERT)
+            End If
+        End With
+        m_vOptions(WinHttpRequestOption_SelectCertificate) = ClientCertificate
+    #Else
+        Err.Raise E_NOTIMPL, , m_oSocket.GetErrorDescription(E_NOTIMPL)
+    #End If
+End Sub
+
 '= not implemented =======================================================
 
 Public Sub SetAutoLogonPolicy(ByVal AutoLogonPolicy As WinHttpRequestAutoLogonPolicy)
     #If AutoLogonPolicy Then '--- touch args for MZ-Tools
-    #End If
-    Err.Raise E_NOTIMPL, , m_oSocket.GetErrorDescription(E_NOTIMPL)
-End Sub
-
-Public Sub SetClientCertificate(ByVal ClientCertificate As String)
-    #If ClientCertificate Then
     #End If
     Err.Raise E_NOTIMPL, , m_oSocket.GetErrorDescription(E_NOTIMPL)
 End Sub
@@ -907,6 +921,7 @@ Private Sub pvSetError(ByVal ErrNumber As Long, Optional ErrSource As String, Op
     #If ImplUseDebugLog Then
         DebugLog MODULE_NAME, "pvSetError", Hex$(ErrNumber) & " " & ErrDescription
     #End If
+    m_vLastError = Array(ErrNumber, ErrSource, ErrDescription)
     RaiseEvent OnError(ErrNumber, ErrDescription & " [" & Replace(ErrSource, vbCrLf, "; ") & "]")
     Abort
     Exit Sub
@@ -1283,6 +1298,31 @@ Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsy
 EH:
     pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Err.Description
 End Sub
+
+#If ImplUseTls Then
+Private Sub m_oSocket_OnClientCertificate(Issuers As Object, Confirmed As Boolean)
+    Const FUNC_NAME     As String = "m_oSocket_OnClientCertificate"
+    Dim vElem           As Variant
+    
+    On Error GoTo EH
+    If LenB(Option_(WinHttpRequestOption_SelectCertificate)) <> 0 Then
+        If m_oSocket.ImportSystemStoreCertificate(Option_(WinHttpRequestOption_SelectCertificate)) Then
+            Confirmed = True
+        End If
+    Else
+        '--- try to match a client certificate in CURRENT_USER\MY certificate store by Issuer's RDN
+        For Each vElem In Issuers
+            If m_oSocket.ImportSystemStoreCertificate(vElem) Then
+                Confirmed = True
+                Exit For
+            End If
+        Next
+    End If
+    Exit Sub
+EH:
+    pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Err.Description
+End Sub
+#End If
 
 '=========================================================================
 ' Base class events

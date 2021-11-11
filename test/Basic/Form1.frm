@@ -195,7 +195,7 @@ Private Sub Command1_Click()
     End With
     Exit Sub
 EH:
-    MsgBox Err.Description, vbCritical, FUNC_NAME
+    MsgBox Err.Description & " [" & Replace(Err.Source, vbCrLf, "; ") & "]", vbCritical, FUNC_NAME
 End Sub
 
 Private Sub Command2_Click()
@@ -211,11 +211,16 @@ Private Sub Command2_Click()
     m_oRequest.Option_(WinHttpRequestOption_EnableHttpsToHttpRedirects) = True
     m_oRequest.Open_ "GET", IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://www.unicontsoft.com" ' /bg/download.html
 '    m_oRequest.Open_ "GET", "http://localhost/ТоваПапка?Параметър1&Парам2#Анкор"
+'    m_oRequest.Open_ "GET", "https://dl.unicontsoft.com/upload/UCS/"
+'    m_oRequest.Open_ "GET", "https://www.epay.bg/v3main/certreq?action=attach&get_cert=1&ident=1"
+'    m_oRequest.SetCredentials "test", "test", 0
+'    m_oRequest.SetClientCertificate "7be211f9069aae6fa109fcd3c83007e2dc14b2f8"
     m_oRequest.Send
+    DebugLog MODULE_NAME, FUNC_NAME, m_oRequest.Status & " " & m_oRequest.StatusText
     DebugLog MODULE_NAME, FUNC_NAME, Len(m_oRequest.ResponseText)
     Exit Sub
 EH:
-    MsgBox Err.Description, vbCritical, FUNC_NAME
+    MsgBox Err.Description & " [" & Replace(Err.Source, vbCrLf, "; ") & "]", vbCritical, FUNC_NAME
 End Sub
 
 Private Sub pvTestHowsMySsl()
@@ -527,7 +532,7 @@ Private Function pvInitHttpRequest( _
     End If
     If LCase$(uRemote.Protocol) = "https" Then
         If LenB(PfxFile) <> 0 Then
-            If Not oRetVal.PkiPkcs12ImportCertificates(PfxFile, Password) Then
+            If Not oRetVal.ImportPkcs12Certificates(PfxFile, Password) Then
                 GoTo QH
             End If
         End If
@@ -804,7 +809,7 @@ Private Sub Command11_Click()
 '    m_oHttpDownload.DownloadFile IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://dl.unicontsoft.com/upload/aaa.zip", Environ$("TMP") & "\aaa.zip"
     Exit Sub
 EH:
-    MsgBox Err.Description, vbCritical, FUNC_NAME
+    MsgBox Err.Description & " [" & Replace(Err.Source, vbCrLf, "; ") & "]", vbCritical, FUNC_NAME
 End Sub
 
 Private Sub m_oHttpDownload_OperationStart()
