@@ -121,6 +121,8 @@ Private Declare Function UrlEscape Lib "shlwapi" Alias "UrlEscapeW" (ByVal pszUR
 ' Constants and member variables
 '=========================================================================
 
+Private Const HDR_HOST              As String = "Host"
+Private Const HDR_USER_AGENT        As String = "User-Agent"
 Private Const HDR_CONTENT_TYPE      As String = "Content-Type"
 Private Const HDR_CONTENT_LENGTH    As String = "Content-Length"
 Private Const HDR_LOCATION          As String = "Location"
@@ -167,7 +169,8 @@ Private m_uChunkBuffer          As UcsBuffer
 
 Private Enum UcsStateEnum
     ucsIdle
-    ucsConnecting
+    ucsWaitResolve
+    ucsWaitConnect
     ucsWaitSendBody
     ucsWaitRecvHeaders
     ucsWaitRecvBody
@@ -223,21 +226,33 @@ Public Property Get ResponseStream() As Variant
 End Property
 
 Public Property Get ResponseBody() As Byte()
-    Dim lSize               As Long
-    Dim baRetVal()          As Byte
-    Dim hResult             As Long
+    Const FUNC_NAME     As String = "ResponseBody"
+    Dim lSize           As Long
+    Dim baRetVal()      As Byte
+    Dim hResult         As Long
     
+    On Error GoTo EH
+    m_vLastError = Empty
     lSize = pvGetStreamSize(m_pResponseStream)
     If lSize > 0 Then
         ReDim baRetVal(0 To lSize - 1) As Byte
         hResult = IStream_Read(m_pResponseStream, baRetVal)
         If hResult < 0 Then
-            Err.Raise vbObjectError, "IStream_Read", m_oSocket.GetErrorDescription(hResult)
+            pvSetError hResult, "IStream_Read"
+            GoTo QH
         End If
     Else
         baRetVal = vbNullString
     End If
     ResponseBody = baRetVal
+QH:
+    If IsArray(m_vLastError) Then
+        On Error GoTo 0
+        Err.Raise m_vLastError(0), MODULE_NAME & "." & FUNC_NAME & vbCrLf & m_vLastError(1), m_vLastError(2)
+    End If
+    Exit Property
+EH:
+    RaiseError FUNC_NAME
 End Property
 
 Public Property Get ResponseText() As String
@@ -291,15 +306,16 @@ Public Sub Open_(ByVal Method As String, ByVal Url As String, Optional ByVal Asy
     Dim uRemote         As UcsParsedUrl
     
     On Error GoTo EH
+    m_vLastError = Empty
     sEscaped = pvEscapeUrl(Url)
     Option_(WinHttpRequestOption_URL) = sEscaped
     If Not pvParseUrl(sEscaped, uRemote, "http") Then
-        On Error GoTo 0
-        Err.Raise ERROR_WINHTTP_INVALID_URL, , m_oSocket.GetErrorDescription(ERROR_WINHTTP_INVALID_URL)
+        pvSetError ERROR_WINHTTP_INVALID_URL
+        GoTo QH
     End If
     If Not pvIsProtocolSupported(uRemote.Protocol) Then
-        On Error GoTo 0
-        Err.Raise ERROR_WINHTTP_UNRECOGNIZED_SCHEME, , m_oSocket.GetErrorDescription(ERROR_WINHTTP_UNRECOGNIZED_SCHEME)
+        pvSetError ERROR_WINHTTP_UNRECOGNIZED_SCHEME
+        GoTo QH
     End If
     If Option_(WinHttpRequestOption_RejectUserpwd) Then
         uRemote.User = vbNullString
@@ -326,12 +342,17 @@ Public Sub Open_(ByVal Method As String, ByVal Url As String, Optional ByVal Asy
     m_lCurrentRedirect = 0
     m_sTransferEncoding = vbNullString
     '--- init headers
-    SetRequestHeader "Host", m_uRemote.Host
-    SetRequestHeader "User-Agent", Option_(WinHttpRequestOption_UserAgentString)
+    SetRequestHeader HDR_HOST, m_uRemote.Host
+    SetRequestHeader HDR_USER_AGENT, Option_(WinHttpRequestOption_UserAgentString)
     If Option_(WinHttpRequestOption_EnableHttp1_1) Then
         SetRequestHeader "Connection", "Keep-Alive"
     End If
     SetRequestHeader "Accept", "*.*"
+QH:
+    If IsArray(m_vLastError) Then
+        On Error GoTo 0
+        Err.Raise m_vLastError(0), MODULE_NAME & "." & FUNC_NAME & vbCrLf & m_vLastError(1), m_vLastError(2)
+    End If
     Exit Sub
 EH:
     RaiseError FUNC_NAME
@@ -344,14 +365,7 @@ Public Sub Send(Optional ByVal Body As Variant)
     Dim sCharset        As String
     
     On Error GoTo EH
-    '--- restore headers
-    SetRequestHeader "Host", m_uRemote.Host
-    SetRequestHeader "User-Agent", Option_(WinHttpRequestOption_UserAgentString)
-    '--- prepare auth header
-    If LenB(m_uRemote.User) <> 0 Or LenB(m_uRemote.Pass) <> 0 Then
-        SetRequestHeader "Authorization", "Basic " & Replace(ToBase64Array( _
-            pvToTextArray(m_uRemote.User & ":" & m_uRemote.Pass, ucsScpAcp)), vbCrLf, vbNullString)
-    End If
+    m_vLastError = Empty
     '--- preapare request stream from body
     If IsObject(Body) Then
         Set m_pRequestStream = AsIStream(Body)
@@ -382,22 +396,28 @@ Public Sub Send(Optional ByVal Body As Variant)
             Set m_pRequestStream = Nothing
         End If
     Else
-        On Error GoTo 0
-        Err.Raise ERROR_INVALID_PARAMETER, , m_oSocket.GetErrorDescription(ERROR_INVALID_PARAMETER)
+        pvSetError ERROR_INVALID_PARAMETER
+        GoTo QH
     End If
+    '--- prepare headers
     If Not m_pRequestStream Is Nothing Then
         SetRequestHeader HDR_CONTENT_LENGTH, pvGetStreamSize(m_pRequestStream)
     End If
+    If LenB(m_uRemote.User) <> 0 Or LenB(m_uRemote.Pass) <> 0 Then
+        SetRequestHeader "Authorization", "Basic " & Replace(ToBase64Array( _
+            pvToTextArray(m_uRemote.User & ":" & m_uRemote.Pass, ucsScpAcp)), vbCrLf, vbNullString)
+    End If
+    SetRequestHeader HDR_HOST, m_uRemote.Host
     '--- try to reuse socket if not closed (keep-alive)
-    m_eState = ucsConnecting
+    m_eState = ucsWaitResolve
     If m_oSocket.IsClosed Then
         If Not m_oSocket.Create(SocketType:=ucsSckStream) Then
-            On Error GoTo 0
-            Err.Raise vbObjectError, , m_oSocket.GetErrorDescription(m_oSocket.LastError)
+            pvSetError m_oSocket.LastError, "m_oSocket.Create"
+            GoTo QH
         End If
         If Not pvConnectRemote(m_uRemote) Then
-            On Error GoTo 0
-            Err.Raise vbObjectError, , m_oSocket.GetErrorDescription(m_oSocket.LastError)
+            pvSetError m_oSocket.LastError, "m_oSocket.Connect"
+            GoTo QH
         End If
     Else
         pvDrainKeepAlive
@@ -405,23 +425,52 @@ Public Sub Send(Optional ByVal Body As Variant)
     End If
     '--- handle synchronous mode
     If Not m_bAsync Then
-        If Not WaitForResponse(m_lSendTimeout) Then
-            If m_eState < ucsWaitRecvHeaders Then
-                Abort
-                On Error GoTo 0
-                Err.Raise ERROR_WINHTTP_TIMEOUT, , m_oSocket.GetErrorDescription(ERROR_WINHTTP_TIMEOUT)
-            End If
+        If Not pvWaitForState(ucsWaitResolve, m_lResolveTimeout) Then
+            pvSetError ERROR_WINHTTP_TIMEOUT
+            GoTo QH
         End If
-        If Not WaitForResponse(m_lReceiveTimeout) Then
-            Abort
-            On Error GoTo 0
-            Err.Raise ERROR_WINHTTP_TIMEOUT, , m_oSocket.GetErrorDescription(ERROR_WINHTTP_TIMEOUT)
+        If Not pvWaitForState(ucsWaitConnect, m_lConnectTimeout) Then
+            pvSetError ERROR_WINHTTP_TIMEOUT
+            GoTo QH
         End If
+        If Not pvWaitForState(ucsWaitSendBody, m_lSendTimeout) Then
+            pvSetError ERROR_WINHTTP_TIMEOUT
+            GoTo QH
+        End If
+        If Not pvWaitForState(ucsWaitRecvBody, m_lReceiveTimeout) Then
+            pvSetError ERROR_WINHTTP_TIMEOUT
+            GoTo QH
+        End If
+    End If
+QH:
+    If IsArray(m_vLastError) Then
+        On Error GoTo 0
+        Err.Raise m_vLastError(0), MODULE_NAME & "." & FUNC_NAME & vbCrLf & m_vLastError(1), m_vLastError(2)
     End If
     Exit Sub
 EH:
     RaiseError FUNC_NAME
 End Sub
+
+Public Function WaitForResponse(Optional ByVal Timeout As Variant) As Boolean
+    Const FUNC_NAME     As String = "WaitForResponse"
+    
+    On Error GoTo EH
+    m_vLastError = Empty
+    If Not pvWaitForState(ucsWaitRecvBody, IIf(Not IsMissing(Timeout), Timeout, -1)) Then
+        GoTo QH
+    End If
+    '--- success
+    WaitForResponse = True
+QH:
+    If IsArray(m_vLastError) Then
+        On Error GoTo 0
+        Err.Raise m_vLastError(0), MODULE_NAME & "." & FUNC_NAME & vbCrLf & m_vLastError(1), m_vLastError(2)
+    End If
+    Exit Function
+EH:
+    RaiseError FUNC_NAME
+End Function
 
 Public Sub SetTimeouts(ByVal ResolveTimeout As Long, ByVal ConnectTimeout As Long, ByVal SendTimeout As Long, ByVal ReceiveTimeout As Long)
     m_lResolveTimeout = ResolveTimeout
@@ -431,69 +480,20 @@ Public Sub SetTimeouts(ByVal ResolveTimeout As Long, ByVal ConnectTimeout As Lon
 End Sub
 
 Public Sub SetRequestHeader(ByVal Header As String, ByVal Value As String)
-    Const FUNC_NAME     As String = "SetRequestHeader"
-    
-    On Error GoTo EH
     If LenB(Value) <> 0 Then
         m_oRequestHeaders.Item(Header) = Value
     Else
         m_oRequestHeaders.Remove Header
     End If
-    Exit Sub
-EH:
-    RaiseError FUNC_NAME
 End Sub
 
 Public Sub Abort()
-    Const FUNC_NAME     As String = "Abort"
-    
-    On Error GoTo EH
     m_eState = ucsIdle
     Set m_oSocket = pvCreateNewSocket
     Set m_pRequestStream = Nothing
     Set m_pResponseStream = Nothing
     m_sResponseText = vbNullChar
-    Exit Sub
-EH:
-    RaiseError FUNC_NAME
 End Sub
-
-Public Function WaitForResponse(Optional ByVal Timeout As Variant) As Boolean
-    Const FUNC_NAME     As String = "WaitForResponse"
-    Dim dblTimerEx      As Double
-    Dim lTimeout        As Long
-    
-    On Error GoTo EH
-    m_vLastError = Empty
-    dblTimerEx = TimerEx
-    If IsMissing(Timeout) Then
-        Timeout = -1
-    End If
-    Do While m_eState <> ucsIdle
-        If Timeout >= 0 Then
-            lTimeout = Timeout - Int((TimerEx - dblTimerEx) * 1000)
-            If lTimeout <= 0 Then
-                GoTo QH
-            End If
-        End If
-        With pvGetAsyncSocket
-            If Not .SyncWaitForEvent(lTimeout) Then
-                GoTo QH
-            End If
-            .SyncProcessMsgQueue
-        End With
-    Loop
-    '--- success
-    WaitForResponse = True
-QH:
-    If IsArray(m_vLastError) Then
-        On Error GoTo 0
-        Err.Raise m_vLastError(0), m_vLastError(1), m_vLastError(2)
-    End If
-    Exit Function
-EH:
-    PrintError FUNC_NAME
-End Function
 
 Public Function GetAllResponseHeaders() As String
     Dim lPos            As Long
@@ -520,16 +520,27 @@ Public Sub SetCredentials(ByVal UserName As String, ByVal Password As String, By
 End Sub
 
 Public Sub SetClientCertificate(ByVal ClientCertificate As String)
-    #If ImplUseTls Then
-        With New cTlsSocket
-            If Not .ImportSystemStoreCertificates(ClientCertificate) Then
-                Err.Raise ERROR_WINHTTP_SECURE_INVALID_CERT, , m_oSocket.GetErrorDescription(ERROR_WINHTTP_SECURE_INVALID_CERT)
-            End If
-        End With
-        m_vOptions(WinHttpRequestOption_SelectCertificate) = ClientCertificate
-    #Else
-        Err.Raise E_NOTIMPL, , m_oSocket.GetErrorDescription(E_NOTIMPL)
-    #End If
+#If ImplUseTls Then
+    Const FUNC_NAME     As String = "SetClientCertificate"
+    
+    On Error GoTo EH
+    m_vLastError = Empty
+    If Not m_oSocket.ImportSystemStoreCertificates(ClientCertificate) Then
+        pvSetError ERROR_WINHTTP_SECURE_INVALID_CERT
+        GoTo QH
+    End If
+    m_vOptions(WinHttpRequestOption_SelectCertificate) = ClientCertificate
+QH:
+    If IsArray(m_vLastError) Then
+        On Error GoTo 0
+        Err.Raise m_vLastError(0), MODULE_NAME & "." & FUNC_NAME & vbCrLf & m_vLastError(1), m_vLastError(2)
+    End If
+    Exit Sub
+EH:
+    RaiseError FUNC_NAME
+#Else
+    Err.Raise E_NOTIMPL, MODULE_NAME & ".SetClientCertificate", m_oSocket.GetErrorDescription(E_NOTIMPL)
+#End If
 End Sub
 
 '= not implemented =======================================================
@@ -537,13 +548,13 @@ End Sub
 Public Sub SetAutoLogonPolicy(ByVal AutoLogonPolicy As WinHttpRequestAutoLogonPolicy)
     #If AutoLogonPolicy Then '--- touch args for MZ-Tools
     #End If
-    Err.Raise E_NOTIMPL, , m_oSocket.GetErrorDescription(E_NOTIMPL)
+    Err.Raise E_NOTIMPL, MODULE_NAME & ".SetAutoLogonPolicy", m_oSocket.GetErrorDescription(E_NOTIMPL)
 End Sub
 
 Public Sub SetProxy(ByVal ProxySetting As Long, Optional ByVal ProxyServer As Variant, Optional ByVal BypassList As Variant)
     #If ProxySetting And ProxyServer And BypassList Then
     #End If
-    Err.Raise E_NOTIMPL, , m_oSocket.GetErrorDescription(E_NOTIMPL)
+    Err.Raise E_NOTIMPL, MODULE_NAME & ".SetProxy", m_oSocket.GetErrorDescription(E_NOTIMPL)
 End Sub
 
 '= private ===============================================================
@@ -665,8 +676,8 @@ Private Function pvRecvHeaders(baBuffer() As Byte, uRecv As UcsBuffer) As Boolea
                 Set m_oSocket = pvCreateNewSocket
             End If
             m_uRemote = uRedirect
-            SetRequestHeader "Host", m_uRemote.Host
-            m_eState = ucsConnecting
+            SetRequestHeader HDR_HOST, m_uRemote.Host
+            m_eState = ucsWaitResolve
             If m_oSocket.IsClosed Then
                 If Not m_oSocket.Create(SocketType:=ucsSckStream) Then
                     pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.Create"
@@ -907,6 +918,37 @@ Private Sub pvDrainKeepAlive()
     End With
 End Sub
 
+Private Function pvWaitForState(ByVal eState As UcsStateEnum, ByVal Timeout As Long) As Boolean
+    Dim dblTimerEx      As Double
+    Dim lRemaining      As Long
+    
+    dblTimerEx = TimerEx
+    Do While m_eState <> ucsIdle And m_eState <= eState
+        If Timeout >= 0 Then
+            lRemaining = Timeout - Int((TimerEx - dblTimerEx) * 1000)
+            If lRemaining <= 0 Then
+                GoTo QH
+            End If
+        End If
+        '-- note: call pvGetAsyncSocket on each iteration because socket instance might change on redirect
+        With pvGetAsyncSocket
+            If .HasPendingResolve Then
+                If Not .SyncWaitForEvent(lRemaining, [_ucsSfdResolve]) Then
+                    GoTo QH
+                End If
+            Else
+                If Not .SyncWaitForEvent(lRemaining) Then
+                    GoTo QH
+                End If
+            End If
+            .SyncProcessMsgQueue
+        End With
+    Loop
+    '--- success
+    pvWaitForState = True
+QH:
+End Function
+
 Private Sub pvSetError(ByVal ErrNumber As Long, Optional ErrSource As String, Optional ErrDescription As String)
     Const FUNC_NAME     As String = "pvSetError"
     
@@ -919,10 +961,10 @@ Private Sub pvSetError(ByVal ErrNumber As Long, Optional ErrSource As String, Op
         End If
     End If
     #If ImplUseDebugLog Then
-        DebugLog MODULE_NAME, "pvSetError", Hex$(ErrNumber) & " " & ErrDescription
+        DebugLog MODULE_NAME, "pvSetError", ErrDescription & " &H" & Hex$(ErrNumber) & " [" & Replace(ErrSource, vbCrLf, "; ") & "]"
     #End If
     m_vLastError = Array(ErrNumber, ErrSource, ErrDescription)
-    RaiseEvent OnError(ErrNumber, ErrDescription & " [" & Replace(ErrSource, vbCrLf, "; ") & "]")
+    RaiseEvent OnError(ErrNumber, ErrDescription & IIf(LenB(ErrSource) <> 0, " [" & Replace(ErrSource, vbCrLf, "; ") & "]", vbNullString))
     Abort
     Exit Sub
 EH:
@@ -1035,11 +1077,11 @@ Private Function pvGetStreamSize(pStream As IUnknown) As Double
     If Not pStream Is Nothing Then
         hResult = IStream_Seek(pStream, 0, STREAM_SEEK_END, cPos)
         If hResult < 0 Then
-            Err.Raise vbObjectError, "IStream_Seek(STREAM_SEEK_END)", m_oSocket.GetErrorDescription(hResult)
+            Err.Raise hResult, "IStream_Seek(STREAM_SEEK_END)", m_oSocket.GetErrorDescription(hResult)
         End If
         hResult = IStream_Seek(pStream, 0, STREAM_SEEK_SET)
         If hResult < 0 Then
-            Err.Raise vbObjectError, "IStream_Seek(STREAM_SEEK_SET)", m_oSocket.GetErrorDescription(hResult)
+            Err.Raise hResult, "IStream_Seek(STREAM_SEEK_SET)", m_oSocket.GetErrorDescription(hResult)
         End If
     End If
     pvGetStreamSize = CDbl(cPos) * 10000#
@@ -1196,11 +1238,21 @@ End Function
 ' Socket events
 '=========================================================================
 
+Private Sub m_oSocket_OnResolve(IpAddress As String)
+    If m_eState = ucsWaitResolve Then
+        m_eState = ucsWaitConnect
+    End If
+End Sub
+
+Private Sub m_oSocket_OnConnect()
+    m_oSocket_OnSend
+End Sub
+
 Private Sub m_oSocket_OnSend()
     Const FUNC_NAME     As String = "m_oSocket_OnSend"
     
     On Error GoTo EH
-    If m_eState = ucsConnecting Then
+    If m_eState = ucsWaitResolve Or m_eState = ucsWaitConnect Then
         m_uSendBuffer.Size = 0
         m_uSendBuffer.Pos = 0
         pvBufferWriteArray m_uSendBuffer, pvToTextArray( _
@@ -1290,7 +1342,7 @@ Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsy
     #Else
         With m_oSocket
             If .LastError <> 0 Then
-                pvSetError .LastError, , .GetErrorDescription(.LastError)
+                pvSetError .LastError, MODULE_NAME & "." & FUNC_NAME, .GetErrorDescription(.LastError)
             End If
         End With
     #End If
@@ -1308,16 +1360,17 @@ Private Sub m_oSocket_OnClientCertificate(Issuers As Object, Confirmed As Boolea
     If LenB(Option_(WinHttpRequestOption_SelectCertificate)) <> 0 Then
         If m_oSocket.ImportSystemStoreCertificates(Option_(WinHttpRequestOption_SelectCertificate)) Then
             Confirmed = True
+            GoTo QH
         End If
-    Else
-        '--- try to match a client certificate in CURRENT_USER\MY certificate store by Issuer's RDN
-        For Each vElem In Issuers
-            If m_oSocket.ImportSystemStoreCertificates(vElem) Then
-                Confirmed = True
-                Exit For
-            End If
-        Next
     End If
+    '--- try to match a client certificate in CURRENT_USER\MY certificate store by Issuer's RDN
+    For Each vElem In Issuers
+        If m_oSocket.ImportSystemStoreCertificates(vElem) Then
+            Confirmed = True
+            Exit For
+        End If
+    Next
+QH:
     Exit Sub
 EH:
     pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Err.Description
