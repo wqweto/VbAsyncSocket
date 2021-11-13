@@ -107,15 +107,41 @@ Private Const ERROR_WINHTTP_HEADER_SIZE_OVERFLOW    As Long = (WINHTTP_ERROR_BAS
 Private Const ERROR_INVALID_PARAMETER               As Long = &H80070057
 Private Const E_NOTIMPL                             As Long = &H80004001
 Private Const E_POINTER                             As Long = &H80004003
+'--- for Modern Subclassing Thunk (MST)
+Private Const MEM_COMMIT                    As Long = &H1000
+Private Const PAGE_EXECUTE_READWRITE        As Long = &H40
+Private Const SIGN_BIT                      As Long = &H80000000
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
+Private Declare Function VirtualProtect Lib "kernel32" (lpAddress As Any, ByVal dwSize As Long, ByVal flNewProtect As Long, lpflOldProtect As Long) As Long
+'--- oleaut32
 Private Declare Function DispCallFunc Lib "oleaut32" (ByVal pvInstance As Long, ByVal oVft As Long, ByVal lCc As Long, ByVal vtReturn As VbVarType, ByVal cActuals As Long, prgVt As Any, prgpVarg As Any, pvargResult As Variant) As Long
+'--- shlwapi
 Private Declare Function SHCreateMemStream Lib "shlwapi" Alias "#12" (pInit As Any, ByVal cbInit As Long) As stdole.IUnknown
-Private Declare Function QueryPerformanceCounter Lib "kernel32" (lpPerformanceCount As Currency) As Long
-Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
 Private Declare Function UrlEscape Lib "shlwapi" Alias "UrlEscapeW" (ByVal pszURL As Long, ByVal pszEscaped As Long, pcchEscaped As Long, ByVal dwFlags As Long) As Long
+'--- libarchive
+Private Declare Function archive_read_new Lib "archiveint" Alias "_archive_read_new@0" () As Long
+Private Declare Function archive_read_free Lib "archiveint" Alias "_archive_read_free@4" (ByVal hArchive As Long) As Long
+Private Declare Function archive_read_support_filter_gzip Lib "archiveint" Alias "_archive_read_support_filter_gzip@4" (ByVal hArchive As Long) As Long
+Private Declare Function archive_read_support_format_raw Lib "archiveint" Alias "_archive_read_support_format_raw@4" (ByVal hArchive As Long) As Long
+Private Declare Function archive_read_open Lib "archiveint" Alias "_archive_read_open@20" (ByVal hArchive As Long, ByVal pClientData As Long, ByVal lOpener As Long, ByVal lReader As Long, ByVal lCloser As Long) As Long
+Private Declare Function archive_read_next_header Lib "archiveint" Alias "_archive_read_next_header@8" (ByVal hArchive As Long, pHeader As Long) As Long
+Private Declare Function archive_read_data Lib "archiveint" Alias "_archive_read_data@12" (ByVal hArchive As Long, pBuffer As Any, ByVal lSize As Long) As Long
+#If Not ImplUseShared Then
+    Private Declare Function QueryPerformanceCounter Lib "kernel32" (lpPerformanceCount As Currency) As Long
+    Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
+    '--- for Modern Subclassing Thunk (MST)
+    Private Declare Function VirtualAlloc Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As Long
+    Private Declare Function CallWindowProc Lib "user32" Alias "CallWindowProcA" (ByVal lpPrevWndFunc As Long, ByVal hWnd As Long, ByVal Msg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
+    Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleA" (ByVal lpModuleName As String) As Long
+    Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
+    Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableA" (ByVal lpName As String, ByVal lpBuffer As String, ByVal nSize As Long) As Long
+    Private Declare Function SetEnvironmentVariable Lib "kernel32" Alias "SetEnvironmentVariableA" (ByVal lpName As String, ByVal lpValue As String) As Long
+    Private Declare Function GetCurrentProcessId Lib "kernel32" () As Long
+    '--- end MST
+#End If
 
 '=========================================================================
 ' Constants and member variables
@@ -162,10 +188,12 @@ Private m_dblBytesProgress      As Double
 Private m_lCurrentRedirect      As Long
 Private m_sTransferEncoding     As String
 Private m_aTransferChunks()     As UcsBuffer
-'--- i/o buffers
+Private m_sContentEncoding      As String
+'--- I/O buffers
 Private m_uSendBuffer           As UcsBuffer
 Private m_uRecvBuffer           As UcsBuffer
 Private m_uChunkBuffer          As UcsBuffer
+Private m_baGzipBuffer()        As Byte
 
 Private Enum UcsStateEnum
     ucsIdle
@@ -191,6 +219,10 @@ Private Type UcsBuffer
     Data()              As Byte
     Pos                 As Long
     Size                As Long
+End Type
+
+Private Type UcsRedirectReaderThunk
+    Code(0 To 8)        As Long
 End Type
 
 '=========================================================================
@@ -296,6 +328,10 @@ Public Property Let Option_(ByVal eOption As WinHttpRequestOption, ByVal RHS As 
     m_vOptions(eOption) = RHS
 End Property
 
+Private Property Get pvAddressOfReaderCallback() As cHttpRequest
+    Set pvAddressOfReaderCallback = InitAddressOfMethod(Me, 3)
+End Property
+
 '=========================================================================
 ' Methods
 '=========================================================================
@@ -341,13 +377,14 @@ Public Sub Open_(ByVal Method As String, ByVal Url As String, Optional ByVal Asy
     m_dblContentLength = -1
     m_lCurrentRedirect = 0
     m_sTransferEncoding = vbNullString
+    m_sContentEncoding = vbNullString
     '--- init headers
     SetRequestHeader HDR_HOST, m_uRemote.Host
     SetRequestHeader HDR_USER_AGENT, Option_(WinHttpRequestOption_UserAgentString)
     If Option_(WinHttpRequestOption_EnableHttp1_1) Then
         SetRequestHeader "Connection", "Keep-Alive"
     End If
-    SetRequestHeader "Accept", "*.*"
+    SetRequestHeader "Accept", "*/*"
 QH:
     If IsArray(m_vLastError) Then
         On Error GoTo 0
@@ -676,6 +713,7 @@ Private Function pvRecvHeaders(baBuffer() As Byte, uRecv As UcsBuffer) As Boolea
                 Set m_oSocket = pvCreateNewSocket
             End If
             m_uRemote = uRedirect
+            m_oResponseHeaders.RemoveAll
             SetRequestHeader HDR_HOST, m_uRemote.Host
             m_eState = ucsWaitResolve
             If m_oSocket.IsClosed Then
@@ -697,6 +735,7 @@ TryDownload:
                 m_dblContentLength = Val(m_oResponseHeaders.Item(HDR_CONTENT_LENGTH))
             End If
             m_sTransferEncoding = LCase$(GetResponseHeader("Transfer-Encoding"))
+            m_sContentEncoding = LCase$(GetResponseHeader("Content-Encoding"))
             m_eState = ucsWaitRecvBody
             lPos = lPos + sizeof_HDR_DELIM - 1
             If uRecv.Size <= lPos Then
@@ -732,6 +771,7 @@ Private Function pvRecvBody(baBuffer() As Byte, uRecv As UcsBuffer, Optional ByV
     Dim lSize           As Long
     Dim lIdx            As Long
     Dim uChunk          As UcsBuffer
+    Dim pOutput         As IUnknown
     
     On Error GoTo EH
     If UBound(baBuffer) >= 0 Then
@@ -783,6 +823,15 @@ Private Function pvRecvBody(baBuffer() As Byte, uRecv As UcsBuffer, Optional ByV
         End If
     End If
     If Flush Then
+        If m_sContentEncoding = "gzip" Then
+            hResult = IStream_Seek(m_pResponseStream, 0, STREAM_SEEK_SET)
+            If hResult < 0 Then
+                pvSetError hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "IStream_Seek(STREAM_SEEK_SET)"
+            End If
+            If pvUngzipStream(m_pResponseStream, pOutput) Then
+                Set m_pResponseStream = pOutput
+            End If
+        End If
         RaiseEvent OnResponseFinished
     End If
     '--- success
@@ -1008,7 +1057,7 @@ Private Sub pvParseChunks(uChunk As UcsBuffer, aOutput() As UcsBuffer, lOutSize 
     Do While lPos > 0 And lPos < uChunk.Size
         sTemp = String$(lPos - lStart, 0)
         Call CopyMemory(ByVal sTemp, uChunk.Data(lStart - 1), Len(sTemp))
-        lSize = Val("&H" & sTemp)
+        lSize = Val("&H" & sTemp & "&")
         If lPos + sizeof_CrLf + lSize > m_uChunkBuffer.Size Then
             Exit Do
         End If
@@ -1213,6 +1262,131 @@ Private Function pvArrayWriteBlob(baArray() As Byte, ByVal lPos As Long, ByVal l
     pvArrayWriteBlob = lPos + lSize
 End Function
 
+Private Function pvUngzipStream(pInput As IUnknown, pOutput As IUnknown) As Boolean
+    Const FUNC_NAME     As String = "pvUngzipStream"
+    Const BUFF_SIZE     As Long = 65536
+    Dim baBuffer()      As Byte
+    Dim hArchive        As Long
+    Dim lSize           As Long
+    Dim lResult         As Long
+    Dim lReaderPfn      As Long
+    Dim uReaderThunk    As UcsRedirectReaderThunk
+    Dim hResult         As Long
+        
+    On Error GoTo EH
+    ReDim m_baGzipBuffer(0 To BUFF_SIZE - 1) As Byte
+    hArchive = archive_read_new()
+    If hArchive = 0 Then
+        GoTo QH
+    End If
+    lResult = archive_read_support_filter_gzip(hArchive)
+    If lResult <> 0 Then
+        GoTo QH
+    End If
+    lResult = archive_read_support_format_raw(hArchive)
+    If lResult <> 0 Then
+        GoTo QH
+    End If
+    lReaderPfn = pvAddressOfReaderCallback.ArchiveReaderCallback(0, Nothing, 0)
+    lReaderPfn = InitRedirectReaderThunk(uReaderThunk, ObjPtr(Me), lReaderPfn)
+    lResult = archive_read_open(hArchive, ObjPtr(pInput), 0, lReaderPfn, 0)
+    If lResult <> 0 Then
+        GoTo QH
+    End If
+    lResult = archive_read_next_header(hArchive, 0)
+    If lResult <> 0 Then
+        GoTo QH
+    End If
+    ReDim baBuffer(0 To BUFF_SIZE - 1) As Byte
+    Do
+        lSize = archive_read_data(hArchive, baBuffer(0), UBound(baBuffer) + 1)
+        If lSize = 0 Then
+            Exit Do
+        End If
+        If UBound(baBuffer) + 1 <> lSize Then
+            ReDim Preserve baBuffer(0 To lSize - 1) As Byte
+        End If
+        If pOutput Is Nothing Then
+            Set pOutput = SHCreateMemStream(baBuffer(0), UBound(baBuffer) + 1)
+        Else
+            hResult = IStream_Write(pOutput, baBuffer)
+            If hResult < 0 Then
+                pvSetError hResult, "IStream_Write"
+                GoTo QH
+            End If
+        End If
+    Loop
+    '--- success
+    pvUngzipStream = True
+QH:
+    If hArchive <> 0 Then
+        Call archive_read_free(hArchive)
+    End If
+    Erase m_baGzipBuffer
+    Exit Function
+EH:
+    PrintError FUNC_NAME
+End Function
+
+Public Function ArchiveReaderCallback(ByVal hArchive As Long, ByVal pInput As IUnknown, lBufferPtr As Long) As Long
+Attribute ArchiveReaderCallback.VB_MemberFlags = "40"
+    Const FUNC_NAME     As String = "ArchiveReaderCallback"
+    Dim hResult         As Long
+    Dim lSize           As Long
+
+    On Error GoTo EH
+    #If hArchive Then '--- touch args
+    #End If
+    hResult = IStream_Read(pInput, m_baGzipBuffer, lSize)
+    If hResult < 0 Then
+        GoTo QH
+    End If
+    If lSize > 0 Then
+        lBufferPtr = VarPtr(m_baGzipBuffer(0))
+        '--- success
+        ArchiveReaderCallback = lSize
+    End If
+QH:
+    Exit Function
+EH:
+    PrintError FUNC_NAME
+End Function
+
+Private Function InitRedirectReaderThunk(uThunk As UcsRedirectReaderThunk, ByVal ParamValue As Long, ByVal pfnDest As Long) As Long
+    Const PAGE_EXECUTE_READWRITE As Long = &H40
+    
+    With uThunk
+        ' 54                   push        esp
+        ' 54                   push        esp
+        ' 33 C0                xor         eax,eax
+        ' B0 14                mov         al,14h
+        ' FF 34 04             push        dword ptr [esp+eax]
+        ' FF 34 04             push        dword ptr [esp+eax]
+        ' FF 34 04             push        dword ptr [esp+eax]
+        ' B8 XX XX XX XX       mov         eax,XXXXXXXXXX
+        ' 50                   push        eax
+        ' 90                   nop
+        ' 90                   nop
+        ' B8 YY YY YY YY       mov         eax,YYYYYYYYYY
+        ' FF D0                call        eax
+        ' 58                   pop         eax
+        ' C2 0C 00             ret         0Ch
+        ' 90                   nop
+        ' 90                   nop
+        .Code(0) = &HC0335454
+        .Code(1) = &H34FF14B0
+        .Code(2) = &H434FF04
+        .Code(3) = &HB80434FF
+        .Code(4) = ParamValue
+        .Code(5) = &HB8909050
+        .Code(6) = pfnDest
+        .Code(7) = &HC258D0FF
+        .Code(8) = &H9090000C
+        Call VirtualProtect(.Code(0), Len(uThunk), PAGE_EXECUTE_READWRITE, 0)
+    End With
+    InitRedirectReaderThunk = VarPtr(uThunk.Code(0))
+End Function
+
 '= shared ================================================================
 
 #If Not ImplUseShared Then
@@ -1232,6 +1406,83 @@ Private Function ToBase64Array(baData() As Byte) As String
         ToBase64Array = .Text
     End With
 End Function
+
+'=========================================================================
+' The Modern Subclassing Thunk (MST)
+'=========================================================================
+
+Private Function InitAddressOfMethod(pObj As Object, ByVal MethodParamCount As Long) As Object
+    Dim STR_THUNK       As String: STR_THUNK = "6AAAAABag+oFV4v6ge9QEMEAgcekEcEAuP9EJAS5+QcAAPOri8LB4AgFuQAAAKuLwsHoGAUAjYEAq7gIAAArq7hEJASLq7hJCIsEq7iBi1Qkq4tEJAzB4AIFCIkCM6uLRCQMweASBcDCCACriTrHQgQBAAAAi0QkCIsAiUIIi0QkEIlCDIHqUBDBAIvCBTwRwQCri8IFUBHBAKuLwgVgEcEAq4vCBYQRwQCri8IFjBHBAKuLwgWUEcEAq4vCBZwRwQCri8IFpBHBALn5BwAAq4PABOL6i8dfgcJQEMEAi0wkEIkRK8LCEAAPHwCLVCQE/0IEi0QkDIkQM8DCDABmkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEg/gAfgPCBABZWotCDGgAgAAAagBSUf/gZpC4AUAAgMIIALgBQACAwhAAuAFAAIDCGAC4AUAAgMIkAA==" ' 25.3.2019 14:01:08
+    Const THUNK_SIZE    As Long = 16728
+    Dim hThunk          As Long
+    Dim lSize           As Long
+    
+    hThunk = pvThunkAllocate(STR_THUNK, THUNK_SIZE)
+    lSize = CallWindowProc(hThunk, ObjPtr(pObj), MethodParamCount, GetProcAddress(GetModuleHandle("kernel32"), "VirtualFree"), VarPtr(InitAddressOfMethod))
+    Debug.Assert lSize = THUNK_SIZE
+End Function
+
+Private Property Get ThunkPrivateData(pThunk As IUnknown, Optional ByVal Index As Long) As Long
+    Dim lPtr            As Long
+    
+    lPtr = ObjPtr(pThunk)
+    If lPtr <> 0 Then
+        Call CopyMemory(ThunkPrivateData, ByVal (lPtr Xor SIGN_BIT) + 8 + Index * 4 Xor SIGN_BIT, 4)
+    End If
+End Property
+
+Private Property Let ThunkPrivateData(pThunk As IUnknown, Optional ByVal Index As Long, ByVal lValue As Long)
+    Dim lPtr            As Long
+    
+    lPtr = ObjPtr(pThunk)
+    If lPtr <> 0 Then
+        Call CopyMemory(ByVal (lPtr Xor SIGN_BIT) + 8 + Index * 4 Xor SIGN_BIT, lValue, 4)
+    End If
+End Property
+
+Private Function pvThunkAllocate(sText As String, Optional ByVal Size As Long) As Long
+    Static Map(0 To &H3FF) As Long
+    Dim baInput()       As Byte
+    Dim lIdx            As Long
+    Dim lChar           As Long
+    Dim lPtr            As Long
+    
+    pvThunkAllocate = VirtualAlloc(0, IIf(Size > 0, Size, (Len(sText) \ 4) * 3), MEM_COMMIT, PAGE_EXECUTE_READWRITE)
+    If pvThunkAllocate = 0 Then
+        Exit Function
+    End If
+    '--- init decoding maps
+    If Map(65) = 0 Then
+        baInput = StrConv("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", vbFromUnicode)
+        For lIdx = 0 To UBound(baInput)
+            lChar = baInput(lIdx)
+            Map(&H0 + lChar) = lIdx * (2 ^ 2)
+            Map(&H100 + lChar) = (lIdx And &H30) \ (2 ^ 4) Or (lIdx And &HF) * (2 ^ 12)
+            Map(&H200 + lChar) = (lIdx And &H3) * (2 ^ 22) Or (lIdx And &H3C) * (2 ^ 6)
+            Map(&H300 + lChar) = lIdx * (2 ^ 16)
+        Next
+    End If
+    '--- base64 decode loop
+    baInput = StrConv(Replace(Replace(sText, vbCr, vbNullString), vbLf, vbNullString), vbFromUnicode)
+    lPtr = pvThunkAllocate
+    For lIdx = 0 To UBound(baInput) - 3 Step 4
+        lChar = Map(baInput(lIdx + 0)) Or Map(&H100 + baInput(lIdx + 1)) Or Map(&H200 + baInput(lIdx + 2)) Or Map(&H300 + baInput(lIdx + 3))
+        Call CopyMemory(ByVal lPtr, lChar, 3)
+        lPtr = (lPtr Xor SIGN_BIT) + 3 Xor SIGN_BIT
+    Next
+End Function
+
+Private Property Get pvThunkGlobalData(sKey As String) As Long
+    Dim sBuffer     As String
+    
+    sBuffer = String$(50, 0)
+    Call GetEnvironmentVariable("_MST_GLOBAL" & GetCurrentProcessId() & "_" & sKey, sBuffer, Len(sBuffer) - 1)
+    pvThunkGlobalData = Val(Left$(sBuffer, InStr(sBuffer, vbNullChar) - 1))
+End Property
+
+Private Property Let pvThunkGlobalData(sKey As String, ByVal lValue As Long)
+    Call SetEnvironmentVariable("_MST_GLOBAL" & GetCurrentProcessId() & "_" & sKey, lValue)
+End Property
 #End If
 
 '=========================================================================
