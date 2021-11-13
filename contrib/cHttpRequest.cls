@@ -830,6 +830,7 @@ Private Function pvRecvBody(baBuffer() As Byte, uRecv As UcsBuffer, Optional ByV
             End If
             If pvUngzipStream(m_pResponseStream, pOutput) Then
                 Set m_pResponseStream = pOutput
+                m_sContentEncoding = vbNullString
             End If
         End If
         RaiseEvent OnResponseFinished
@@ -1022,17 +1023,17 @@ End Sub
 
 Private Function pvJoinHeaders(oDict As Object) As String
     Const FUNC_NAME     As String = "pvJoinHeaders"
-    Dim vTemp           As Variant
+    Dim vSplit          As Variant
     Dim vKey            As Variant
     Dim lIdx            As Long
     
     On Error GoTo EH
-    vTemp = oDict.Keys
-    For Each vKey In vTemp
-        vTemp(lIdx) = vTemp(lIdx) & ": " & oDict.Item(vKey)
+    vSplit = oDict.Keys
+    For Each vKey In vSplit
+        vSplit(lIdx) = vSplit(lIdx) & ": " & oDict.Item(vKey)
         lIdx = lIdx + 1
     Next
-    pvJoinHeaders = Join(vTemp, vbCrLf)
+    pvJoinHeaders = Join(vSplit, vbCrLf)
     Exit Function
 EH:
     PrintError FUNC_NAME
@@ -1156,110 +1157,73 @@ Private Function pvGetHeaderAttrib(sHeader As String, sAttrib As String) As Stri
 End Function
 
 Private Function pvMapCharset(sCharset As String) As UcsAsyncSocketCodePageEnum
+    Dim vElem           As Variant
+    
+    ' https://www.iana.org/assignments/character-sets/character-sets.xhtml
+    ' https://docs.microsoft.com/en-us/windows/win32/intl/code-page-identifiers
     Select Case LCase$(sCharset)
-    Case "iso-8859-1", "windows-1252"
-        pvMapCharset = 1252
-    Case "windows-1251"
-        pvMapCharset = 1251
     Case "utf-8"
         pvMapCharset = ucsScpUtf8
+    Case "utf-7"
+        pvMapCharset = 65000
+    Case "utf-16"
+        pvMapCharset = 1200
+    Case "utf-32"
+        pvMapCharset = 12000
+    Case "iso-8859-1", "latin1"
+        pvMapCharset = 28591
+    Case "iso-8859-2", "latin2"
+        pvMapCharset = 28592
+    Case "iso-8859-3", "latin3"
+        pvMapCharset = 28593
+    Case "iso-8859-4", "latin4"
+        pvMapCharset = 28594
+    Case "iso-8859-5", "cyrillic"
+        pvMapCharset = 28595
+    Case "iso-8859-6", "arabic"
+        pvMapCharset = 28596
+    Case "iso-8859-7", "greek"
+        pvMapCharset = 28597
+    Case "iso-8859-8", "hebrew"
+        pvMapCharset = 28598
+    Case "iso-8859-9", "latin5"
+        pvMapCharset = 28599
+    Case "iso-8859-13"
+        pvMapCharset = 28603
+    Case "iso-8859-15", "latin-9"
+        pvMapCharset = 28603
+    Case "koi8-r"
+        pvMapCharset = 28605
+    Case "koi8-u"
+        pvMapCharset = 21866
+    Case "us-ascii"
+        pvMapCharset = 20127
+    Case "shift_jis"
+        pvMapCharset = 932
+    Case "gb2312"
+        pvMapCharset = 936
+    Case "ks_c_5601-1987"
+        pvMapCharset = 949
+    Case "big5"
+        pvMapCharset = 950
+    Case "cp1025"
+        pvMapCharset = 21025
     Case Else
+        For Each vElem In Split("windows- dos- cp x-cp ibm")
+            If LCase$(Left$(sCharset, Len(vElem))) = vElem Then
+                pvMapCharset = Val(Mid$(sCharset, Len(vElem) + 1))
+                If pvMapCharset <> 0 Then
+                    Exit Function
+                End If
+            End If
+        Next
+        '--- fallback
         pvMapCharset = ucsScpAcp
     End Select
 End Function
 
 Private Function pvToTextArray(sText As String, Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As Byte()
     pvToTextArray = m_oSocket.ToTextArray(sText, CodePage)
-End Function
-
-Private Function AsIStream(ByVal pUnk As IUnknown) As IUnknown
-    Const IDX_QueryInterface As Long = 0
-    Dim IID_IStream(0 To 3) As Long
-    Dim hResult         As Long
-    
-    IID_IStream(0) = &HC: IID_IStream(1) = &H0
-    IID_IStream(2) = &HC0: IID_IStream(3) = &H46000000
-    hResult = DispCallByVtbl(pUnk, IDX_QueryInterface, VarPtr(IID_IStream(0)), VarPtr(AsIStream))
-    If hResult < 0 Then
-        Err.Raise hResult, "IUnknown.QueryInterface(IID_IStream)"
-    End If
-End Function
-
-Private Function IStream_Read(pstm As IUnknown, baBuffer() As Byte, Optional BytesRead As Long) As Long
-    If Not pstm Is Nothing And UBound(baBuffer) >= 0 Then
-        IStream_Read = DispCallByVtbl(pstm, 3, VarPtr(baBuffer(0)), UBound(baBuffer) + 1, VarPtr(BytesRead))
-    End If
-End Function
-
-Private Function IStream_Write(pstm As IUnknown, baBuffer() As Byte, Optional BytesWritten As Long) As Long
-    If Not pstm Is Nothing And UBound(baBuffer) >= 0 Then
-        IStream_Write = DispCallByVtbl(pstm, 4, VarPtr(baBuffer(0)), UBound(baBuffer) + 1, VarPtr(BytesWritten))
-    End If
-End Function
-
-Private Function IStream_Seek(pstm As stdole.IUnknown, ByVal cMove As Currency, ByVal dwOrigin As Long, Optional NewPosition As Currency) As Long
-    If Not pstm Is Nothing Then
-        IStream_Seek = DispCallByVtbl(pstm, 5, cMove, dwOrigin, VarPtr(NewPosition))
-    Else
-        IStream_Seek = -1
-    End If
-End Function
-
-Private Function DispCallByVtbl(pUnk As IUnknown, ByVal lIndex As Long, ParamArray A() As Variant) As Variant
-    Const CC_STDCALL    As Long = 4
-    Dim lIdx            As Long
-    Dim vParam()        As Variant
-    Dim vType(0 To 63)  As Integer
-    Dim vPtr(0 To 63)   As Long
-    Dim hResult         As Long
-    
-    vParam = A
-    For lIdx = 0 To UBound(vParam)
-        vType(lIdx) = VarType(vParam(lIdx))
-        vPtr(lIdx) = VarPtr(vParam(lIdx))
-    Next
-    hResult = DispCallFunc(ObjPtr(pUnk), lIndex * 4, CC_STDCALL, vbLong, lIdx, vType(0), vPtr(0), DispCallByVtbl)
-    If hResult < 0 Then
-        Err.Raise hResult, "DispCallFunc"
-    End If
-End Function
-
-Private Sub pvBufferWriteArray(uOutput As UcsBuffer, baSrc() As Byte)
-    Dim lSize       As Long
-    
-    With uOutput
-        lSize = pvArraySize(baSrc)
-        If lSize > 0 Then
-            .Size = pvArrayWriteBlob(.Data, .Size, VarPtr(baSrc(0)), lSize)
-        End If
-    End With
-End Sub
-
-Private Property Get pvArraySize(baArray() As Byte) As Long
-    Dim lPtr            As Long
-
-    '--- peek long at ArrPtr(baArray)
-    Call CopyMemory(lPtr, ByVal ArrPtr(baArray), 4)
-    If lPtr <> 0 Then
-        pvArraySize = UBound(baArray) + 1
-    End If
-End Property
-
-Private Function pvArrayWriteBlob(baArray() As Byte, ByVal lPos As Long, ByVal lPtr As Long, ByVal lSize As Long) As Long
-    Dim lBufPtr         As Long
-    
-    '--- peek long at ArrPtr(baArray)
-    Call CopyMemory(lBufPtr, ByVal ArrPtr(baArray), 4)
-    If lBufPtr = 0 Then
-        ReDim baArray(0 To lPos + lSize - 1) As Byte
-    ElseIf UBound(baArray) < lPos + lSize - 1 Then
-        ReDim Preserve baArray(0 To lPos + lSize - 1) As Byte
-    End If
-    If lSize > 0 And lPtr <> 0 Then
-        Debug.Assert IsBadReadPtr(lPtr, lSize) = 0
-        Call CopyMemory(baArray(lPos), ByVal lPtr, lSize)
-    End If
-    pvArrayWriteBlob = lPos + lSize
 End Function
 
 Private Function pvUngzipStream(pInput As IUnknown, pOutput As IUnknown) As Boolean
@@ -1311,7 +1275,7 @@ Private Function pvUngzipStream(pInput As IUnknown, pOutput As IUnknown) As Bool
         Else
             hResult = IStream_Write(pOutput, baBuffer)
             If hResult < 0 Then
-                pvSetError hResult, "IStream_Write"
+                pvSetError hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "IStream_Write"
                 GoTo QH
             End If
         End If
@@ -1385,6 +1349,102 @@ Private Function InitRedirectReaderThunk(uThunk As UcsRedirectReaderThunk, ByVal
         Call VirtualProtect(.Code(0), Len(uThunk), PAGE_EXECUTE_READWRITE, 0)
     End With
     InitRedirectReaderThunk = VarPtr(uThunk.Code(0))
+End Function
+
+'= buffers ===============================================================
+
+Private Function AsIStream(ByVal pUnk As IUnknown) As IUnknown
+    Const IDX_QueryInterface As Long = 0
+    Static IID_IStream(0 To 3) As Long
+    Dim hResult         As Long
+    
+    If IID_IStream(0) = 0 Then
+        IID_IStream(0) = &HC: IID_IStream(1) = &H0
+        IID_IStream(2) = &HC0: IID_IStream(3) = &H46000000
+    End If
+    If Not pUnk Is Nothing Then
+        hResult = DispCallByVtbl(pUnk, IDX_QueryInterface, VarPtr(IID_IStream(0)), VarPtr(AsIStream))
+        If hResult < 0 Then
+            Err.Raise hResult, "IUnknown.QueryInterface(IID_IStream)"
+        End If
+    End If
+End Function
+
+Private Function IStream_Read(pStm As IUnknown, baBuffer() As Byte, Optional BytesRead As Long) As Long
+    If Not pStm Is Nothing And UBound(baBuffer) >= 0 Then
+        IStream_Read = DispCallByVtbl(pStm, 3, VarPtr(baBuffer(0)), UBound(baBuffer) + 1, VarPtr(BytesRead))
+    End If
+End Function
+
+Private Function IStream_Write(pStm As IUnknown, baBuffer() As Byte, Optional BytesWritten As Long) As Long
+    If Not pStm Is Nothing And UBound(baBuffer) >= 0 Then
+        IStream_Write = DispCallByVtbl(pStm, 4, VarPtr(baBuffer(0)), UBound(baBuffer) + 1, VarPtr(BytesWritten))
+    End If
+End Function
+
+Private Function IStream_Seek(pStm As stdole.IUnknown, ByVal cMove As Currency, ByVal dwOrigin As Long, Optional NewPosition As Currency) As Long
+    If Not pStm Is Nothing Then
+        IStream_Seek = DispCallByVtbl(pStm, 5, cMove, dwOrigin, VarPtr(NewPosition))
+    Else
+        IStream_Seek = -1
+    End If
+End Function
+
+Private Function DispCallByVtbl(pUnk As IUnknown, ByVal lIndex As Long, ParamArray A() As Variant) As Variant
+    Const CC_STDCALL    As Long = 4
+    Dim lIdx            As Long
+    Dim vParam()        As Variant
+    Dim vType(0 To 63)  As Integer
+    Dim vPtr(0 To 63)   As Long
+    Dim hResult         As Long
+    
+    vParam = A
+    For lIdx = 0 To UBound(vParam)
+        vType(lIdx) = VarType(vParam(lIdx))
+        vPtr(lIdx) = VarPtr(vParam(lIdx))
+    Next
+    hResult = DispCallFunc(ObjPtr(pUnk), lIndex * 4, CC_STDCALL, vbLong, lIdx, vType(0), vPtr(0), DispCallByVtbl)
+    If hResult < 0 Then
+        Err.Raise hResult, "DispCallFunc"
+    End If
+End Function
+
+Private Sub pvBufferWriteArray(uOutput As UcsBuffer, baSrc() As Byte)
+    Dim lSize       As Long
+    
+    With uOutput
+        lSize = pvArraySize(baSrc)
+        If lSize > 0 Then
+            .Size = pvArrayWriteBlob(.Data, .Size, VarPtr(baSrc(0)), lSize)
+        End If
+    End With
+End Sub
+
+Private Property Get pvArraySize(baArray() As Byte) As Long
+    Dim lPtr            As Long
+
+    '--- peek long at ArrPtr(baArray)
+    Call CopyMemory(lPtr, ByVal ArrPtr(baArray), 4)
+    If lPtr <> 0 Then
+        pvArraySize = UBound(baArray) + 1
+    End If
+End Property
+
+Private Function pvArrayWriteBlob(baArray() As Byte, ByVal lPos As Long, ByVal lPtr As Long, ByVal lSize As Long) As Long
+    Dim lBufPtr         As Long
+    
+    '--- peek long at ArrPtr(baArray)
+    Call CopyMemory(lBufPtr, ByVal ArrPtr(baArray), 4)
+    If lBufPtr = 0 Then
+        ReDim baArray(0 To lPos + lSize - 1) As Byte
+    ElseIf UBound(baArray) < lPos + lSize - 1 Then
+        ReDim Preserve baArray(0 To lPos + lSize - 1) As Byte
+    End If
+    If lSize > 0 And lPtr <> 0 Then
+        Debug.Assert IsBadReadPtr(lPtr, lSize) = 0
+        Call CopyMemory(baArray(lPos), ByVal lPtr, lSize)
+    End If
+    pvArrayWriteBlob = lPos + lSize
 End Function
 
 '= shared ================================================================
@@ -1608,19 +1668,19 @@ Private Sub m_oSocket_OnClientCertificate(Issuers As Object, Confirmed As Boolea
     Dim vElem           As Variant
     
     On Error GoTo EH
+    '--- try to match a client certificate in CURRENT_USER\MY certificate store by Issuer's RDN
+    For Each vElem In Issuers
+        If m_oSocket.ImportSystemStoreCertificates(vElem) Then
+            Confirmed = True
+            GoTo QH
+        End If
+    Next
     If LenB(Option_(WinHttpRequestOption_SelectCertificate)) <> 0 Then
         If m_oSocket.ImportSystemStoreCertificates(Option_(WinHttpRequestOption_SelectCertificate)) Then
             Confirmed = True
             GoTo QH
         End If
     End If
-    '--- try to match a client certificate in CURRENT_USER\MY certificate store by Issuer's RDN
-    For Each vElem In Issuers
-        If m_oSocket.ImportSystemStoreCertificates(vElem) Then
-            Confirmed = True
-            Exit For
-        End If
-    Next
 QH:
     Exit Sub
 EH:
