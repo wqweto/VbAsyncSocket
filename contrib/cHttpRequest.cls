@@ -175,6 +175,8 @@ Private Enum UcsStateEnum
     ucsIdle
     ucsWaitResolve
     ucsWaitConnect
+    ucsWaitSendProxy
+    ucsWaitRecvProxy
     ucsWaitSendBody
     ucsWaitRecvHeaders
     ucsWaitRecvBody
@@ -204,6 +206,7 @@ Private Type UcsRequestType
     ReceiveTimeout      As Long
     Method              As String
     Remote              As UcsParsedUrl
+    Proxy               As UcsParsedUrl
     Async               As Boolean
     Headers             As Object
     NumOfRedirects      As Long
@@ -342,6 +345,26 @@ Private Property Get pvAddressOfReaderCallback() As cHttpRequest
     Set pvAddressOfReaderCallback = InitAddressOfMethod(Me, 3)
 End Property
 
+Private Property Get pvLocalFeatures() As UcsTlsLocalFeaturesEnum
+    Dim eProt           As WinHttpRequestSecureProtocols
+        
+    eProt = m_vOptions(WinHttpRequestOption_SecureProtocols)
+    If eProt = SecureProtocol_ALL Then
+        pvLocalFeatures = ucsTlsSupportAll
+    Else
+        pvLocalFeatures = ucsTlsSupportTls13 * -((eProt And SecureProtocol_TLS1_3) <> 0) _
+            Or ucsTlsSupportTls12 * -((eProt And SecureProtocol_TLS1_2) <> 0) _
+            Or ucsTlsSupportTls11 * -((eProt And SecureProtocol_TLS1_1) <> 0) _
+            Or ucsTlsSupportTls10 * -((eProt And SecureProtocol_TLS1) <> 0)
+    End If
+    If m_vOptions(WinHttpRequestOption_SslErrorIgnoreFlags) <> 0 Then
+        pvLocalFeatures = pvLocalFeatures Or ucsTlsIgnoreServerCertificateErrors
+    End If
+    If Not m_vOptions(WinHttpRequestOption_EnableCertificateRevocationCheck) Then
+        pvLocalFeatures = pvLocalFeatures Or ucsTlsIgnoreServerCertificateRevocation
+    End If
+End Property
+
 '=========================================================================
 ' Methods
 '=========================================================================
@@ -368,13 +391,13 @@ Public Sub Open_(ByVal Method As String, ByVal Url As String, Optional ByVal Asy
         uParsed.Pass = vbNullString
     End If
     With m_uRequest
-        .Method = Method
         If LenB(.Remote.Host) <> 0 Then
-            If .Remote.Host <> uParsed.Host Or .Remote.Port <> uParsed.Port Or .Remote.Protocol <> uParsed.Protocol Then
+            If LenB(.Proxy.Host) <> 0 Or .Remote.Host <> uParsed.Host Or .Remote.Port <> uParsed.Port Or .Remote.Protocol <> uParsed.Protocol Then
                 m_oSocket.Close_
                 Set m_oSocket = pvCreateNewSocket
             End If
         End If
+        .Method = Method
         .Remote = uParsed
         .Async = IIf(Not IsMissing(Async), Async, False)
         .NumOfRedirects = 0
@@ -455,7 +478,7 @@ Public Sub Send(Optional ByVal Body As Variant)
                 pvSetError m_oSocket.LastError, "m_oSocket.Create"
                 GoTo QH
             End If
-            If Not pvConnectRemote(.Remote) Then
+            If Not pvConnectRemote(.Remote, .Proxy) Then
                 pvSetError m_oSocket.LastError, "m_oSocket.Connect"
                 GoTo QH
             End If
@@ -560,13 +583,61 @@ End Function
 
 Public Sub SetCredentials(ByVal UserName As String, ByVal Password As String, ByVal Flags As Long)
     Const HTTPREQUEST_SETCREDENTIALS_FOR_SERVER As Long = 0
+    Const HTTPREQUEST_SETCREDENTIALS_FOR_PROXY As Long = 1
     
-    If Flags = HTTPREQUEST_SETCREDENTIALS_FOR_SERVER Then
+    Select Case Flags
+    Case HTTPREQUEST_SETCREDENTIALS_FOR_SERVER
         With m_uRequest.Remote
             .User = UserName
             .Pass = Password
         End With
+    Case HTTPREQUEST_SETCREDENTIALS_FOR_PROXY
+        With m_uRequest.Proxy
+            .User = UserName
+            .Pass = Password
+        End With
+    Case Else
+        Err.Raise E_NOTIMPL, MODULE_NAME & ".SetCredentials", m_oSocket.GetErrorDescription(E_NOTIMPL)
+    End Select
+End Sub
+
+Public Sub SetProxy(ByVal ProxySetting As Long, Optional ByVal ProxyServer As Variant, Optional ByVal BypassList As Variant)
+    Const FUNC_NAME     As String = "SetProxy"
+    Const HTTPREQUEST_PROXYSETTING_DIRECT As Long = 1
+    Const HTTPREQUEST_PROXYSETTING_PROXY As Long = 2
+    Dim uParsed         As UcsParsedUrl
+    
+    On Error GoTo EH
+    m_vLastError = Empty
+    Select Case ProxySetting
+    Case HTTPREQUEST_PROXYSETTING_DIRECT
+        m_uRequest.Proxy = uParsed
+    Case HTTPREQUEST_PROXYSETTING_PROXY
+        If LenB(IIf(Not IsMissing(BypassList), BypassList, vbNullString)) <> 0 Then
+            pvSetError E_NOTIMPL
+            GoTo QH
+        End If
+        If Not pvParseUrl(IIf(Not IsMissing(ProxyServer), ProxyServer, vbNullString), uParsed, "http") Or LenB(uParsed.Host) = 0 Then
+            pvSetError ERROR_WINHTTP_INVALID_URL
+            GoTo QH
+        End If
+        If Not pvIsProtocolSupported(uParsed.Protocol) Then
+            pvSetError ERROR_WINHTTP_UNRECOGNIZED_SCHEME
+            GoTo QH
+        End If
+        m_uRequest.Proxy = uParsed
+    Case Else
+        pvSetError E_NOTIMPL
+        GoTo QH
+    End Select
+QH:
+    If IsArray(m_vLastError) Then
+        On Error GoTo 0
+        Err.Raise m_vLastError(0), MODULE_NAME & "." & FUNC_NAME & vbCrLf & m_vLastError(1), m_vLastError(2)
     End If
+    Exit Sub
+EH:
+    RaiseError FUNC_NAME
 End Sub
 
 Public Sub SetClientCertificate(ByVal ClientCertificate As String)
@@ -601,13 +672,46 @@ Public Sub SetAutoLogonPolicy(ByVal AutoLogonPolicy As WinHttpRequestAutoLogonPo
     Err.Raise E_NOTIMPL, MODULE_NAME & ".SetAutoLogonPolicy", m_oSocket.GetErrorDescription(E_NOTIMPL)
 End Sub
 
-Public Sub SetProxy(ByVal ProxySetting As Long, Optional ByVal ProxyServer As Variant, Optional ByVal BypassList As Variant)
-    #If ProxySetting And ProxyServer And BypassList Then
-    #End If
-    Err.Raise E_NOTIMPL, MODULE_NAME & ".SetProxy", m_oSocket.GetErrorDescription(E_NOTIMPL)
-End Sub
-
 '= private ===============================================================
+
+Private Function pvSendHeaders(uRequest As UcsRequestType) As Boolean
+    Const FUNC_NAME     As String = "pvSendHeaders"
+    Dim sHttpVersion    As String
+    Dim sProxyAuth      As String
+    Dim sRequestLine    As String
+    
+    On Error GoTo EH
+    With uRequest
+        .SendBuffer.Size = 0
+        .SendBuffer.Pos = 0
+        sHttpVersion = "HTTP/1." & -m_vOptions(WinHttpRequestOption_EnableHttp1_1)
+        If LenB(.Proxy.User) <> 0 Or LenB(.Proxy.Pass) <> 0 Then
+            sProxyAuth = vbCrLf & "Proxy-Authorization: Basic " & Replace(ToBase64Array( _
+                pvToTextArray(.Proxy.User & ":" & .Proxy.Pass, ucsScpAcp)), vbCrLf, vbNullString)
+        End If
+        If m_eState < ucsWaitSendProxy And LCase$(.Proxy.Protocol) = "https" Then
+            pvBufferWriteArray .SendBuffer, pvToTextArray( _
+                "CONNECT " & .Remote.Host & ":" & .Remote.Port & " " & sHttpVersion & vbCrLf & _
+                "Host: " & .Remote.Host & ":" & .Remote.Port & sProxyAuth & HDR_DELIM, ucsScpAcp)
+            m_eState = ucsWaitSendProxy
+        Else
+            sRequestLine = .Remote.Path & .Remote.QueryString & .Remote.Anchor & " " & sHttpVersion
+            If LCase$(.Proxy.Protocol) = "http" Then
+                sRequestLine = .Remote.Protocol & "://" & .Remote.Host & ":" & .Remote.Port & sRequestLine & sProxyAuth
+            End If
+            pvBufferWriteArray .SendBuffer, pvToTextArray( _
+                .Method & " " & sRequestLine & vbCrLf & _
+                pvJoinHeaders(.Headers) & HDR_DELIM, ucsScpAcp)
+            m_eState = ucsWaitSendBody
+        End If
+    End With
+    '--- success
+    pvSendHeaders = True
+QH:
+    Exit Function
+EH:
+    pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Err.Description
+End Function
 
 Private Function pvSendBody(uRequest As UcsRequestType) As Boolean
     Const FUNC_NAME     As String = "pvSendBody"
@@ -620,22 +724,29 @@ Private Function pvSendBody(uRequest As UcsRequestType) As Boolean
         Do
             lSize = .SendBuffer.Size - .SendBuffer.Pos
             If lSize <= 0 Then
-                If pvArraySize(.SendBuffer.Data) <> DEF_BUFFER_SIZE Then
-                    ReDim .SendBuffer.Data(0 To DEF_BUFFER_SIZE - 1) As Byte
-                End If
-                hResult = IStream_Read(.Stream, .SendBuffer.Data, lSize)
-                If hResult < 0 Then
-                    pvSetError hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "IStream_Read"
+                If m_eState < ucsWaitRecvProxy Then
+                    m_eState = ucsWaitRecvProxy
+                    pvSendBody = True
                     GoTo QH
+                Else
+                    If pvArraySize(.SendBuffer.Data) <> DEF_BUFFER_SIZE Then
+                        ReDim .SendBuffer.Data(0 To DEF_BUFFER_SIZE - 1) As Byte
+                    End If
+                    hResult = IStream_Read(.Stream, .SendBuffer.Data, lSize)
+                    If hResult < 0 Then
+                        pvSetError hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "IStream_Read"
+                        GoTo QH
+                    End If
+                    If lSize = 0 Then
+                        m_uResponse.RecvBuffer.Size = 0
+                        m_uResponse.ChunksBuffer.Size = 0
+                        m_eState = ucsWaitRecvHeaders
+                        pvSendBody = True
+                        GoTo QH
+                    End If
+                    .SendBuffer.Size = lSize
+                    .SendBuffer.Pos = 0
                 End If
-                If lSize = 0 Then
-                    m_uResponse.RecvBuffer.Size = 0
-                    m_uResponse.ChunksBuffer.Size = 0
-                    m_eState = ucsWaitRecvHeaders
-                    GoTo QH
-                End If
-                .SendBuffer.Size = lSize
-                .SendBuffer.Pos = 0
             End If
             If lSize <= 0 Then
                 Exit Do
@@ -729,7 +840,7 @@ Private Function pvRecvHeaders(baData() As Byte, uResponse As UcsResponseType, u
                             GoTo TryDownload
                         End If
                     End If
-                    If .Remote.Host <> uRedirect.Host Or .Remote.Port <> uRedirect.Port Or .Remote.Protocol <> uRedirect.Protocol Then
+                    If LenB(.Proxy.Host) <> 0 Or .Remote.Host <> uRedirect.Host Or .Remote.Port <> uRedirect.Port Or .Remote.Protocol <> uRedirect.Protocol Then
                         m_oSocket.Close_
                         Set m_oSocket = pvCreateNewSocket
                     End If
@@ -744,7 +855,7 @@ Private Function pvRecvHeaders(baData() As Byte, uResponse As UcsResponseType, u
                             pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.Create"
                             GoTo QH
                         End If
-                        If Not pvConnectRemote(.Remote) Then
+                        If Not pvConnectRemote(.Remote, .Proxy) Then
                             pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.Connect"
                             GoTo QH
                         End If
@@ -755,26 +866,34 @@ Private Function pvRecvHeaders(baData() As Byte, uResponse As UcsResponseType, u
                 End With
             Case Else
 TryDownload:
-                Set uRequest.Stream = Nothing
-                uRequest.Headers.RemoveAll
-                If .Headers.Exists(HDR_CONTENT_LENGTH) Then
-                    .ContentLength = Val(.Headers.Item(HDR_CONTENT_LENGTH))
-                End If
-                .TransferEncoding = LCase$(GetResponseHeader("Transfer-Encoding"))
-                .ContentEncoding = LCase$(GetResponseHeader("Content-Encoding"))
-                m_eState = ucsWaitRecvBody
-                lPos = lPos + sizeof_HDR_DELIM - 1
-                If .RecvBuffer.Size <= lPos Then
-                    baData = vbNullString
+                If m_eState = ucsWaitRecvProxy Then
+                    If .Status >= 200 And .Status <= 299 Then
+                        m_oSocket.StartTls uRequest.Remote.Host, pvLocalFeatures
+                        pvResetResponse uResponse
+                        pvSendHeaders uRequest
+                    End If
                 Else
-                    ReDim baData(0 To .RecvBuffer.Size - lPos - 1) As Byte
-                    Call CopyMemory(baData(0), .RecvBuffer.Data(lPos), UBound(baData) + 1)
+                    Set uRequest.Stream = Nothing
+                    uRequest.Headers.RemoveAll
+                    If .Headers.Exists(HDR_CONTENT_LENGTH) Then
+                        .ContentLength = Val(.Headers.Item(HDR_CONTENT_LENGTH))
+                    End If
+                    .TransferEncoding = LCase$(GetResponseHeader("Transfer-Encoding"))
+                    .ContentEncoding = LCase$(GetResponseHeader("Content-Encoding"))
+                    m_eState = ucsWaitRecvBody
+                    lPos = lPos + sizeof_HDR_DELIM - 1
+                    If .RecvBuffer.Size <= lPos Then
+                        baData = vbNullString
+                    Else
+                        ReDim baData(0 To .RecvBuffer.Size - lPos - 1) As Byte
+                        Call CopyMemory(baData(0), .RecvBuffer.Data(lPos), UBound(baData) + 1)
+                    End If
+                    RaiseEvent OnResponseStart(.Status, GetResponseHeader(HDR_CONTENT_TYPE))
+                    .RecvBuffer.Size = 0
+                    Set .Stream = SHCreateMemStream(ByVal 0, 0)
+                    .Text = vbNullChar
+                    pvRecvBody baData, uResponse
                 End If
-                RaiseEvent OnResponseStart(.Status, GetResponseHeader(HDR_CONTENT_TYPE))
-                .RecvBuffer.Size = 0
-                Set .Stream = SHCreateMemStream(ByVal 0, 0)
-                .Text = vbNullChar
-                pvRecvBody baData, uResponse
             End Select
         ElseIf .RecvBuffer.Size > m_vOptions(WinHttpRequestOption_MaxResponseHeaderSize) Then
             pvSetError ERROR_WINHTTP_HEADER_SIZE_OVERFLOW, MODULE_NAME & "." & FUNC_NAME
@@ -940,30 +1059,17 @@ Private Function pvGetAsyncSocket() As cAsyncSocket
     #End If
 End Function
 
-Private Function pvConnectRemote(uRemote As UcsParsedUrl) As Boolean
-    #If ImplUseTls Then
-        Dim eProt           As WinHttpRequestSecureProtocols
-        Dim eFeatures       As UcsTlsLocalFeaturesEnum
-        
-        eProt = m_vOptions(WinHttpRequestOption_SecureProtocols)
-        If eProt = SecureProtocol_ALL Then
-            eFeatures = ucsTlsSupportAll
-        Else
-            eFeatures = ucsTlsSupportTls13 * -((eProt And SecureProtocol_TLS1_3) <> 0) _
-                Or ucsTlsSupportTls12 * -((eProt And SecureProtocol_TLS1_2) <> 0) _
-                Or ucsTlsSupportTls11 * -((eProt And SecureProtocol_TLS1_1) <> 0) _
-                Or ucsTlsSupportTls10 * -((eProt And SecureProtocol_TLS1) <> 0)
-        End If
-        If m_vOptions(WinHttpRequestOption_SslErrorIgnoreFlags) <> 0 Then
-            eFeatures = eFeatures Or ucsTlsIgnoreServerCertificateErrors
-        End If
-        If Not m_vOptions(WinHttpRequestOption_EnableCertificateRevocationCheck) Then
-            eFeatures = eFeatures Or ucsTlsIgnoreServerCertificateRevocation
-        End If
-        pvConnectRemote = m_oSocket.Connect(uRemote.Host, uRemote.Port, UseTls:=pvIsProtocolSecure(uRemote.Protocol), LocalFeatures:=eFeatures)
-    #Else
-        pvConnectRemote = m_oSocket.Connect(uRemote.Host, uRemote.Port)
-    #End If
+Private Function pvConnectRemote(uRemote As UcsParsedUrl, uProxy As UcsParsedUrl) As Boolean
+    If LenB(uProxy.Host) <> 0 Then
+        '--- always use unencrypted socket because https proxies use StartTls
+        pvConnectRemote = m_oSocket.Connect(uProxy.Host, uProxy.Port, UseTls:=False)
+    Else
+        #If ImplUseTls Then
+            pvConnectRemote = m_oSocket.Connect(uRemote.Host, uRemote.Port, UseTls:=pvIsProtocolSecure(uRemote.Protocol), LocalFeatures:=pvLocalFeatures)
+        #Else
+            pvConnectRemote = m_oSocket.Connect(uRemote.Host, uRemote.Port)
+        #End If
+    End If
 End Function
 
 Private Function pvIsProtocolSupported(sProtocol As String) As Boolean
@@ -1174,6 +1280,9 @@ Private Function pvParseHeaderAttrib(sHeader As String, sAttrib As String) As St
             If UBound(vElem) > 0 Then
                 If LCase$(Trim$(vElem(0))) = LCase$(sAttrib) Then
                     pvParseHeaderAttrib = Trim$(vElem(1))
+                    If Left$(pvParseHeaderAttrib, 1) = """" And Right$(pvParseHeaderAttrib, 1) = """" And Len(pvParseHeaderAttrib) > 1 Then
+                        pvParseHeaderAttrib = Trim$(Mid$(pvParseHeaderAttrib, 2, Len(pvParseHeaderAttrib) - 2))
+                    End If
                     Exit For
                 End If
             End If
@@ -1608,16 +1717,11 @@ Private Sub m_oSocket_OnSend()
     
     On Error GoTo EH
     If m_eState = ucsWaitResolve Or m_eState = ucsWaitConnect Then
-        With m_uRequest
-            .SendBuffer.Size = 0
-            .SendBuffer.Pos = 0
-            pvBufferWriteArray .SendBuffer, pvToTextArray( _
-                .Method & " " & .Remote.Path & .Remote.QueryString & .Remote.Anchor & " HTTP/1." & IIf(m_vOptions(WinHttpRequestOption_EnableHttp1_1), "1", "0") & vbCrLf & _
-                pvJoinHeaders(.Headers) & HDR_DELIM, ucsScpAcp)
-            m_eState = ucsWaitSendBody
-        End With
+        If Not pvSendHeaders(m_uRequest) Then
+            GoTo QH
+        End If
     End If
-    If m_eState = ucsWaitSendBody Then
+    If m_eState = ucsWaitSendProxy Or m_eState = ucsWaitSendBody Then
         If Not pvSendBody(m_uRequest) Then
             GoTo QH
         End If
@@ -1633,28 +1737,22 @@ Private Sub m_oSocket_OnReceive()
     Dim baData()        As Byte
     
     On Error GoTo EH
-    If m_eState = ucsWaitRecvHeaders Then
-        If Not m_oSocket.ReceiveArray(baData) Then
-            pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.ReceiveArray"
+    If Not m_oSocket.ReceiveArray(baData) Then
+        If m_uResponse.BytesProgress >= m_uResponse.ContentLength And m_uResponse.ContentLength >= 0 Then
             GoTo QH
         End If
-        If UBound(baData) < 0 Then
-            GoTo QH
-        End If
+        pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.ReceiveArray"
+        GoTo QH
+    End If
+    If UBound(baData) < 0 Then
+        GoTo QH
+    End If
+    If m_eState = ucsWaitRecvProxy Or m_eState = ucsWaitRecvHeaders Then
         If Not pvRecvHeaders(baData, m_uResponse, m_uRequest) Then
             GoTo QH
         End If
     End If
     If m_eState = ucsWaitRecvBody Then
-        If Not m_oSocket.ReceiveArray(baData) Then
-            If m_uResponse.BytesProgress < m_uResponse.ContentLength Then
-                pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.ReceiveArray"
-            End If
-            GoTo QH
-        End If
-        If UBound(baData) < 0 Then
-            GoTo QH
-        End If
         If Not pvRecvBody(baData, m_uResponse) Then
             GoTo QH
         End If
