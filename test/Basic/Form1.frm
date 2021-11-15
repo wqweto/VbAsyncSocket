@@ -569,11 +569,7 @@ Private Sub m_oClientSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As 
     
     With m_oClientSocket.LastError
         If .Number <> 0 Then
-            #If ImplUseDebugLog Then
-                DebugLog MODULE_NAME, FUNC_NAME & ", " & Replace(.Source, vbCrLf, ", "), .Description & " &H" & Hex$(.Number), vbLogEventTypeError
-            #Else
-                Debug.Print "Error: " & .Description & " [" & MODULE_NAME & "." & FUNC_NAME & "]"
-            #End If
+            DebugLog MODULE_NAME, FUNC_NAME & ", " & Replace(.Source, vbCrLf, ", "), .Description & " &H" & Hex$(.Number), vbLogEventTypeError
         End If
     End With
 End Sub
@@ -879,3 +875,10 @@ Private Sub m_oHttpDownload_UploadComplete(ByVal LocalFileName As String)
     MsgBox "Upload of " & LocalFileName & " complete to " & m_oHttpDownload.Body, vbExclamation
     Clipboard.Clear: Clipboard.SetText m_oHttpDownload.Body
 End Sub
+
+#If Not ImplUseDebugLog Then
+Private Sub DebugLog(sModule As String, sFunction As String, sText As String, Optional ByVal eType As LogEventTypeConstants = vbLogEventTypeInformation)
+    Debug.Print Format$(Timer, "0.00") & " [" & eType & "] " & sText & " [" & sModule & "." & sFunction & "]"
+End Sub
+#End If
+
