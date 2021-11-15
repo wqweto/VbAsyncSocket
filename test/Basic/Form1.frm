@@ -209,18 +209,24 @@ Private Sub Command2_Click()
     End If
     m_oRequest.SetTimeouts 5000, 5000, 5000, 5000
     m_oRequest.Option_(WinHttpRequestOption_EnableHttpsToHttpRedirects) = True
-    m_oRequest.Open_ "GET", IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://www.unicontsoft.com" ' /bg/download.html
+'    m_oRequest.SetProxy 0
+'    m_oRequest.SetProxy 2, "https://ucsgate:3128" ' , "*.unicontsoft.com"
+    m_oRequest.Open_ "GET", IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://unicontsoft.com/bg/download.html"
     m_oRequest.SetRequestHeader "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.69 Safari/537.36"
     m_oRequest.SetRequestHeader "Accept-Encoding", "gzip"
+    m_oRequest.Send
 '    m_oRequest.Open_ "GET", "http://localhost/ТоваПапка?Параметър1&Парам2#Анкор"
+'    m_oRequest.Send
+'    m_oRequest.Open_ "GET", IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://www.epay.bg/v3main/certreq?action=attach&get_cert=1&ident=1"
+'    m_oRequest.SetClientCertificate "7be211f9069aae6fa109fcd3c83007e2dc14b2f8"
+'    m_oRequest.Send
 '    m_oRequest.Open_ "GET", "https://dl.unicontsoft.com/upload/UCS/"
 '    m_oRequest.SetCredentials "test", "test", 0
-'    m_oRequest.Open_ "GET", "https://www.epay.bg/v3main/certreq?action=attach&get_cert=1&ident=1"
-'    m_oRequest.SetClientCertificate "7be211f9069aae6fa109fcd3c83007e2dc14b2f8"
-    m_oRequest.Send
+'    m_oRequest.Send
     DebugLog MODULE_NAME, FUNC_NAME, m_oRequest.Status & " " & m_oRequest.StatusText
-    DebugLog MODULE_NAME, FUNC_NAME, m_oRequest.GetResponseHeader("Transfer-Encoding") & " " & m_oRequest.GetResponseHeader("Content-Encoding")
+    DebugLog MODULE_NAME, FUNC_NAME, m_oRequest.GetResponseHeader("Transfer-Encoding") & " " & m_oRequest.GetResponseHeader("Content-Encoding") & " " & m_oRequest.GetResponseHeader("Via")
     DebugLog MODULE_NAME, FUNC_NAME, Len(m_oRequest.ResponseText) & " " & m_oRequest.GetResponseHeader("Content-Length")
+    DebugLog MODULE_NAME, FUNC_NAME, Replace(At(Split(m_oRequest.ResponseText, vbLf), 0), vbCr, vbNullString)
     Exit Sub
 EH:
     MsgBox Err.Description & " [" & Replace(Err.Source, vbCrLf, "; ") & "]", vbCritical, FUNC_NAME

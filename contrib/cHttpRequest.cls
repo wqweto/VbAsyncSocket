@@ -116,8 +116,10 @@ Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
 Private Declare Function VirtualProtect Lib "kernel32" (lpAddress As Any, ByVal dwSize As Long, ByVal flNewProtect As Long, lpflOldProtect As Long) As Long
-'--- oleaut32
+Private Declare Function GlobalFree Lib "kernel32" (ByVal hMem As Long) As Long
+Private Declare Function lstrlenW Lib "kernel32" (ByVal lpString As Long) As Long
 Private Declare Function DispCallFunc Lib "oleaut32" (ByVal pvInstance As Long, ByVal oVft As Long, ByVal lCc As Long, ByVal vtReturn As VbVarType, ByVal cActuals As Long, prgVt As Any, prgpVarg As Any, pvargResult As Variant) As Long
+Private Declare Function WinHttpGetDefaultProxyConfiguration Lib "winhttp" (pProxyInfo As Any) As Long
 '--- shlwapi
 Private Declare Function SHCreateMemStream Lib "shlwapi" Alias "#12" (pInit As Any, ByVal cbInit As Long) As stdole.IUnknown
 Private Declare Function UrlEscape Lib "shlwapi" Alias "UrlEscapeW" (ByVal pszURL As Long, ByVal pszEscaped As Long, pcchEscaped As Long, ByVal dwFlags As Long) As Long
@@ -142,6 +144,12 @@ Private Declare Function archive_read_data Lib "archiveint" Alias "_archive_read
     Private Declare Function GetCurrentProcessId Lib "kernel32" () As Long
     '--- end MST
 #End If
+
+Private Type WINHTTP_PROXY_INFO
+    dwAccessType        As Long
+    lpszProxy           As Long
+    lpszProxyBypass     As Long
+End Type
 
 '=========================================================================
 ' Constants and member variables
@@ -207,6 +215,7 @@ Private Type UcsRequestType
     Method              As String
     Remote              As UcsParsedUrl
     Proxy               As UcsParsedUrl
+    BypassList          As Variant
     Async               As Boolean
     Headers             As Object
     NumOfRedirects      As Long
@@ -391,11 +400,13 @@ Public Sub Open_(ByVal Method As String, ByVal Url As String, Optional ByVal Asy
         uParsed.Pass = vbNullString
     End If
     With m_uRequest
-        If LenB(.Remote.Host) <> 0 Then
-            If LenB(.Proxy.Host) <> 0 Or .Remote.Host <> uParsed.Host Or .Remote.Port <> uParsed.Port Or .Remote.Protocol <> uParsed.Protocol Then
-                m_oSocket.Close_
-                Set m_oSocket = pvCreateNewSocket
-            End If
+        If LCase$(.Proxy.Protocol) = "http" And LCase$(GetResponseHeader("Proxy-Connection")) = "keep-alive" Then
+            '--- keep alive proxy connection
+        ElseIf LenB(.Proxy.Protocol) = 0 And LCase$(GetResponseHeader("Connection")) = "keep-alive" And LCase$(pvFormatHost(.Remote)) = LCase$(pvFormatHost(uParsed)) Then
+            '--- keep alive host connection
+        Else
+            m_oSocket.Close_
+            Set m_oSocket = pvCreateNewSocket
         End If
         .Method = Method
         .Remote = uParsed
@@ -472,13 +483,13 @@ Public Sub Send(Optional ByVal Body As Variant)
         SetRequestHeader HDR_HOST, .Remote.Host
         pvResetResponse m_uResponse
         '--- try to reuse socket if not closed (keep-alive)
-        m_eState = ucsWaitResolve
+        pvSetState ucsWaitResolve
         If m_oSocket.IsClosed Then
             If Not m_oSocket.Create(SocketType:=ucsSckStream) Then
                 pvSetError m_oSocket.LastError, "m_oSocket.Create"
                 GoTo QH
             End If
-            If Not pvConnectRemote(.Remote, .Proxy) Then
+            If Not pvConnectRemote(.Remote, .Proxy, .BypassList) Then
                 pvSetError m_oSocket.LastError, "m_oSocket.Connect"
                 GoTo QH
             End If
@@ -556,7 +567,7 @@ Public Sub SetRequestHeader(ByVal Header As String, ByVal Value As String)
 End Sub
 
 Public Sub Abort()
-    m_eState = ucsIdle
+    pvSetState ucsIdle
     Set m_oSocket = pvCreateNewSocket
     Set m_uRequest.Stream = Nothing
     m_uRequest.Headers.RemoveAll
@@ -603,21 +614,32 @@ End Sub
 
 Public Sub SetProxy(ByVal ProxySetting As Long, Optional ByVal ProxyServer As Variant, Optional ByVal BypassList As Variant)
     Const FUNC_NAME     As String = "SetProxy"
+    Const HTTPREQUEST_PROXYSETTING_PRECONFIG As Long = 0
     Const HTTPREQUEST_PROXYSETTING_DIRECT As Long = 1
     Const HTTPREQUEST_PROXYSETTING_PROXY As Long = 2
+    Const WINHTTP_ACCESS_TYPE_NAMED_PROXY As Long = 3
     Dim uParsed         As UcsParsedUrl
+    Dim vList           As Variant
+    Dim uInfo           As WINHTTP_PROXY_INFO
     
     On Error GoTo EH
     m_vLastError = Empty
     Select Case ProxySetting
-    Case HTTPREQUEST_PROXYSETTING_DIRECT
-        m_uRequest.Proxy = uParsed
-    Case HTTPREQUEST_PROXYSETTING_PROXY
-        If LenB(IIf(Not IsMissing(BypassList), BypassList, vbNullString)) <> 0 Then
-            pvSetError E_NOTIMPL
+    Case HTTPREQUEST_PROXYSETTING_PRECONFIG
+         If WinHttpGetDefaultProxyConfiguration(uInfo) = 0 Then
+            pvSetError Err.LastDllError
             GoTo QH
         End If
-        If Not pvParseUrl(IIf(Not IsMissing(ProxyServer), ProxyServer, vbNullString), uParsed, "http") Or LenB(uParsed.Host) = 0 Then
+        ProxyServer = pvToStringAndFree(uInfo.lpszProxy)
+        BypassList = pvToStringAndFree(uInfo.lpszProxyBypass)
+        If uInfo.dwAccessType = WINHTTP_ACCESS_TYPE_NAMED_PROXY Then
+            GoTo SetProxy
+        End If
+    Case HTTPREQUEST_PROXYSETTING_DIRECT
+        '--- will clear proxy settings
+    Case HTTPREQUEST_PROXYSETTING_PROXY
+SetProxy:
+        If Not pvParseUrl(IIf(IsMissing(ProxyServer), vbNullString, ProxyServer), uParsed, "http") Or LenB(uParsed.Host) = 0 Then
             pvSetError ERROR_WINHTTP_INVALID_URL
             GoTo QH
         End If
@@ -625,11 +647,13 @@ Public Sub SetProxy(ByVal ProxySetting As Long, Optional ByVal ProxyServer As Va
             pvSetError ERROR_WINHTTP_UNRECOGNIZED_SCHEME
             GoTo QH
         End If
-        m_uRequest.Proxy = uParsed
+        vList = Split(IIf(IsMissing(BypassList) Or IsEmpty(BypassList), "<local>", BypassList), ";")
     Case Else
         pvSetError E_NOTIMPL
         GoTo QH
     End Select
+    m_uRequest.Proxy = uParsed
+    m_uRequest.BypassList = vList
 QH:
     If IsArray(m_vLastError) Then
         On Error GoTo 0
@@ -693,16 +717,17 @@ Private Function pvSendHeaders(uRequest As UcsRequestType) As Boolean
             pvBufferWriteArray .SendBuffer, pvToTextArray( _
                 "CONNECT " & .Remote.Host & ":" & .Remote.Port & " " & sHttpVersion & vbCrLf & _
                 "Host: " & .Remote.Host & ":" & .Remote.Port & sProxyAuth & HDR_DELIM, ucsScpAcp)
-            m_eState = ucsWaitSendProxy
+            pvSetState ucsWaitSendProxy
         Else
             sRequestLine = .Remote.Path & .Remote.QueryString & .Remote.Anchor & " " & sHttpVersion
             If LCase$(.Proxy.Protocol) = "http" Then
-                sRequestLine = .Remote.Protocol & "://" & .Remote.Host & ":" & .Remote.Port & sRequestLine & sProxyAuth
+                sRequestLine = pvFormatHost(.Remote) & sRequestLine & sProxyAuth
+                .Headers.Item("Proxy-Connection") = "Keep-Alive"
             End If
             pvBufferWriteArray .SendBuffer, pvToTextArray( _
                 .Method & " " & sRequestLine & vbCrLf & _
                 pvJoinHeaders(.Headers) & HDR_DELIM, ucsScpAcp)
-            m_eState = ucsWaitSendBody
+            pvSetState ucsWaitSendBody
         End If
     End With
     '--- success
@@ -725,7 +750,7 @@ Private Function pvSendBody(uRequest As UcsRequestType) As Boolean
             lSize = .SendBuffer.Size - .SendBuffer.Pos
             If lSize <= 0 Then
                 If m_eState < ucsWaitRecvProxy Then
-                    m_eState = ucsWaitRecvProxy
+                    pvSetState ucsWaitRecvProxy
                     pvSendBody = True
                     GoTo QH
                 Else
@@ -740,7 +765,7 @@ Private Function pvSendBody(uRequest As UcsRequestType) As Boolean
                     If lSize = 0 Then
                         m_uResponse.RecvBuffer.Size = 0
                         m_uResponse.ChunksBuffer.Size = 0
-                        m_eState = ucsWaitRecvHeaders
+                        pvSetState ucsWaitRecvHeaders
                         pvSendBody = True
                         GoTo QH
                     End If
@@ -840,7 +865,11 @@ Private Function pvRecvHeaders(baData() As Byte, uResponse As UcsResponseType, u
                             GoTo TryDownload
                         End If
                     End If
-                    If LenB(.Proxy.Host) <> 0 Or .Remote.Host <> uRedirect.Host Or .Remote.Port <> uRedirect.Port Or .Remote.Protocol <> uRedirect.Protocol Then
+                    If LCase$(.Proxy.Protocol) = "http" And LCase$(GetResponseHeader("Proxy-Connection")) = "keep-alive" Then
+                        '--- keep alive proxy connection
+                    ElseIf LenB(.Proxy.Protocol) = 0 And LCase$(GetResponseHeader("Connection")) = "keep-alive" And LCase$(pvFormatHost(.Remote)) = LCase$(pvFormatHost(uRedirect)) Then
+                        '--- keep alive host connection
+                    Else
                         m_oSocket.Close_
                         Set m_oSocket = pvCreateNewSocket
                     End If
@@ -849,13 +878,13 @@ Private Function pvRecvHeaders(baData() As Byte, uResponse As UcsResponseType, u
                     SetRequestHeader HDR_HOST, .Remote.Host
                     pvResetResponse uResponse
                     '--- try to reuse socket if not closed (keep-alive)
-                    m_eState = ucsWaitResolve
+                    pvSetState ucsWaitResolve
                     If m_oSocket.IsClosed Then
                         If Not m_oSocket.Create(SocketType:=ucsSckStream) Then
                             pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.Create"
                             GoTo QH
                         End If
-                        If Not pvConnectRemote(.Remote, .Proxy) Then
+                        If Not pvConnectRemote(.Remote, .Proxy, .BypassList) Then
                             pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.Connect"
                             GoTo QH
                         End If
@@ -868,7 +897,9 @@ Private Function pvRecvHeaders(baData() As Byte, uResponse As UcsResponseType, u
 TryDownload:
                 If m_eState = ucsWaitRecvProxy Then
                     If .Status >= 200 And .Status <= 299 Then
-                        m_oSocket.StartTls uRequest.Remote.Host, pvLocalFeatures
+                        If pvIsProtocolSecure(uRequest.Remote.Protocol) Then
+                            m_oSocket.StartTls uRequest.Remote.Host, pvLocalFeatures
+                        End If
                         pvResetResponse uResponse
                         pvSendHeaders uRequest
                     End If
@@ -880,7 +911,7 @@ TryDownload:
                     End If
                     .TransferEncoding = LCase$(GetResponseHeader("Transfer-Encoding"))
                     .ContentEncoding = LCase$(GetResponseHeader("Content-Encoding"))
-                    m_eState = ucsWaitRecvBody
+                    pvSetState ucsWaitRecvBody
                     lPos = lPos + sizeof_HDR_DELIM - 1
                     If .RecvBuffer.Size <= lPos Then
                         baData = vbNullString
@@ -929,7 +960,7 @@ Private Function pvRecvBody(baData() As Byte, uResponse As UcsResponseType, Opti
                     uChunk = .TransferChunks(lIdx)
                     lPos = uChunk.Pos + uChunk.Size + sizeof_CrLf
                     If uChunk.Size = 0 Then
-                        m_eState = ucsIdle
+                        pvSetState ucsIdle
                         Flush = True
                         Exit For
                     End If
@@ -951,7 +982,7 @@ Private Function pvRecvBody(baData() As Byte, uResponse As UcsResponseType, Opti
                 RaiseEvent OnResponseDataAvailable(baData)
                 pvBufferWriteArray .RecvBuffer, baData
                 If .BytesProgress >= .ContentLength And .ContentLength >= 0 Then
-                    m_eState = ucsIdle
+                    pvSetState ucsIdle
                     Flush = True
                 End If
             End If
@@ -1059,16 +1090,56 @@ Private Function pvGetAsyncSocket() As cAsyncSocket
     #End If
 End Function
 
-Private Function pvConnectRemote(uRemote As UcsParsedUrl, uProxy As UcsParsedUrl) As Boolean
+Private Function pvConnectRemote(uRemote As UcsParsedUrl, uProxy As UcsParsedUrl, vBypassList As Variant) As Boolean
+    Dim vElem           As Variant
+    
     If LenB(uProxy.Host) <> 0 Then
+        If IsArray(vBypassList) Then
+            For Each vElem In vBypassList
+                If pvMatchRemote(uRemote, LCase$(vElem)) Then
+                    #If ImplUseDebugLog Then
+                        DebugLog MODULE_NAME, "pvConnectRemote", "Bypass proxy for " & pvFormatHost(uRemote)
+                    #End If
+                    GoTo DirectConnect
+                End If
+            Next
+        End If
         '--- always use unencrypted socket because https proxies use StartTls
         pvConnectRemote = m_oSocket.Connect(uProxy.Host, uProxy.Port, UseTls:=False)
     Else
+DirectConnect:
         #If ImplUseTls Then
             pvConnectRemote = m_oSocket.Connect(uRemote.Host, uRemote.Port, UseTls:=pvIsProtocolSecure(uRemote.Protocol), LocalFeatures:=pvLocalFeatures)
         #Else
             pvConnectRemote = m_oSocket.Connect(uRemote.Host, uRemote.Port)
         #End If
+    End If
+End Function
+
+Private Function pvMatchRemote(uRemote As UcsParsedUrl, sBypass As String) As Boolean
+    Dim sHost           As String
+    
+    If sBypass = "<local>" Then
+        If InStr(uRemote.Host, ".") = 0 Then
+            pvMatchRemote = True
+        ElseIf uRemote.Host Like "192.168.*.*" Then
+            pvMatchRemote = True
+        ElseIf uRemote.Host Like "172.*.*.*" Then
+            pvMatchRemote = True
+        ElseIf uRemote.Host Like "10.*.*.*" Then
+            pvMatchRemote = True
+        End If
+    Else
+        sHost = LCase$(uRemote.Host)
+        If sHost Like sBypass Then
+            pvMatchRemote = True
+        ElseIf "." & sHost Like sBypass Then
+            pvMatchRemote = True
+        ElseIf sHost & ":" & uRemote.Port Like sBypass Then
+            pvMatchRemote = True
+        ElseIf "." & sHost & ":" & uRemote.Port Like sBypass Then
+            pvMatchRemote = True
+        End If
     End If
 End Function
 
@@ -1082,6 +1153,10 @@ End Function
 
 Private Function pvIsProtocolSecure(sProtocol As String) As Boolean
     pvIsProtocolSecure = (LCase$(sProtocol) = "https")
+End Function
+
+Private Function pvFormatHost(uRemote As UcsParsedUrl) As String
+    pvFormatHost = uRemote.Protocol & "://" & uRemote.Host & ":" & uRemote.Port
 End Function
 
 Private Sub pvDrainKeepAlive()
@@ -1144,7 +1219,15 @@ Private Sub pvResetResponse(uResponse As UcsResponseType)
         .ContentLength = -1
         .TransferEncoding = vbNullString
         .ContentEncoding = vbNullString
+        .RecvBuffer.Size = 0
+        .ChunksBuffer.Size = 0
+        Set .Stream = Nothing
+        .Text = vbNullChar
     End With
+End Sub
+
+Private Sub pvSetState(ByVal eValue As UcsStateEnum)
+    m_eState = eValue
 End Sub
 
 Private Sub pvSetError(ByVal ErrNumber As Long, Optional ErrSource As String, Optional ErrDescription As String)
@@ -1487,6 +1570,14 @@ Private Function pvFromTextArray(baText() As Byte, Optional ByVal CodePage As Uc
     pvFromTextArray = m_oSocket.FromTextArray(baText, CodePage)
 End Function
 
+Private Function pvToStringAndFree(ByVal lPtr As Long) As Variant
+    If lPtr Then
+        pvToStringAndFree = String$(lstrlenW(lPtr), 0)
+        Call CopyMemory(ByVal StrPtr(pvToStringAndFree), ByVal lPtr, LenB(pvToStringAndFree))
+        Call GlobalFree(lPtr)
+    End If
+End Function
+
 '= buffers ===============================================================
 
 Private Function AsIStream(ByVal pUnk As IUnknown) As IUnknown
@@ -1704,7 +1795,7 @@ End Property
 
 Private Sub m_oSocket_OnResolve(IpAddress As String)
     If m_eState = ucsWaitResolve Then
-        m_eState = ucsWaitConnect
+        pvSetState ucsWaitConnect
     End If
 End Sub
 
@@ -1777,7 +1868,7 @@ Private Sub m_oSocket_OnClose()
         baData = vbNullString
         pvRecvBody baData, m_uResponse, Flush:=True
     End If
-    m_eState = ucsIdle
+    pvSetState ucsIdle
     m_oSocket.Close_
     Exit Sub
 EH:
