@@ -160,6 +160,9 @@ Private Const HDR_USER_AGENT        As String = "User-Agent"
 Private Const HDR_CONTENT_TYPE      As String = "Content-Type"
 Private Const HDR_CONTENT_LENGTH    As String = "Content-Length"
 Private Const HDR_LOCATION          As String = "Location"
+Private Const HDR_CONNECTION        As String = "Connection"
+Private Const HDR_PROXY_AUTH        As String = "Proxy-Authorization"
+Private Const HDR_PROXY_CONNECTION  As String = "Proxy-Connection"
 Private Const HDR_DELIM             As String = vbCrLf & vbCrLf
 Private Const DEF_BUFFER_SIZE       As Long = 256& * 1024
 Private Const DEF_USER_AGENT        As String = "Mozilla/4.0 (compatible; Win32; VbAsyncSocket)"
@@ -214,8 +217,9 @@ Private Type UcsRequestType
     ReceiveTimeout      As Long
     Method              As String
     Remote              As UcsParsedUrl
-    Proxy               As UcsParsedUrl
+    ProxyList()         As UcsParsedUrl
     BypassList          As Variant
+    CurrentProxy        As UcsParsedUrl
     Async               As Boolean
     Headers             As Object
     NumOfRedirects      As Long
@@ -400,10 +404,10 @@ Public Sub Open_(ByVal Method As String, ByVal Url As String, Optional ByVal Asy
         uParsed.Pass = vbNullString
     End If
     With m_uRequest
-        If LCase$(.Proxy.Protocol) = "http" And LCase$(GetResponseHeader("Proxy-Connection")) = "keep-alive" Then
-            '--- keep alive proxy connection
-        ElseIf LenB(.Proxy.Protocol) = 0 And LCase$(GetResponseHeader("Connection")) = "keep-alive" And LCase$(pvFormatHost(.Remote)) = LCase$(pvFormatHost(uParsed)) Then
-            '--- keep alive host connection
+        If LenB(.CurrentProxy.Host) <> 0 And LCase$(GetResponseHeader(HDR_PROXY_CONNECTION)) = "keep-alive" And LCase$(.Remote.Protocol) = "http" Then
+            '--- keep proxy connection alive
+        ElseIf LenB(.CurrentProxy.Host) = 0 And LCase$(GetResponseHeader(HDR_CONNECTION)) = "keep-alive" And LCase$(pvFormatHost(.Remote)) = LCase$(pvFormatHost(uParsed)) Then
+            '--- keep host connection alive
         Else
             m_oSocket.Close_
             Set m_oSocket = pvCreateNewSocket
@@ -416,7 +420,7 @@ Public Sub Open_(ByVal Method As String, ByVal Url As String, Optional ByVal Asy
         SetRequestHeader HDR_HOST, .Remote.Host
         SetRequestHeader HDR_USER_AGENT, m_vOptions(WinHttpRequestOption_UserAgentString)
         If m_vOptions(WinHttpRequestOption_EnableHttp1_1) Then
-            SetRequestHeader "Connection", "Keep-Alive"
+            SetRequestHeader HDR_CONNECTION, "Keep-Alive"
         End If
         SetRequestHeader "Accept", "*/*"
     End With
@@ -489,7 +493,7 @@ Public Sub Send(Optional ByVal Body As Variant)
                 pvSetError m_oSocket.LastError, "m_oSocket.Create"
                 GoTo QH
             End If
-            If Not pvConnectRemote(.Remote, .Proxy, .BypassList) Then
+            If Not pvConnectRemote(m_uRequest) Then
                 pvSetError m_oSocket.LastError, "m_oSocket.Connect"
                 GoTo QH
             End If
@@ -603,7 +607,7 @@ Public Sub SetCredentials(ByVal UserName As String, ByVal Password As String, By
             .Pass = Password
         End With
     Case HTTPREQUEST_SETCREDENTIALS_FOR_PROXY
-        With m_uRequest.Proxy
+        With m_uRequest.CurrentProxy
             .User = UserName
             .Pass = Password
         End With
@@ -618,14 +622,16 @@ Public Sub SetProxy(ByVal ProxySetting As Long, Optional ByVal ProxyServer As Va
     Const HTTPREQUEST_PROXYSETTING_DIRECT As Long = 1
     Const HTTPREQUEST_PROXYSETTING_PROXY As Long = 2
     Const WINHTTP_ACCESS_TYPE_NAMED_PROXY As Long = 3
+    Dim uProxyList()    As UcsParsedUrl
+    Dim vBypassList     As Variant
     Dim uParsed         As UcsParsedUrl
-    Dim vList           As Variant
     Dim uInfo           As WINHTTP_PROXY_INFO
+    Dim vElem           As Variant
+    Dim lSize           As Long
     
     On Error GoTo EH
     m_vLastError = Empty
-    Select Case ProxySetting
-    Case HTTPREQUEST_PROXYSETTING_PRECONFIG
+    If ProxySetting = HTTPREQUEST_PROXYSETTING_PRECONFIG Then
          If WinHttpGetDefaultProxyConfiguration(uInfo) = 0 Then
             pvSetError Err.LastDllError
             GoTo QH
@@ -633,27 +639,44 @@ Public Sub SetProxy(ByVal ProxySetting As Long, Optional ByVal ProxyServer As Va
         ProxyServer = pvToStringAndFree(uInfo.lpszProxy)
         BypassList = pvToStringAndFree(uInfo.lpszProxyBypass)
         If uInfo.dwAccessType = WINHTTP_ACCESS_TYPE_NAMED_PROXY Then
-            GoTo SetProxy
+            ProxySetting = HTTPREQUEST_PROXYSETTING_PROXY
+        Else
+            ProxySetting = HTTPREQUEST_PROXYSETTING_DIRECT
         End If
+    End If
+    Select Case ProxySetting
     Case HTTPREQUEST_PROXYSETTING_DIRECT
         '--- will clear proxy settings
+        ReDim uProxyList(-1 To -1) As UcsParsedUrl
     Case HTTPREQUEST_PROXYSETTING_PROXY
-SetProxy:
-        If Not pvParseUrl(IIf(IsMissing(ProxyServer), vbNullString, ProxyServer), uParsed, "http") Or LenB(uParsed.Host) = 0 Then
-            pvSetError ERROR_WINHTTP_INVALID_URL
-            GoTo QH
-        End If
-        If Not pvIsProtocolSupported(uParsed.Protocol) Then
-            pvSetError ERROR_WINHTTP_UNRECOGNIZED_SCHEME
-            GoTo QH
-        End If
-        vList = Split(IIf(IsMissing(BypassList) Or IsEmpty(BypassList), "<local>", BypassList), ";")
+        '--- comma/semi-colon separated list of [<scheme>=][<scheme>"://"]<server>[":"<port>]
+        For Each vElem In Split(Replace(IIf(IsMissing(ProxyServer), vbNullString, ProxyServer), ",", ";"), ";")
+            vElem = Split(vElem, "=", Limit:=2)
+            If Not pvParseUrl(Trim$(vElem(UBound(vElem))), uParsed, "http") Or LenB(uParsed.Host) = 0 Then
+                pvSetError ERROR_WINHTTP_INVALID_URL
+                GoTo QH
+            End If
+            If Not pvIsProtocolSupported(uParsed.Protocol) Then
+                pvSetError ERROR_WINHTTP_UNRECOGNIZED_SCHEME
+                GoTo QH
+            End If
+            '--- keep proxy's target remote protocol in unused anchor member
+            uParsed.Anchor = IIf(UBound(vElem) > 0, Trim$(vElem(0)), vbNullString)
+            If lSize = 0 Then
+                ReDim uProxyList(0 To lSize) As UcsParsedUrl
+            Else
+                ReDim Preserve uProxyList(0 To lSize) As UcsParsedUrl
+            End If
+            uProxyList(lSize) = uParsed
+            lSize = lSize + 1
+        Next
+        vBypassList = Split(Replace(IIf(IsMissing(BypassList) Or IsEmpty(BypassList), "<local>", BypassList), ",", ";"), ";")
     Case Else
         pvSetError E_NOTIMPL
         GoTo QH
     End Select
-    m_uRequest.Proxy = uParsed
-    m_uRequest.BypassList = vList
+    m_uRequest.ProxyList = uProxyList
+    m_uRequest.BypassList = vBypassList
 QH:
     If IsArray(m_vLastError) Then
         On Error GoTo 0
@@ -709,20 +732,21 @@ Private Function pvSendHeaders(uRequest As UcsRequestType) As Boolean
         .SendBuffer.Size = 0
         .SendBuffer.Pos = 0
         sHttpVersion = "HTTP/1." & -m_vOptions(WinHttpRequestOption_EnableHttp1_1)
-        If LenB(.Proxy.User) <> 0 Or LenB(.Proxy.Pass) <> 0 Then
-            sProxyAuth = vbCrLf & "Proxy-Authorization: Basic " & Replace(ToBase64Array( _
-                pvToTextArray(.Proxy.User & ":" & .Proxy.Pass, ucsScpAcp)), vbCrLf, vbNullString)
+        If LenB(.CurrentProxy.User) <> 0 Or LenB(.CurrentProxy.Pass) <> 0 Then
+            sProxyAuth = "Basic " & Replace(ToBase64Array(pvToTextArray(.CurrentProxy.User & ":" & .CurrentProxy.Pass, ucsScpAcp)), vbCrLf, vbNullString)
         End If
-        If m_eState < ucsWaitSendProxy And LCase$(.Proxy.Protocol) = "https" Then
+        If m_eState < ucsWaitSendProxy And LCase$(.Remote.Protocol) = "https" And LenB(.CurrentProxy.Host) <> 0 Then
             pvBufferWriteArray .SendBuffer, pvToTextArray( _
                 "CONNECT " & .Remote.Host & ":" & .Remote.Port & " " & sHttpVersion & vbCrLf & _
-                "Host: " & .Remote.Host & ":" & .Remote.Port & sProxyAuth & HDR_DELIM, ucsScpAcp)
+                HDR_HOST & ": " & .Remote.Host & ":" & .Remote.Port & IIf(LenB(sProxyAuth) <> 0, vbCrLf & _
+                HDR_PROXY_AUTH & ": " & sProxyAuth, vbNullString) & HDR_DELIM, ucsScpAcp)
             pvSetState ucsWaitSendProxy
         Else
             sRequestLine = .Remote.Path & .Remote.QueryString & .Remote.Anchor & " " & sHttpVersion
-            If LCase$(.Proxy.Protocol) = "http" Then
+            If LCase$(.Remote.Protocol) = "http" And LenB(.CurrentProxy.Host) <> 0 Then
                 sRequestLine = pvFormatHost(.Remote) & sRequestLine & sProxyAuth
-                .Headers.Item("Proxy-Connection") = "Keep-Alive"
+                .Headers.Item(HDR_PROXY_AUTH) = sProxyAuth
+                .Headers.Item(HDR_PROXY_CONNECTION) = "Keep-Alive"
             End If
             pvBufferWriteArray .SendBuffer, pvToTextArray( _
                 .Method & " " & sRequestLine & vbCrLf & _
@@ -865,10 +889,10 @@ Private Function pvRecvHeaders(baData() As Byte, uResponse As UcsResponseType, u
                             GoTo TryDownload
                         End If
                     End If
-                    If LCase$(.Proxy.Protocol) = "http" And LCase$(GetResponseHeader("Proxy-Connection")) = "keep-alive" Then
-                        '--- keep alive proxy connection
-                    ElseIf LenB(.Proxy.Protocol) = 0 And LCase$(GetResponseHeader("Connection")) = "keep-alive" And LCase$(pvFormatHost(.Remote)) = LCase$(pvFormatHost(uRedirect)) Then
-                        '--- keep alive host connection
+                    If LenB(.CurrentProxy.Host) <> 0 And LCase$(GetResponseHeader(HDR_PROXY_CONNECTION)) = "keep-alive" And LCase$(.Remote.Protocol) = "http" Then
+                        '--- keep proxy connection alive
+                    ElseIf LenB(.CurrentProxy.Host) = 0 And LCase$(GetResponseHeader(HDR_CONNECTION)) = "keep-alive" And LCase$(pvFormatHost(.Remote)) = LCase$(pvFormatHost(uRedirect)) Then
+                        '--- keep host connection alive
                     Else
                         m_oSocket.Close_
                         Set m_oSocket = pvCreateNewSocket
@@ -884,7 +908,7 @@ Private Function pvRecvHeaders(baData() As Byte, uResponse As UcsResponseType, u
                             pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.Create"
                             GoTo QH
                         End If
-                        If Not pvConnectRemote(.Remote, .Proxy, .BypassList) Then
+                        If Not pvConnectRemote(uRequest) Then
                             pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.Connect"
                             GoTo QH
                         End If
@@ -1001,7 +1025,7 @@ Private Function pvRecvBody(baData() As Byte, uResponse As UcsResponseType, Opti
             End If
         End If
         If Flush Then
-            If .ContentEncoding = "gzip" Then
+            If .ContentEncoding = "gzip" And Not .Stream Is Nothing Then
                 hResult = IStream_Seek(.Stream, 0, STREAM_SEEK_SET)
                 If hResult < 0 Then
                     pvSetError hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "IStream_Seek(STREAM_SEEK_SET)"
@@ -1090,29 +1114,55 @@ Private Function pvGetAsyncSocket() As cAsyncSocket
     #End If
 End Function
 
-Private Function pvConnectRemote(uRemote As UcsParsedUrl, uProxy As UcsParsedUrl, vBypassList As Variant) As Boolean
+Private Function pvConnectRemote(uRequest As UcsRequestType) As Boolean
+    Const FUNC_NAME     As String = "pvConnectRemote"
+    Dim lIdx            As Long
+    
+    With uRequest
+        .CurrentProxy.Host = vbNullString
+        For lIdx = 0 To UBound(.ProxyList)
+            If LenB(.ProxyList(lIdx).Host) <> 0 Then
+                If (LCase$(.ProxyList(lIdx).Anchor) = LCase$(.Remote.Protocol) Or LenB(.ProxyList(lIdx).Anchor) = 0) Then
+                    If Not pvMatchBypassList(.Remote, .BypassList) Then
+                        .CurrentProxy.Protocol = .ProxyList(lIdx).Protocol
+                        .CurrentProxy.Host = .ProxyList(lIdx).Host
+                        .CurrentProxy.Port = .ProxyList(lIdx).Port
+                    Else
+                        #If ImplUseDebugLog Then
+                            DebugLog MODULE_NAME, FUNC_NAME, "Bypass proxy for " & pvFormatHost(.Remote)
+                        #End If
+                    End If
+                    Exit For
+                End If
+            End If
+        Next
+        If LenB(.CurrentProxy.Host) <> 0 Then
+            #If ImplUseTls Then
+                pvConnectRemote = m_oSocket.Connect(.CurrentProxy.Host, .CurrentProxy.Port, UseTls:=pvIsProtocolSecure(.CurrentProxy.Protocol), _
+                    LocalFeatures:=ucsTlsSupportAll Or ucsTlsIgnoreServerCertificateErrors Or ucsTlsIgnoreServerCertificateRevocation)
+            #Else
+                pvConnectRemote = m_oSocket.Connect(.CurrentProxy.Host, .CurrentProxy.Port)
+            #End If
+        Else
+            #If ImplUseTls Then
+                pvConnectRemote = m_oSocket.Connect(.Remote.Host, .Remote.Port, UseTls:=pvIsProtocolSecure(.Remote.Protocol), LocalFeatures:=pvLocalFeatures)
+            #Else
+                pvConnectRemote = m_oSocket.Connect(.Remote.Host, .Remote.Port)
+            #End If
+        End If
+    End With
+End Function
+
+Private Function pvMatchBypassList(uRemote As UcsParsedUrl, vBypassList As Variant) As Boolean
     Dim vElem           As Variant
     
-    If LenB(uProxy.Host) <> 0 Then
-        If IsArray(vBypassList) Then
-            For Each vElem In vBypassList
-                If pvMatchRemote(uRemote, LCase$(vElem)) Then
-                    #If ImplUseDebugLog Then
-                        DebugLog MODULE_NAME, "pvConnectRemote", "Bypass proxy for " & pvFormatHost(uRemote)
-                    #End If
-                    GoTo DirectConnect
-                End If
-            Next
-        End If
-        '--- always use unencrypted socket because https proxies use StartTls
-        pvConnectRemote = m_oSocket.Connect(uProxy.Host, uProxy.Port, UseTls:=False)
-    Else
-DirectConnect:
-        #If ImplUseTls Then
-            pvConnectRemote = m_oSocket.Connect(uRemote.Host, uRemote.Port, UseTls:=pvIsProtocolSecure(uRemote.Protocol), LocalFeatures:=pvLocalFeatures)
-        #Else
-            pvConnectRemote = m_oSocket.Connect(uRemote.Host, uRemote.Port)
-        #End If
+    If IsArray(vBypassList) Then
+        For Each vElem In vBypassList
+            If pvMatchRemote(uRemote, LCase$(vElem)) Then
+                pvMatchBypassList = True
+                Exit For
+            End If
+        Next
     End If
 End Function
 
@@ -1832,7 +1882,9 @@ Private Sub m_oSocket_OnReceive()
         If m_uResponse.BytesProgress >= m_uResponse.ContentLength And m_uResponse.ContentLength >= 0 Then
             GoTo QH
         End If
-        pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.ReceiveArray"
+        If m_oSocket.LastError <> 0 Then
+            pvSetError m_oSocket.LastError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "m_oSocket.ReceiveArray"
+        End If
         GoTo QH
     End If
     If UBound(baData) < 0 Then
@@ -1953,6 +2005,7 @@ Private Sub Class_Initialize()
     m_uRequest.Headers.CompareMode = vbTextCompare
     Set m_uResponse.Headers = CreateObject("Scripting.Dictionary")
     m_uResponse.Headers.CompareMode = vbTextCompare
+    ReDim m_uRequest.ProxyList(-1 To -1) As UcsParsedUrl
 End Sub
 
 Private Sub Class_Terminate()
