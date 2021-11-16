@@ -13,7 +13,7 @@ Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
 '
-' VbAsyncSocket Project (c) 2018-2020 by wqweto@gmail.com
+' VbAsyncSocket Project (c) 2018-2021 by wqweto@gmail.com
 '
 ' Simple and thin WinSock API wrappers for VB6
 '
@@ -789,6 +789,9 @@ Public Function Receive( _
             ByVal BufLen As Long, _
             Optional HostAddress As String = STR_CHR1, _
             Optional HostPort As Long) As Long
+    Const FUNC_NAME     As String = "Receive"
+    
+    On Error GoTo EH
     If m_bUseTls Then
         If m_lRecvPos = 0 Then
             If TlsIsClosed(m_uCtx) Then
@@ -799,15 +802,15 @@ Public Function Receive( _
             End If
         End If
         If m_lRecvPos > 0 Then
-            If UBound(m_baRecvBuffer) + 1 <= BufLen Then
-                Receive = UBound(m_baRecvBuffer) + 1
+            If m_lRecvPos <= BufLen Then
+                Receive = m_lRecvPos
                 Call CopyMemory(ByVal BufPtr, m_baRecvBuffer(0), Receive)
                 Erase m_baRecvBuffer
                 m_lRecvPos = 0
             Else
                 Receive = BufLen
                 Call CopyMemory(ByVal BufPtr, m_baRecvBuffer(0), Receive)
-                m_lRecvPos = UBound(m_baRecvBuffer) + 1 - BufLen
+                m_lRecvPos = m_lRecvPos - BufLen
                 Call CopyMemory(m_baRecvBuffer(0), m_baRecvBuffer(BufLen), m_lRecvPos)
             End If
         End If
@@ -815,6 +818,10 @@ Public Function Receive( _
         Receive = m_oSocket.Receive(BufPtr, BufLen, HostAddress, HostPort)
     End If
 QH:
+    Exit Function
+EH:
+    PrintError FUNC_NAME
+    Resume QH
 End Function
 
 Public Function SendText( _
