@@ -326,12 +326,13 @@ Public Property Get SocketHandle() As Long
     SocketHandle = m_hSocket
 End Property
 
-Public Property Get LastError() As Long
-    LastError = m_lLastError
-End Property
-
-Friend Property Let frLastError(ByVal lValue As Long)
-    m_lLastError = lValue
+Public Property Get LastError() As VBA.ErrObject
+    Set LastError = Err
+    With LastError
+        .Description = GetErrorDescription(m_lLastError)
+        .Number = m_lLastError
+        .Source = "cAsyncSocket"
+    End With
 End Property
 
 Public Property Get SockOpt(ByVal OptionName As UcsAsyncSocketOptionNameEnum, Optional ByVal Level As UcsAsyncSocketOptionLevelEnum = ucsSolSocket) As Long
@@ -945,6 +946,10 @@ Public Sub PostEvent(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Optional By
     Exit Sub
 EH:
     PrintError FUNC_NAME
+End Sub
+
+Public Sub SetLastError(ByVal lValue As Long)
+    m_lLastError = lValue
 End Sub
 
 '= static helpers ========================================================
