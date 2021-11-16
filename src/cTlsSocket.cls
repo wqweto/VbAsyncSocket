@@ -687,6 +687,7 @@ Public Function StartTls( _
         GoTo QH
     End If
     If Not bResult Then
+        RaiseEvent OnError(LastError.Number, ucsSfdConnect)
         GoTo QH
     End If
     '--- success

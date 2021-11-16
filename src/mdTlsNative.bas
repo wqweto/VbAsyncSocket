@@ -27,12 +27,14 @@ Private Const UNISP_NAME                                As String = "Microsoft U
 Private Const SECPKG_CRED_INBOUND                       As Long = 1
 Private Const SECPKG_CRED_OUTBOUND                      As Long = 2
 Private Const SCHANNEL_CRED_VERSION                     As Long = 4
+Private Const SCH_CREDENTIALS_VERSION                   As Long = 5
 Private Const SP_PROT_TLS1_0                            As Long = &H40 Or &H80
 Private Const SP_PROT_TLS1_1                            As Long = &H100 Or &H200
 Private Const SP_PROT_TLS1_2                            As Long = &H400 Or &H800
 Private Const SP_PROT_TLS1_3                            As Long = &H1000 Or &H2000
 Private Const SCH_CRED_MANUAL_CRED_VALIDATION           As Long = 8
 Private Const SCH_CRED_NO_DEFAULT_CREDS                 As Long = &H10
+Private Const SCH_USE_STRONG_CRYPTO                     As Long = &H400000
 '-- for InitializeSecurityContext
 Private Const ISC_REQ_REPLAY_DETECT                     As Long = &H4
 Private Const ISC_REQ_SEQUENCE_DETECT                   As Long = &H8
@@ -169,6 +171,44 @@ Private Type SCHANNEL_CRED
     dwSessionLifespan       As Long
     dwFlags                 As Long
     dwCredFormat            As Long
+End Type
+
+Private Type SCH_CREDENTIALS
+    dwVersion               As Long
+    dwCredFormat            As Long
+    cCreds                  As Long
+    paCred                  As Long
+    hRootStore              As Long
+    cMappers                As Long
+    aphMappers              As Long
+    dwSessionLifespan       As Long
+    dwFlags                 As Long
+    cTlsParameters          As Long
+    pTlsParameters          As Long
+End Type
+
+Private Type TLS_PARAMETERS
+    cAlpnIds                As Long
+    rgstrAlpnIds            As Long
+    grbitDisabledProtocols  As Long
+    cDisabledCrypto         As Long
+    pDisabledCrypto         As Long
+    dwFlags                 As Long
+End Type
+
+Private Type UNICODE_STRING
+    Length                  As Integer
+    MaximumLength           As Integer
+    Buffer                  As Long
+End Type
+
+Private Type CRYPTO_SETTINGS
+    eAlgorithmUsage         As Long
+    strCngAlgId             As UNICODE_STRING
+    cChainingModes          As Long
+    rgstrChainingModes      As Long
+    dwMinBitLength          As Long
+    dwMaxBitLength          As Long
 End Type
 
 Private Type ApiSecBuffer
@@ -499,7 +539,13 @@ End Function
 
 Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize As Long, baOutput() As Byte, lOutputPos As Long) As Boolean
     Const FUNC_NAME     As String = "TlsHandshake"
+    Const TlsParametersCngAlgUsageCipher As Long = 2
+    Const BCRYPT_CHACHA20_POLY1305_ALGORITHM As String = "CHACHA20_POLY1305"
+    Const sizeof_BCRYPT_CHACHA20_POLY1305_ALGORITHM As Long = 36
     Dim uCred           As SCHANNEL_CRED
+    Dim uNewCred        As SCH_CREDENTIALS
+    Dim uNewParams      As TLS_PARAMETERS
+    Dim uNewSettings    As CRYPTO_SETTINGS
     Dim lContextAttr    As Long
     Dim hResult         As Long
     Dim lIdx            As Long
@@ -507,7 +553,7 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
     Dim oCallback       As Object
     Dim hMemStore       As Long
     Dim pCertContext    As Long
-    Dim aCred(0 To 100) As Long
+    Dim aCred(0 To 0)   As Long
     Dim uIssuerInfo     As SecPkgContext_IssuerListInfoEx
     Dim uIssuerList()   As CRYPT_BLOB_DATA
     Dim cIssuers        As Collection
@@ -556,24 +602,40 @@ RetryCredentials:
             uCred.dwFlags = uCred.dwFlags Or SCH_CRED_NO_DEFAULT_CREDS          ' Prevent Schannel from attempting to automatically supply a certificate chain for client authentication.
             If pvCollectionCount(.LocalCertificates) > 0 Then
                 If pvTlsImportToCertStore(.LocalCertificates, .LocalPrivateKey, hMemStore) Then
-                    Do
-                        pCertContext = CertEnumCertificatesInStore(hMemStore, pCertContext)
-                        If pCertContext = 0 Then
-                            Exit Do
-                        End If
+                    pCertContext = CertEnumCertificatesInStore(hMemStore, pCertContext)
+                    If pCertContext <> 0 Then
                         aCred(uCred.cCreds) = CertDuplicateCertificateContext(pCertContext)
                         uCred.cCreds = uCred.cCreds + 1
-'                        If Not .IsServer Then
-                            Call CertFreeCertificateContext(pCertContext)
-                            Exit Do
-'                        End If
-                    Loop
+                        Call CertFreeCertificateContext(pCertContext)
+                    End If
                     Call CertCloseStore(hMemStore, 0)
                     uCred.paCred = VarPtr(aCred(0))
                     .ContextReq = .ContextReq Or ISC_REQ_USE_SUPPLIED_CREDS     ' Schannel must not attempt to supply credentials for the client automatically.
                 End If
             End If
-            hResult = AcquireCredentialsHandle(0, UNISP_NAME, IIf(.IsServer, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND), 0, uCred, 0, 0, .hTlsCredentials, 0)
+            If RealOsVersion(BuildNo:=lIdx) = ucsOsvWin10 And lIdx >= 22000 Then   '--- win11
+                '--- use new credentials struct for TLS 1.3 support
+                uNewCred.dwVersion = SCH_CREDENTIALS_VERSION
+                uNewCred.cCreds = uCred.cCreds
+                uNewCred.paCred = uCred.paCred
+                uNewCred.dwFlags = uCred.dwFlags Or SCH_USE_STRONG_CRYPTO
+                uNewCred.cTlsParameters = 1
+                uNewCred.pTlsParameters = VarPtr(uNewParams)
+                uNewParams.grbitDisabledProtocols = Not uCred.grbitEnabledProtocols
+                '--- disallow TLS_CHACHA20_POLY1305_SHA256 cipher (unsupported in Win11 build 22000)
+                uNewParams.cDisabledCrypto = 1
+                uNewParams.pDisabledCrypto = VarPtr(uNewSettings)
+                uNewSettings.eAlgorithmUsage = TlsParametersCngAlgUsageCipher
+                uNewSettings.strCngAlgId.Length = sizeof_BCRYPT_CHACHA20_POLY1305_ALGORITHM
+                uNewSettings.strCngAlgId.MaximumLength = sizeof_BCRYPT_CHACHA20_POLY1305_ALGORITHM
+                uNewSettings.strCngAlgId.Buffer = StrPtr(BCRYPT_CHACHA20_POLY1305_ALGORITHM)
+                hResult = AcquireCredentialsHandle(0, UNISP_NAME, IIf(.IsServer, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND), 0, uNewCred, 0, 0, .hTlsCredentials, 0)
+            Else
+                hResult = -1
+            End If
+            If hResult < 0 Then
+                hResult = AcquireCredentialsHandle(0, UNISP_NAME, IIf(.IsServer, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND), 0, uCred, 0, 0, .hTlsCredentials, 0)
+            End If
             If hResult < 0 Then
                 pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "AcquireCredentialsHandle", AlertCode:=.LastAlertCode
                 GoTo QH
@@ -667,7 +729,9 @@ RetryCredentials:
                 Case SEC_I_CONTINUE_NEEDED
                     '--- do nothing
                 Case SEC_E_OK
-                    If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_STREAM_SIZES, .TlsSizes) <> 0 Then
+                    hResult = QueryContextAttributes(.hTlsContext, SECPKG_ATTR_STREAM_SIZES, .TlsSizes)
+                    If hResult < 0 Then
+                        pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "QueryContextAttributes(SECPKG_ATTR_STREAM_SIZES)", AlertCode:=.LastAlertCode
                         GoTo QH
                     End If
                     pvInitSecDesc .InDesc, .TlsSizes.cBuffers, .InBuffers
@@ -704,7 +768,9 @@ RetryCredentials:
                     Exit Do
                 Case SEC_I_INCOMPLETE_CREDENTIALS
                     If .OnClientCertificate <> 0 Then
-                        If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_ISSUER_LIST_EX, uIssuerInfo) <> 0 Then
+                        hResult = QueryContextAttributes(.hTlsContext, SECPKG_ATTR_ISSUER_LIST_EX, uIssuerInfo)
+                        If hResult < 0 Then
+                            pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "QueryContextAttributes(SECPKG_ATTR_ISSUER_LIST_EX)", AlertCode:=.LastAlertCode
                             GoTo QH
                         End If
                         If uIssuerInfo.cIssuers > 0 Then
@@ -721,14 +787,11 @@ RetryCredentials:
                         If oCallback.FireOnClientCertificate(cIssuers) Then
                             Call FreeCredentialsHandle(.hTlsCredentials)
                             .hTlsCredentials = 0
-                            GoTo RetryCredentials
                         End If
                     ElseIf (.ContextReq And ISC_REQ_USE_SUPPLIED_CREDS) = 0 Then
                         .ContextReq = .ContextReq Or ISC_REQ_USE_SUPPLIED_CREDS
-                        GoTo RetryCredentials
                     End If
-                    pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME, AlertCode:=.LastAlertCode
-                    GoTo QH
+                    GoTo RetryCredentials
                 Case SEC_I_CONTEXT_EXPIRED
                     .State = ucsTlsStateShutdown
                     Exit Do
@@ -824,7 +887,6 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
                 If Not TlsHandshake(uCtx, baEmpty, 0, baOutput, lOutputPos) Then
                     GoTo QH
                 End If
-                Exit Do
             Case SEC_I_CONTEXT_EXPIRED
                 .State = ucsTlsStateShutdown
                 Exit Do
@@ -833,6 +895,9 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
                     Replace(Replace(ERR_UNEXPECTED_RESULT, "%1", "DecryptMessage"), "%2", "&H" & Hex$(hResult))
                 GoTo QH
             End Select
+            If .RecvPos = 0 Then
+                Exit Do
+            End If
         Loop
     End With
     '--- success
@@ -1333,7 +1398,7 @@ End Function
 
 Private Function pvTlsExportFromCertStore(ByVal hCertStore As Long, cCerts As Collection) As Boolean
     Const FUNC_NAME     As String = "pvTlsExportFromCertStore"
-    Dim uCertContext        As CERT_CONTEXT
+    Dim uCertContext    As CERT_CONTEXT
     Dim baCert()        As Byte
     Dim pCertContext    As Long
 
@@ -1651,8 +1716,9 @@ Private Function SplitOrReindex(Expression As String, Delimiter As String) As Va
     End If
 End Function
 
-Private Property Get RealOsVersion() As UcsOsVersionEnum
+Private Property Get RealOsVersion(Optional BuildNo As Long) As UcsOsVersionEnum
     Static lVersion     As Long
+    Static lBuildNo     As Long
     Dim baBuffer()      As Byte
     Dim lPtr            As Long
     Dim lSize           As Long
@@ -1664,8 +1730,10 @@ Private Property Get RealOsVersion() As UcsOsVersionEnum
         Call VerQueryValue(baBuffer(0), "\", lPtr, lSize)
         Call CopyMemory(aVer(0), ByVal lPtr, 20)
         lVersion = aVer(9) * 100 + aVer(8)
+        lBuildNo = aVer(7)
     End If
     RealOsVersion = lVersion
+    BuildNo = lBuildNo
 End Property
 
 Private Function GetSystemMessage(ByVal lLastDllError As Long) As String
