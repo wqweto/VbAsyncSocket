@@ -358,6 +358,7 @@ Private Property Get pvAddressOfReaderCallback() As cHttpRequest
     Set pvAddressOfReaderCallback = InitAddressOfMethod(Me, 3)
 End Property
 
+#If ImplUseTls Then
 Private Property Get pvLocalFeatures() As UcsTlsLocalFeaturesEnum
     Dim eProt           As WinHttpRequestSecureProtocols
         
@@ -377,6 +378,7 @@ Private Property Get pvLocalFeatures() As UcsTlsLocalFeaturesEnum
         pvLocalFeatures = pvLocalFeatures Or ucsTlsIgnoreServerCertificateRevocation
     End If
 End Property
+#End If
 
 '=========================================================================
 ' Methods
@@ -744,9 +746,9 @@ Private Function pvSendHeaders(uRequest As UcsRequestType) As Boolean
         Else
             sRequestLine = .Remote.Path & .Remote.QueryString & .Remote.Anchor & " " & sHttpVersion
             If LCase$(.Remote.Protocol) = "http" And LenB(.CurrentProxy.Host) <> 0 Then
-                sRequestLine = pvFormatHost(.Remote) & sRequestLine & sProxyAuth
-                .Headers.Item(HDR_PROXY_AUTH) = sProxyAuth
-                .Headers.Item(HDR_PROXY_CONNECTION) = "Keep-Alive"
+                sRequestLine = pvFormatHost(.Remote) & sRequestLine
+                SetRequestHeader HDR_PROXY_AUTH, sProxyAuth
+                SetRequestHeader HDR_PROXY_CONNECTION, "Keep-Alive"
             End If
             pvBufferWriteArray .SendBuffer, pvToTextArray( _
                 .Method & " " & sRequestLine & vbCrLf & _
@@ -921,9 +923,18 @@ Private Function pvRecvHeaders(baData() As Byte, uResponse As UcsResponseType, u
 TryDownload:
                 If m_eState = ucsWaitRecvProxy Then
                     If .Status >= 200 And .Status <= 299 Then
-                        If pvIsProtocolSecure(uRequest.Remote.Protocol) Then
-                            m_oSocket.StartTls uRequest.Remote.Host, pvLocalFeatures
-                        End If
+                        #If ImplUseTls Then
+                            If pvIsProtocolSecure(uRequest.Remote.Protocol) Then
+                                If pvIsProtocolSecure(uRequest.CurrentProxy.Protocol) Then
+                                    Dim oBaseSocket As cTlsSocket
+                                    Set oBaseSocket = m_oSocket
+                                    Set m_oSocket = pvCreateNewSocket
+                                    Set m_oSocket.Socket = oBaseSocket
+                                    Set oBaseSocket.CallbackWeakRef = m_oSocket
+                                End If
+                                m_oSocket.StartTls uRequest.Remote.Host, pvLocalFeatures
+                            End If
+                        #End If
                         pvResetResponse uResponse
                         pvSendHeaders uRequest
                     End If
@@ -1106,11 +1117,11 @@ Private Function pvCreateNewSocket() As Object
     #End If
 End Function
 
-Private Function pvGetAsyncSocket() As cAsyncSocket
+Private Function pvGetBaseSocket() As Object
     #If ImplUseTls Then
-        Set pvGetAsyncSocket = m_oSocket.Socket
+        Set pvGetBaseSocket = m_oSocket.Socket
     #Else
-        Set pvGetAsyncSocket = m_oSocket
+        Set pvGetBaseSocket = m_oSocket
     #End If
 End Function
 
@@ -1127,6 +1138,10 @@ Private Function pvConnectRemote(uRequest As UcsRequestType) As Boolean
                         .CurrentProxy.Protocol = .ProxyList(lIdx).Protocol
                         .CurrentProxy.Host = .ProxyList(lIdx).Host
                         .CurrentProxy.Port = .ProxyList(lIdx).Port
+                        If LenB(.ProxyList(lIdx).User) <> 0 Or LenB(.ProxyList(lIdx).Pass) <> 0 Then
+                            .CurrentProxy.User = .ProxyList(lIdx).User
+                            .CurrentProxy.Pass = .ProxyList(lIdx).Pass
+                        End If
                     Else
                         #If ImplUseDebugLog Then
                             DebugLog MODULE_NAME, FUNC_NAME, "Bypass proxy for " & pvFormatHost(.Remote)
@@ -1206,14 +1221,22 @@ Private Function pvIsProtocolSecure(sProtocol As String) As Boolean
 End Function
 
 Private Function pvFormatHost(uRemote As UcsParsedUrl) As String
-    pvFormatHost = uRemote.Protocol & "://" & uRemote.Host & ":" & uRemote.Port
+    Dim lDefPort        As Long
+    
+    Select Case LCase$(uRemote.Protocol)
+    Case "http"
+        lDefPort = 80
+    Case "https"
+        lDefPort = 433
+    End Select
+    pvFormatHost = uRemote.Protocol & "://" & uRemote.Host & IIf(uRemote.Port <> lDefPort, ":" & uRemote.Port, vbNullString)
 End Function
 
 Private Sub pvDrainKeepAlive()
     Dim baData()        As Byte
     Dim lTotal          As Long
     
-    With pvGetAsyncSocket
+    With pvGetBaseSocket
         .ReceiveArray baData
         lTotal = pvArraySize(baData)
         If lTotal > 0 Then
@@ -1240,8 +1263,8 @@ Private Function pvWaitForState(ByVal eState As UcsStateEnum, ByVal Timeout As L
                 GoTo QH
             End If
         End If
-        '-- note: call pvGetAsyncSocket on each iteration because socket instance might change on redirect
-        With pvGetAsyncSocket
+        '--- note: call pvGetBaseSocket on each iteration because socket instance might change on redirect
+        With pvGetBaseSocket
             If .HasPendingResolve Then
                 If Not .SyncWaitForEvent(lRemaining, [_ucsSfdResolve]) Then
                     GoTo QH

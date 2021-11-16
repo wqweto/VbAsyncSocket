@@ -210,8 +210,10 @@ Private Sub Command2_Click()
     m_oRequest.SetTimeouts 5000, 5000, 5000, 5000
     m_oRequest.Option_(WinHttpRequestOption_EnableHttpsToHttpRedirects) = True
 '    m_oRequest.SetProxy 0
-'    m_oRequest.SetProxy 2, "https://ucsgate:3128" ' , "*.unicontsoft.com"
-    m_oRequest.Open_ "GET", IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://unicontsoft.com/bg/download.html"
+'    m_oRequest.SetProxy 2, "http=ucsgate:3128;https=https://ucsgate:3129" ' , "*.unicontsoft.com"
+'    m_oRequest.SetProxy 2, "https://ucsgate:3129"
+'    m_oRequest.SetProxy 2, "http://ipbbbtvy:wqi9dnt558ex@209.127.191.180:9279"
+    m_oRequest.Open_ "GET", IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://www.unicontsoft.com/bg/download.html"
     m_oRequest.SetRequestHeader "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.69 Safari/537.36"
     m_oRequest.SetRequestHeader "Accept-Encoding", "gzip"
     m_oRequest.Send

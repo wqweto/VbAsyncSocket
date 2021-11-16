@@ -7,6 +7,7 @@ Class=cHttpDownload; ..\..\contrib\cHttpDownload.cls
 Class=cRateLimiter; ..\..\contrib\cRateLimiter.cls
 Class=cTlsSocket; ..\..\src\cTlsSocket.cls
 Module=mdTlsNative; ..\..\src\mdTlsNative.bas
+Class=cHttpRequest; ..\..\contrib\cHttpRequest.cls
 IconForm="Form1"
 Startup="Form1"
 HelpFile=""
