@@ -393,8 +393,7 @@ Private m_lRecvPos              As Long
 Private m_baSendBuffer()        As Byte
 Private m_lSendPos              As Long
 Private m_lCallbackPtr          As Long
-Private m_bHasReceiveEvent      As Boolean
-Private m_bHasSendEvent         As Boolean
+Private m_eRaisedEvent          As UcsAsyncSocketEventMaskEnum
 
 #If Not ImplUseShared Then
 Private Enum UcsOsVersionEnum
@@ -448,22 +447,13 @@ Public Property Get LastError() As VBA.ErrObject
         If LenB(.Description) <> 0 And lErrNumber <> 0 Then
             .Number = lErrNumber
             .Source = sErrSource
-        ElseIf m_oSocket.LastError <> 0 And Not m_oSocket.HasPendingEvent Then
-            .Description = m_oSocket.GetErrorDescription(m_oSocket.LastError)
-            .Number = m_oSocket.LastError
-            .Source = "cAsyncSocket"
-        Else
+        ElseIf m_oSocket.HasPendingEvent Then
             .Number = 0
-            .Source = sErrSource
+        Else
+            Set LastError = m_oSocket.LastError
         End If
     End With
 End Property
-
-Private Function pvSetLastError(sError As String, sErrSource As String)
-    m_uCtx.LastErrNumber = vbObjectError
-    m_uCtx.LastError = sError
-    m_uCtx.LastErrSource = sErrSource
-End Function
 
 Public Property Get IsClosed() As Boolean
     If m_bUseTls Then
@@ -1249,31 +1239,13 @@ Public Function SyncWaitForEvent( _
     Dim lElapsed        As Long
     
     On Error GoTo EH
-    If (EventMask And ucsSfdConnect) <> 0 Then
-        If TlsIsReady(m_uCtx) Then
-            EventMask = EventMask And Not ucsSfdConnect
-        End If
-    End If
     If m_bUseTls And (EventMask And LNG_MASK) <> 0 Then
         dblTimer = TimerEx
         m_oSocket.SyncProcessMsgQueue
         Do
-            If (EventMask And ucsSfdConnect) <> 0 Then
-                If TlsIsReady(m_uCtx) Then
-                    Exit Do
-                End If
-            End If
-            If (EventMask And ucsSfdRead) <> 0 Then
-                If m_bHasReceiveEvent Then
-                    m_bHasReceiveEvent = False
-                    Exit Do
-                End If
-            End If
-            If (EventMask And ucsSfdWrite) <> 0 Then
-                If m_bHasSendEvent Then
-                    m_bHasSendEvent = False
-                    Exit Do
-                End If
+            If (m_eRaisedEvent And EventMask) <> 0 Then
+                m_eRaisedEvent = 0
+                Exit Do
             End If
             If TlsIsClosed(m_uCtx) Then
                 GoTo QH
@@ -1467,105 +1439,147 @@ EH:
     Resume QH
 End Function
 
+Private Function pvSetLastError(sError As String, sErrSource As String)
+    m_uCtx.LastErrNumber = vbObjectError
+    m_uCtx.LastError = sError
+    m_uCtx.LastErrSource = sErrSource
+End Function
+
 Private Sub pvFireOnResolve(IpAddress As String)
+    Dim oCallback       As Object
+    
+    Set oCallback = CallbackWeakRef
+    m_eRaisedEvent = m_eRaisedEvent Or [_ucsSfdResolve]
     RaiseEvent OnResolve(IpAddress)
-    If m_lCallbackPtr <> 0 Then
+    If Not oCallback Is Nothing Then
         On Error Resume Next
-        Call CallbackWeakRef.NotifyOnResolve(IpAddress)
+        Call oCallback.NotifyOnResolve(IpAddress)
         On Error GoTo 0
     End If
 End Sub
 
 Private Sub pvFireOnAccept()
+    Dim oCallback       As Object
+    
+    Set oCallback = CallbackWeakRef
     RaiseEvent OnAccept
-    If m_lCallbackPtr <> 0 Then
+    If Not oCallback Is Nothing Then
         On Error Resume Next
-        Call CallbackWeakRef.NotifyOnAccept
+        Call oCallback.NotifyOnAccept
         On Error GoTo 0
     End If
 End Sub
 
 Private Sub pvFireOnClose()
+    Dim oCallback       As Object
+    
+    Set oCallback = CallbackWeakRef
+    m_eRaisedEvent = m_eRaisedEvent Or ucsSfdClose
     RaiseEvent OnClose
-    If m_lCallbackPtr <> 0 Then
+    If Not oCallback Is Nothing Then
         On Error Resume Next
-        Call CallbackWeakRef.NotifyOnClose
+        Call oCallback.NotifyOnClose
         On Error GoTo 0
     End If
 End Sub
 
 Private Sub pvFireOnConnect()
+    Dim oCallback       As Object
+    
+    Set oCallback = CallbackWeakRef
+    m_eRaisedEvent = m_eRaisedEvent Or ucsSfdConnect
     RaiseEvent OnConnect
-    If m_lCallbackPtr <> 0 Then
+    If Not oCallback Is Nothing Then
         On Error Resume Next
-        Call CallbackWeakRef.NotifyOnConnect
+        Call oCallback.NotifyOnConnect
         On Error GoTo 0
     End If
 End Sub
 
 Private Sub pvFireOnReceive()
-    m_bHasReceiveEvent = True
+    Dim oCallback       As Object
+    
+    Set oCallback = CallbackWeakRef
+    m_eRaisedEvent = m_eRaisedEvent Or ucsSfdRead
     RaiseEvent OnReceive
-    If m_lCallbackPtr <> 0 Then
+    If Not oCallback Is Nothing Then
         On Error Resume Next
-        Call CallbackWeakRef.NotifyOnReceive
+        Call oCallback.NotifyOnReceive
         On Error GoTo 0
     End If
 End Sub
 
 Private Sub pvFireOnSend()
-    m_bHasSendEvent = True
+    Dim oCallback       As Object
+    
+    Set oCallback = CallbackWeakRef
+    m_eRaisedEvent = m_eRaisedEvent Or ucsSfdWrite
     RaiseEvent OnSend
-    If m_lCallbackPtr <> 0 Then
+    If Not oCallback Is Nothing Then
         On Error Resume Next
-        Call CallbackWeakRef.NotifyOnSend
+        Call oCallback.NotifyOnSend
         On Error GoTo 0
     End If
 End Sub
 
 Private Sub pvFireOnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
+    Dim oCallback       As Object
+    
+    Set oCallback = CallbackWeakRef
     RaiseEvent OnError(ErrorCode, EventMask)
-    If m_lCallbackPtr <> 0 Then
+    If Not oCallback Is Nothing Then
         On Error Resume Next
-        Call CallbackWeakRef.NotifyOnError(ErrorCode, EventMask)
+        Call oCallback.NotifyOnError(ErrorCode, EventMask)
         On Error GoTo 0
     End If
 End Sub
 
 Private Sub pvFireOnMessagePending(Handled As Boolean)
+    Dim oCallback       As Object
+    
+    Set oCallback = CallbackWeakRef
     RaiseEvent OnMessagePending(Handled)
-    If m_lCallbackPtr <> 0 Then
+    If Not oCallback Is Nothing Then
         On Error Resume Next
-        Call CallbackWeakRef.NotifyOnMessagePending(Handled)
+        Call oCallback.NotifyOnMessagePending(Handled)
         On Error GoTo 0
     End If
 End Sub
 
 Private Function pvFireBeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum) As Boolean
+    Dim oCallback       As Object
+    
+    Set oCallback = CallbackWeakRef
     RaiseEvent BeforeNotify(EventMask, pvFireBeforeNotify)
-    If m_lCallbackPtr <> 0 Then
+    If Not oCallback Is Nothing Then
         On Error Resume Next
-        Call CallbackWeakRef.NotifyBeforeNotify(EventMask, pvFireBeforeNotify)
+        Call oCallback.NotifyBeforeNotify(EventMask, pvFireBeforeNotify)
         On Error GoTo 0
     End If
     pvFireBeforeNotify = Not pvFireBeforeNotify
 End Function
 
 Private Sub pvFireAfterNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum)
+    Dim oCallback       As Object
+    
+    Set oCallback = CallbackWeakRef
     RaiseEvent AfterNotify(EventMask)
-    If m_lCallbackPtr <> 0 Then
+    If Not oCallback Is Nothing Then
         On Error Resume Next
-        Call CallbackWeakRef.NotifyAfterNotify(EventMask)
+        Call oCallback.NotifyAfterNotify(EventMask)
         On Error GoTo 0
     End If
 End Sub
 
 Public Function FireOnClientCertificate(CertRequestCaDn As Collection) As Boolean
 Attribute FireOnClientCertificate.VB_MemberFlags = "40"
+    Dim oCallback       As Object
+    
+    Set oCallback = CallbackWeakRef
     RaiseEvent OnClientCertificate(CertRequestCaDn, FireOnClientCertificate)
-    If m_lCallbackPtr <> 0 Then
+    If Not oCallback Is Nothing Then
         On Error Resume Next
-        Call CallbackWeakRef.NotifyOnClientCertificate(CertRequestCaDn, FireOnClientCertificate)
+        Call oCallback.NotifyOnClientCertificate(CertRequestCaDn, FireOnClientCertificate)
         On Error GoTo 0
     End If
 End Function
