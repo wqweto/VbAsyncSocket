@@ -15,6 +15,7 @@ Private Const MODULE_NAME As String = "mdTlsNative"
 
 #Const ImplUseShared = (ASYNCSOCKET_USE_SHARED <> 0)
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
+#Const ImplCaptureTraffic = False
 
 '=========================================================================
 ' API
@@ -194,21 +195,6 @@ Private Type TLS_PARAMETERS
     cDisabledCrypto         As Long
     pDisabledCrypto         As Long
     dwFlags                 As Long
-End Type
-
-Private Type UNICODE_STRING
-    Length                  As Integer
-    MaximumLength           As Integer
-    Buffer                  As Long
-End Type
-
-Private Type CRYPTO_SETTINGS
-    eAlgorithmUsage         As Long
-    strCngAlgId             As UNICODE_STRING
-    cChainingModes          As Long
-    rgstrChainingModes      As Long
-    dwMinBitLength          As Long
-    dwMaxBitLength          As Long
 End Type
 
 Private Type ApiSecBuffer
@@ -432,6 +418,9 @@ Public Type UcsTlsContext
     '--- I/O buffers
     RecvBuffer()        As Byte
     RecvPos             As Long
+#If ImplCaptureTraffic Then
+    TrafficDump         As Collection
+#End If
 End Type
 
 Private Type UcsKeyInfo
@@ -476,7 +465,7 @@ Public Function TlsInitClient( _
     
     On Error GoTo EH
     With uEmpty
-        pvTlsSetLastError uEmpty
+        pvTlsClearLastError uEmpty
         .State = ucsTlsStateHandshakeStart
         .RemoteHostName = RemoteHostName
         .LocalFeatures = LocalFeatures
@@ -484,6 +473,9 @@ Public Function TlsInitClient( _
         If RealOsVersion >= [ucsOsvWin8.1] Then
             .AlpnProtocols = AlpnProtocols
         End If
+        #If ImplCaptureTraffic Then
+            Set .TrafficDump = New Collection
+        #End If
     End With
     uCtx = uEmpty
     '--- success
@@ -504,7 +496,7 @@ Public Function TlsInitServer( _
     
     On Error GoTo EH
     With uEmpty
-        pvTlsSetLastError uEmpty
+        pvTlsClearLastError uEmpty
         .IsServer = True
         .State = ucsTlsStateHandshakeStart
         .RemoteHostName = RemoteHostName
@@ -514,6 +506,9 @@ Public Function TlsInitServer( _
         If RealOsVersion >= [ucsOsvWin8.1] Then
             .AlpnProtocols = AlpnProtocols
         End If
+        #If ImplCaptureTraffic Then
+            Set .TrafficDump = New Collection
+        #End If
     End With
     uCtx = uEmpty
     '--- success
@@ -539,13 +534,9 @@ End Function
 
 Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize As Long, baOutput() As Byte, lOutputPos As Long) As Boolean
     Const FUNC_NAME     As String = "TlsHandshake"
-    Const TlsParametersCngAlgUsageCipher As Long = 2
-    Const BCRYPT_CHACHA20_POLY1305_ALGORITHM As String = "CHACHA20_POLY1305"
-    Const sizeof_BCRYPT_CHACHA20_POLY1305_ALGORITHM As Long = 36
     Dim uCred           As SCHANNEL_CRED
     Dim uNewCred        As SCH_CREDENTIALS
     Dim uNewParams      As TLS_PARAMETERS
-    Dim uNewSettings    As CRYPTO_SETTINGS
     Dim lContextAttr    As Long
     Dim hResult         As Long
     Dim lIdx            As Long
@@ -571,7 +562,7 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
             pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_CONNECTION_CLOSED
             GoTo QH
         End If
-        pvTlsSetLastError uCtx
+        pvTlsClearLastError uCtx
         If .ContextReq = 0 Then
             .ContextReq = .ContextReq Or ISC_REQ_REPLAY_DETECT              ' Detect replayed messages that have been encoded by using the EncryptMessage or MakeSignature functions.
             .ContextReq = .ContextReq Or ISC_REQ_SEQUENCE_DETECT            ' Detect messages received out of sequence.
@@ -596,8 +587,7 @@ RetryCredentials:
             uCred.dwVersion = SCHANNEL_CRED_VERSION
             uCred.grbitEnabledProtocols = IIf((.LocalFeatures And ucsTlsSupportTls10) <> 0, SP_PROT_TLS1_0, 0) Or _
                 IIf((.LocalFeatures And ucsTlsSupportTls11) <> 0, SP_PROT_TLS1_1, 0) Or _
-                IIf((.LocalFeatures And ucsTlsSupportTls12) <> 0, SP_PROT_TLS1_2, 0) Or _
-                IIf((.LocalFeatures And ucsTlsSupportTls13) <> 0, SP_PROT_TLS1_3, 0)
+                IIf((.LocalFeatures And ucsTlsSupportTls12) <> 0, SP_PROT_TLS1_2, 0)
             uCred.dwFlags = uCred.dwFlags Or SCH_CRED_MANUAL_CRED_VALIDATION    ' Prevent Schannel from validating the received server certificate chain.
             uCred.dwFlags = uCred.dwFlags Or SCH_CRED_NO_DEFAULT_CREDS          ' Prevent Schannel from attempting to automatically supply a certificate chain for client authentication.
             If pvCollectionCount(.LocalCertificates) > 0 Then
@@ -613,7 +603,7 @@ RetryCredentials:
                     .ContextReq = .ContextReq Or ISC_REQ_USE_SUPPLIED_CREDS     ' Schannel must not attempt to supply credentials for the client automatically.
                 End If
             End If
-            If RealOsVersion(BuildNo:=lIdx) = ucsOsvWin10 And lIdx >= 22000 Then   '--- win11
+            If RealOsVersion(BuildNo:=lIdx) = ucsOsvWin10 And lIdx >= 20348 Then   '--- 20348 = Windows Server 2022
                 '--- use new credentials struct for TLS 1.3 support
                 uNewCred.dwVersion = SCH_CREDENTIALS_VERSION
                 uNewCred.cCreds = uCred.cCreds
@@ -621,14 +611,8 @@ RetryCredentials:
                 uNewCred.dwFlags = uCred.dwFlags Or SCH_USE_STRONG_CRYPTO
                 uNewCred.cTlsParameters = 1
                 uNewCred.pTlsParameters = VarPtr(uNewParams)
-                uNewParams.grbitDisabledProtocols = Not uCred.grbitEnabledProtocols
-                '--- disallow TLS_CHACHA20_POLY1305_SHA256 cipher (unsupported in Win11 build 22000)
-                uNewParams.cDisabledCrypto = 1
-                uNewParams.pDisabledCrypto = VarPtr(uNewSettings)
-                uNewSettings.eAlgorithmUsage = TlsParametersCngAlgUsageCipher
-                uNewSettings.strCngAlgId.Length = sizeof_BCRYPT_CHACHA20_POLY1305_ALGORITHM
-                uNewSettings.strCngAlgId.MaximumLength = sizeof_BCRYPT_CHACHA20_POLY1305_ALGORITHM
-                uNewSettings.strCngAlgId.Buffer = StrPtr(BCRYPT_CHACHA20_POLY1305_ALGORITHM)
+                uNewParams.grbitDisabledProtocols = Not (uCred.grbitEnabledProtocols Or _
+                    IIf((.LocalFeatures And ucsTlsSupportTls13) <> 0, SP_PROT_TLS1_3, 0))
                 hResult = AcquireCredentialsHandle(0, UNISP_NAME, IIf(.IsServer, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND), 0, uNewCred, 0, 0, .hTlsCredentials, 0)
             Else
                 hResult = -1
@@ -656,6 +640,9 @@ RetryCredentials:
         End If
         Do
             If .RecvPos > 0 Then
+                #If ImplCaptureTraffic Then
+                    .TrafficDump.Add FUNC_NAME & ".Input" & vbCrLf & TlsDesignDumpArray(.RecvBuffer, 0, .RecvPos)
+                #End If
                 pvInitSecBuffer .InBuffers(0), SECBUFFER_TOKEN, VarPtr(.RecvBuffer(0)), .RecvPos
                 lPtr = VarPtr(.InDesc)
             Else
@@ -694,7 +681,7 @@ RetryCredentials:
                                 uCtx.RecvPos = pvWriteBuffer(uCtx.RecvBuffer, uCtx.RecvPos, lPtr, .cbBuffer)
                             Case SECBUFFER_ALERT
                                 #If ImplUseDebugLog Then
-                                    DebugLog MODULE_NAME, FUNC_NAME, "InBuffers, SECBUFFER_ALERT:" & vbCrLf & DesignDumpMemory(.pvBuffer, .cbBuffer), vbLogEventTypeWarning
+                                    DebugLog MODULE_NAME, FUNC_NAME, "InBuffers, SECBUFFER_ALERT:" & vbCrLf & TlsDesignDumpMemory(.pvBuffer, .cbBuffer), vbLogEventTypeWarning
                                 #End If
                             Case Else
                                 #If ImplUseDebugLog Then
@@ -712,9 +699,12 @@ RetryCredentials:
                             Select Case .BufferType
                             Case SECBUFFER_TOKEN
                                 lOutputPos = pvWriteBuffer(baOutput, lOutputPos, .pvBuffer, .cbBuffer)
+                                #If ImplCaptureTraffic Then
+                                    uCtx.TrafficDump.Add FUNC_NAME & ".Output" & vbCrLf & TlsDesignDumpMemory(.pvBuffer, .cbBuffer)
+                                #End If
                             Case SECBUFFER_ALERT
                                 #If ImplUseDebugLog Then
-                                    DebugLog MODULE_NAME, FUNC_NAME, "OutBuffers, SECBUFFER_ALERT:" & vbCrLf & DesignDumpMemory(.pvBuffer, .cbBuffer), vbLogEventTypeWarning
+                                    DebugLog MODULE_NAME, FUNC_NAME, "OutBuffers, SECBUFFER_ALERT:" & vbCrLf & TlsDesignDumpMemory(.pvBuffer, .cbBuffer), vbLogEventTypeWarning
                                 #End If
                             End Select
                             If .pvBuffer <> 0 Then
@@ -828,7 +818,7 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
             pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_CONNECTION_CLOSED
             GoTo QH
         End If
-        pvTlsSetLastError uCtx
+        pvTlsClearLastError uCtx
         If lSize < 0 Then
             lSize = pvArraySize(baInput)
         End If
@@ -838,6 +828,9 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
         Do
             If .RecvPos > 0 Then
                 lPtr = VarPtr(.RecvBuffer(0))
+                #If ImplCaptureTraffic Then
+                    .TrafficDump.Add FUNC_NAME & ".Input" & vbCrLf & TlsDesignDumpArray(.RecvBuffer, 0, .RecvPos)
+                #End If
             Else
                 lPtr = VarPtr(.RecvPos)
             End If
@@ -865,7 +858,7 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
                             uCtx.RecvPos = pvWriteBuffer(uCtx.RecvBuffer, uCtx.RecvPos, lPtr, .cbBuffer)
                         Case SECBUFFER_ALERT
                             #If ImplUseDebugLog Then
-                                DebugLog MODULE_NAME, FUNC_NAME, "InBuffers, SECBUFFER_ALERT:" & vbCrLf & DesignDumpMemory(.pvBuffer, .cbBuffer), vbLogEventTypeWarning
+                                DebugLog MODULE_NAME, FUNC_NAME, "InBuffers, SECBUFFER_ALERT:" & vbCrLf & TlsDesignDumpMemory(.pvBuffer, .cbBuffer), vbLogEventTypeWarning
                             #End If
                         Case SECBUFFER_STREAM_HEADER, SECBUFFER_STREAM_TRAILER
                             '--- do nothing
@@ -923,7 +916,7 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
             pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_CONNECTION_CLOSED
             GoTo QH
         End If
-        pvTlsSetLastError uCtx
+        pvTlsClearLastError uCtx
         '--- figure out upper bound of total output and reserve space in baOutput
         lIdx = (lSize + .TlsSizes.cbMaximumMessage - 1) \ .TlsSizes.cbMaximumMessage
         pvWriteReserved baOutput, lOutputPos, .TlsSizes.cbHeader * lIdx + lSize + .TlsSizes.cbTrailer * lIdx
@@ -948,6 +941,9 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
                 pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "EncryptMessage"
                 GoTo QH
             End If
+            #If ImplCaptureTraffic Then
+                .TrafficDump.Add FUNC_NAME & ".Output" & vbCrLf & TlsDesignDumpArray(baOutput, lOutputPos, .InBuffers(0).cbBuffer + .InBuffers(1).cbBuffer + .InBuffers(2).cbBuffer)
+            #End If
             '--- note: use cbBuffer's as returned by EncryptMessage because trailing MAC might be trimmed (shorter than initial .TlsSizes.cbTrailer)
             lOutputPos = lOutputPos + .InBuffers(0).cbBuffer + .InBuffers(1).cbBuffer + .InBuffers(2).cbBuffer
             For lIdx = 1 To UBound(.InBuffers)
@@ -956,7 +952,7 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
                         Select Case .BufferType
                         Case SECBUFFER_ALERT
                             #If ImplUseDebugLog Then
-                                DebugLog MODULE_NAME, FUNC_NAME, "InBuffers, SECBUFFER_ALERT:" & vbCrLf & DesignDumpMemory(.pvBuffer, .cbBuffer), vbLogEventTypeWarning
+                                DebugLog MODULE_NAME, FUNC_NAME, "InBuffers, SECBUFFER_ALERT:" & vbCrLf & TlsDesignDumpMemory(.pvBuffer, .cbBuffer), vbLogEventTypeWarning
                             #End If
                         Case SECBUFFER_DATA, SECBUFFER_STREAM_HEADER, SECBUFFER_STREAM_TRAILER
                             '--- do nothing
@@ -1033,6 +1029,9 @@ Public Function TlsShutdown(uCtx As UcsTlsContext, baOutput() As Byte, lPos As L
         For lIdx = 0 To UBound(.OutBuffers)
             With .OutBuffers(lIdx)
                 If .BufferType = SECBUFFER_TOKEN And .cbBuffer > 0 Then
+                    #If ImplCaptureTraffic Then
+                        uCtx.TrafficDump.Add FUNC_NAME & ".Output" & vbCrLf & TlsDesignDumpMemory(.pvBuffer, .cbBuffer)
+                    #End If
                     lPos = pvWriteBuffer(baOutput, lPos, .pvBuffer, .cbBuffer)
                 End If
                 If .pvBuffer <> 0 Then
@@ -1062,12 +1061,23 @@ Public Function TlsGetLastError(uCtx As UcsTlsContext, Optional LastErrNumber As
     End If
 End Function
 
+Private Sub pvTlsClearLastError(uCtx As UcsTlsContext)
+    With uCtx
+        .LastErrNumber = 0
+        .LastErrSource = vbNullString
+        .LastError = vbNullString
+        .LastAlertCode = 0
+    End With
+End Sub
+
 Private Sub pvTlsSetLastError( _
             uCtx As UcsTlsContext, _
             Optional ByVal ErrNumber As Long, _
             Optional ErrSource As String, _
             Optional ErrDescription As String, _
             Optional ByVal AlertCode As Long = -1)
+    Const FUNC_NAME     As String = "pvTlsSetLastError"
+    
     With uCtx
         .LastErrNumber = ErrNumber
         .LastErrSource = ErrSource
@@ -1089,6 +1099,13 @@ Private Sub pvTlsSetLastError( _
         If .LastErrNumber <> 0 Then
             .State = ucsTlsStateClosed
         End If
+        #If ImplCaptureTraffic Then
+            Clipboard.Clear
+            Clipboard.SetText TlsConcatCollection(.TrafficDump, vbCrLf)
+            #If ImplUseDebugLog Then
+                DebugLog MODULE_NAME, FUNC_NAME, "Traffic dump copied to clipboard"
+            #End If
+        #End If
     End With
 End Sub
 
@@ -1750,4 +1767,74 @@ Private Function GetSystemMessage(ByVal lLastDllError As Long) As String
     End If
     GetSystemMessage = Left$(GetSystemMessage, lSize)
 End Function
-#End If
+#End If ' Not ImplUseShared
+
+#If ImplCaptureTraffic Then
+Public Function TlsDesignDumpArray(baData() As Byte, Optional ByVal Pos As Long, Optional ByVal Size As Long = -1) As String
+    If Size < 0 Then
+        Size = UBound(baData) + 1 - Pos
+    End If
+    If Size > 0 Then
+        TlsDesignDumpArray = TlsDesignDumpMemory(VarPtr(baData(Pos)), Size)
+    End If
+End Function
+
+Public Function TlsDesignDumpMemory(ByVal lPtr As Long, ByVal lSize As Long) As String
+    Dim lIdx            As Long
+    Dim sHex            As String
+    Dim sChar           As String
+    Dim lValue          As Long
+    Dim aResult()       As String
+    
+    ReDim aResult(0 To (lSize + 15) \ 16) As String
+    Debug.Assert RedimStats("TlsDesignDumpMemory.aResult", UBound(aResult) + 1)
+    For lIdx = 0 To ((lSize + 15) \ 16) * 16
+        If lIdx < lSize Then
+            If IsBadReadPtr(lPtr, 1) = 0 Then
+                Call CopyMemory(lValue, ByVal lPtr, 1)
+                sHex = sHex & Right$("0" & Hex$(lValue), 2) & " "
+                If lValue >= 32 Then
+                    sChar = sChar & Chr$(lValue)
+                Else
+                    sChar = sChar & "."
+                End If
+            Else
+                sHex = sHex & "?? "
+                sChar = sChar & "."
+            End If
+        Else
+            sHex = sHex & "   "
+        End If
+        If ((lIdx + 1) Mod 4) = 0 Then
+            sHex = sHex & " "
+        End If
+        If ((lIdx + 1) Mod 16) = 0 Then
+            aResult(lIdx \ 16) = Right$("000" & Hex$(lIdx - 15), 4) & " - " & sHex & sChar
+            sHex = vbNullString
+            sChar = vbNullString
+        End If
+        lPtr = (lPtr Xor &H80000000) + 1 Xor &H80000000
+    Next
+    TlsDesignDumpMemory = Join(aResult, vbCrLf)
+End Function
+
+Public Function TlsConcatCollection(oCol As Collection, Optional Separator As String = vbCrLf) As String
+    Dim lSize           As Long
+    Dim vElem           As Variant
+    
+    For Each vElem In oCol
+        lSize = lSize + Len(vElem) + Len(Separator)
+    Next
+    If lSize > 0 Then
+        TlsConcatCollection = String$(lSize - Len(Separator), 0)
+        lSize = 1
+        For Each vElem In oCol
+            If lSize <= Len(TlsConcatCollection) Then
+                Mid$(TlsConcatCollection, lSize, Len(vElem) + Len(Separator)) = vElem & Separator
+            End If
+            lSize = lSize + Len(vElem) + Len(Separator)
+        Next
+    End If
+End Function
+#End If ' ImplCaptureTraffic
+

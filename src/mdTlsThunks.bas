@@ -674,7 +674,7 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
             End If
             #If ImplCaptureTraffic Then
                 If lSize <> 0 Then
-                    .TrafficDump.Add FUNC_NAME & ".Input" & vbCrLf & DesignDumpArray(baInput, Size:=lSize)
+                    .TrafficDump.Add FUNC_NAME & ".Input" & vbCrLf & TlsDesignDumpArray(baInput, Size:=lSize)
                 End If
             #End If
             If Not pvTlsParsePayload(uCtx, baInput, lSize, .LastError, .LastAlertCode) Then
@@ -690,7 +690,7 @@ QH:
         pvArrayWriteEOF baOutput, lOutputPos
         #If ImplCaptureTraffic Then
             If lOutputPos <> 0 Then
-                .TrafficDump.Add FUNC_NAME & ".Output" & vbCrLf & DesignDumpArray(baOutput, Size:=lOutputPos)
+                .TrafficDump.Add FUNC_NAME & ".Output" & vbCrLf & TlsDesignDumpArray(baOutput, Size:=lOutputPos)
             End If
         #End If
     End With
@@ -710,7 +710,7 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
         End If
         #If ImplCaptureTraffic Then
             If lSize <> 0 Then
-                .TrafficDump.Add FUNC_NAME & ".Input (undecrypted)" & vbCrLf & DesignDumpArray(baInput, Size:=lSize)
+                .TrafficDump.Add FUNC_NAME & ".Input (undecrypted)" & vbCrLf & TlsDesignDumpArray(baInput, Size:=lSize)
             End If
         #End If
         If lSize = 0 Then
@@ -783,7 +783,7 @@ QH:
         pvArrayWriteEOF baOutput, lOutputPos
         #If ImplCaptureTraffic Then
             If lOutputPos <> 0 Then
-                .TrafficDump.Add FUNC_NAME & ".Output (encrypted)" & vbCrLf & DesignDumpArray(baOutput, Size:=lOutputPos)
+                .TrafficDump.Add FUNC_NAME & ".Output (encrypted)" & vbCrLf & TlsDesignDumpArray(baOutput, Size:=lOutputPos)
             End If
         #End If
     End With
@@ -1622,7 +1622,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                 End If
                 #If ImplCaptureTraffic Then
                     If lEnd - uInput.Pos <> 0 Then
-                        .TrafficDump.Add FUNC_NAME & ".Input (decrypted)" & vbCrLf & DesignDumpArray(uInput.Data, uInput.Pos, lEnd - uInput.Pos)
+                        .TrafficDump.Add FUNC_NAME & ".Input (decrypted)" & vbCrLf & TlsDesignDumpArray(uInput.Data, uInput.Pos, lEnd - uInput.Pos)
                     End If
                 #End If
                 .RemoteTrafficSeqNo = UnsignedAdd(.RemoteTrafficSeqNo, 1)
@@ -3057,6 +3057,8 @@ Private Sub pvTlsSetLastError( _
             Optional ErrSource As String, _
             Optional ErrDescription As String, _
             Optional ByVal AlertCode As UcsTlsAlertDescriptionsEnum = -1)
+    Const FUNC_NAME     As String = "pvTlsSetLastError"
+    
     With uCtx
         .LastErrNumber = ErrNumber
         .LastErrSource = ErrSource
@@ -3070,6 +3072,13 @@ Private Sub pvTlsSetLastError( _
             End If
             .State = ucsTlsStateClosed
         End If
+        #If ImplCaptureTraffic Then
+            Clipboard.Clear
+            Clipboard.SetText TlsConcatCollection(.TrafficDump, vbCrLf)
+            #If ImplUseDebugLog Then
+                DebugLog MODULE_NAME, FUNC_NAME, "Traffic dump copied to clipboard"
+            #End If
+        #End If
     End With
 End Sub
 
@@ -3836,7 +3845,7 @@ Private Sub pvBufferWriteRecordEnd(uOutput As UcsBuffer, uCtx As UcsTlsContext)
             pvBufferWriteBlockEnd uOutput
             #If ImplCaptureTraffic Then
                 If lMessageSize <> 0 Then
-                    .TrafficDump.Add FUNC_NAME & ".Output (unencrypted)" & vbCrLf & DesignDumpArray(uOutput.Data, lMessagePos, lMessageSize)
+                    .TrafficDump.Add FUNC_NAME & ".Output (unencrypted)" & vbCrLf & TlsDesignDumpArray(uOutput.Data, lMessagePos, lMessageSize)
                 End If
             #End If
             If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
@@ -5603,17 +5612,19 @@ Private Function Clamp( _
         Clamp = lMax
     End Select
 End Function
+#End If ' Not ImplUseShared
 
-Private Function DesignDumpArray(baData() As Byte, Optional ByVal Pos As Long, Optional ByVal Size As Long = -1) As String
+#If ImplCaptureTraffic Then
+Public Function TlsDesignDumpArray(baData() As Byte, Optional ByVal Pos As Long, Optional ByVal Size As Long = -1) As String
     If Size < 0 Then
         Size = UBound(baData) + 1 - Pos
     End If
     If Size > 0 Then
-        DesignDumpArray = DesignDumpMemory(VarPtr(baData(Pos)), Size)
+        TlsDesignDumpArray = TlsDesignDumpMemory(VarPtr(baData(Pos)), Size)
     End If
 End Function
 
-Private Function DesignDumpMemory(ByVal lPtr As Long, ByVal lSize As Long) As String
+Public Function TlsDesignDumpMemory(ByVal lPtr As Long, ByVal lSize As Long) As String
     Dim lIdx            As Long
     Dim sHex            As String
     Dim sChar           As String
@@ -5621,7 +5632,7 @@ Private Function DesignDumpMemory(ByVal lPtr As Long, ByVal lSize As Long) As St
     Dim aResult()       As String
     
     ReDim aResult(0 To (lSize + 15) \ 16) As String
-    Debug.Assert RedimStats("DesignDumpMemory.aResult", UBound(aResult) + 1)
+    Debug.Assert RedimStats("TlsDesignDumpMemory.aResult", UBound(aResult) + 1)
     For lIdx = 0 To ((lSize + 15) \ 16) * 16
         If lIdx < lSize Then
             If IsBadReadPtr(lPtr, 1) = 0 Then
@@ -5649,9 +5660,28 @@ Private Function DesignDumpMemory(ByVal lPtr As Long, ByVal lSize As Long) As St
         End If
         lPtr = (lPtr Xor &H80000000) + 1 Xor &H80000000
     Next
-    DesignDumpMemory = Join(aResult, vbCrLf)
+    TlsDesignDumpMemory = Join(aResult, vbCrLf)
 End Function
-#End If
+
+Public Function TlsConcatCollection(oCol As Collection, Optional Separator As String = vbCrLf) As String
+    Dim lSize           As Long
+    Dim vElem           As Variant
+    
+    For Each vElem In oCol
+        lSize = lSize + Len(vElem) + Len(Separator)
+    Next
+    If lSize > 0 Then
+        TlsConcatCollection = String$(lSize - Len(Separator), 0)
+        lSize = 1
+        For Each vElem In oCol
+            If lSize <= Len(TlsConcatCollection) Then
+                Mid$(TlsConcatCollection, lSize, Len(vElem) + Len(Separator)) = vElem & Separator
+            End If
+            lSize = lSize + Len(vElem) + Len(Separator)
+        Next
+    End If
+End Function
+#End If ' ImplCaptureTraffic
 
 '= trampolines ===========================================================
 
