@@ -1769,7 +1769,6 @@ Private Function GetSystemMessage(ByVal lLastDllError As Long) As String
 End Function
 #End If ' Not ImplUseShared
 
-#If ImplCaptureTraffic Then
 Public Function TlsDesignDumpArray(baData() As Byte, Optional ByVal Pos As Long, Optional ByVal Size As Long = -1) As String
     If Size < 0 Then
         Size = UBound(baData) + 1 - Pos
@@ -1818,6 +1817,7 @@ Public Function TlsDesignDumpMemory(ByVal lPtr As Long, ByVal lSize As Long) As 
     TlsDesignDumpMemory = Join(aResult, vbCrLf)
 End Function
 
+#If ImplCaptureTraffic Then
 Public Function TlsConcatCollection(oCol As Collection, Optional Separator As String = vbCrLf) As String
     Dim lSize           As Long
     Dim vElem           As Variant
