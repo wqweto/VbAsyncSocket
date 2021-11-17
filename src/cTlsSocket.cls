@@ -141,6 +141,8 @@ Private Const NCRYPTBUFFER_PKCS_SECRET                  As Long = 46
 '--- export policy flags
 Private Const NCRYPT_ALLOW_EXPORT_FLAG                  As Long = &H1
 Private Const NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG        As Long = &H2
+'--- errors
+Private Const WSAENOTCONN                               As Long = 10057
 Private Const ERR_TIMEOUT                               As Long = &H800705B4
 Private Const INVALID_SOCKET                            As Long = -1
 
@@ -1248,6 +1250,7 @@ Public Function SyncWaitForEvent( _
                 Exit Do
             End If
             If TlsIsClosed(m_uCtx) Then
+                m_oSocket.SetLastError WSAENOTCONN
                 GoTo QH
             End If
             If Timeout > 0 Then
@@ -1340,8 +1343,8 @@ Private Function pvHandleReceive(Optional ByVal Flush As Boolean) As Boolean
                     pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
                     pvFireOnError LastError.Number, ucsSfdRead
                     GoTo QH
-                ElseIf Not pvPkiCertChainValidate(RemoteHostName, RemoteCertificates, frRootStore, sError) Then
-                    pvSetLastError sError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & MODULE_NAME & ".pvPkiCertChainValidate"
+                ElseIf Not pvPkiCertValidate(RemoteHostName, RemoteCertificates, frRootStore, sError) Then
+                    pvSetLastError sError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & MODULE_NAME & ".pvPkiCertValidate"
                     pvFireOnError LastError.Number, ucsSfdRead
                     GoTo QH
                 End If
@@ -1402,6 +1405,7 @@ Private Function pvHandleSend() As Boolean
             GoTo QH
         Else
             m_lSendActual = m_lSendActual + lBytes
+            m_eRaisedEvent = m_eRaisedEvent Or ucsSfdWrite
         End If
     Loop
     If m_lSendActual > 0 Then
@@ -2132,29 +2136,15 @@ QH:
     End If
 End Function
 
-Private Function pvPkiCertChainValidate(sRemoteHostName As String, cCerts As Collection, ByVal hRootStore As Long, sError As String) As Boolean
-    Const FUNC_NAME     As String = "pvPkiCertChainValidate"
+Private Function pvPkiCertValidate(ByVal sRemoteHostName As String, cCerts As Collection, ByVal hRootStore As Long, sError As String) As Boolean
+    Const FUNC_NAME     As String = "pvPkiCertValidate"
     Dim hCertStore      As Long
     Dim lIdx            As Long
     Dim baCert()        As Byte
     Dim pCertContext    As Long
-    Dim pChainContext   As Long
-    Dim uChain          As CERT_CHAIN_CONTEXT
-    Dim lPtr            As Long
-    Dim dwErrorStatus   As Long
-    Dim dwFlags         As Long
-    Dim uChainParams    As CERT_CHAIN_PARA
-    Dim uInfo           As CERT_INFO
-    Dim uExtension      As CERT_EXTENSION
-    Dim lAltInfoPtr     As Long
-    Dim uAltInfo        As CERT_ALT_NAME_INFO
-    Dim uEntry          As CERT_ALT_NAME_ENTRY
+    Dim vElem           As Variant
     Dim sDnsName        As String
-    Dim bValidName      As Boolean
-    Dim uEngineConfig   As CERT_CHAIN_ENGINE_CONFIG
-    Dim hChainEngine    As Long
-    Dim uChainElem      As CERT_CHAIN_ELEMENT
-    Dim pExistContext   As Long
+    Dim bMatched        As Boolean
     Dim hResult         As Long
     Dim sApiSource      As String
     
@@ -2174,46 +2164,105 @@ Private Function pvPkiCertChainValidate(sRemoteHostName As String, cCerts As Col
         End If
     Next
     '--- search remote host FQDN in any X.509 certificate's "Subject Alternative Name" list of DNS names (incl. wildcards)
+    sRemoteHostName = LCase$(sRemoteHostName)
+    sError = vbNullString
     Do
         pCertContext = CertEnumCertificatesInStore(hCertStore, pCertContext)
         If pCertContext = 0 Then
-            sError = Replace(ERR_NO_MATCHING_ALT_NAME, "%1", sRemoteHostName)
-            GoTo QH
-        End If
-        Call CopyMemory(lPtr, ByVal UnsignedAdd(pCertContext, 12), 4)               '--- dereference pCertContext->pCertInfo->cExtension
-        Call CopyMemory(uInfo, ByVal lPtr, Len(uInfo))
-        lPtr = CertFindExtension(szOID_SUBJECT_ALT_NAME2, uInfo.cExtension, uInfo.rgExtension)
-        If lPtr <> 0 Then
-            Call CopyMemory(uExtension, ByVal lPtr, Len(uExtension))
-            If CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, szOID_SUBJECT_ALT_NAME2, ByVal uExtension.Value.pbData, _
-                        uExtension.Value.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lAltInfoPtr, 0) = 0 Then
-                hResult = Err.LastDllError
-                sApiSource = "CryptDecodeObjectEx(szOID_SUBJECT_ALT_NAME2)"
-                GoTo QH
+            If LenB(sError) = 0 Then
+                sError = Replace(ERR_NO_MATCHING_ALT_NAME, "%1", sRemoteHostName)
             End If
-            Call CopyMemory(uAltInfo, ByVal lAltInfoPtr, Len(uAltInfo))
-            For lIdx = 0 To uAltInfo.cAltEntry - 1
-                lPtr = UnsignedAdd(uAltInfo.rgAltEntry, lIdx * Len(uEntry))         '--- dereference lAltInfoPtr->rgAltEntry[lidx].dwAltNameChoice
-                Call CopyMemory(uEntry, ByVal lPtr, Len(uEntry))
-                If uEntry.dwAltNameChoice = CERT_ALT_NAME_DNS_NAME Then
-                    sDnsName = LCase$(pvToStringW(uEntry.pwszDNSName))
-                    If Left$(sDnsName, 1) = "*" Then
-                        If LCase$(sRemoteHostName) Like sDnsName And Not LCase$(sRemoteHostName) Like "*." & sDnsName Then
-                            bValidName = True
-                            Exit Do
-                        End If
-                    Else
-                        If LCase$(sRemoteHostName) = sDnsName Or LCase$("www." & sRemoteHostName) = sDnsName Then
-                            bValidName = True
-                            Exit Do
-                        End If
-                    End If
+            Exit Do
+        End If
+        bMatched = False
+        For Each vElem In pvPkiCertGetSubjectAltName2(pCertContext, CERT_ALT_NAME_DNS_NAME)
+            sDnsName = LCase$(vElem)
+            If Left$(sDnsName, 1) = "*" Then
+                If sRemoteHostName Like sDnsName And Not sRemoteHostName Like "*." & sDnsName Then
+                    bMatched = True
+                    Exit For
                 End If
-            Next
-            Call LocalFree(lAltInfoPtr)
-            lAltInfoPtr = 0
+            Else
+                If sRemoteHostName = sDnsName Or "www." & sRemoteHostName = sDnsName Then
+                    bMatched = True
+                    Exit For
+                End If
+            End If
+        Next
+        If bMatched Then
+            If pvPkiCertBuildChain(pCertContext, hRootStore, sError) Then
+                '--- success
+                pvPkiCertValidate = True
+                Exit Do
+            End If
         End If
     Loop
+QH:
+    If pCertContext <> 0 Then
+        Call CertFreeCertificateContext(pCertContext)
+    End If
+    If hCertStore <> 0 Then
+        Call CertCloseStore(hCertStore, 0)
+    End If
+    If LenB(sApiSource) <> 0 Then
+        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+    End If
+End Function
+
+Private Function pvPkiCertGetSubjectAltName2(ByVal pCertContext As Long, ByVal lNameForm As Long) As Variant
+    Dim lIdx            As Long
+    Dim lPtr            As Long
+    Dim uInfo           As CERT_INFO
+    Dim uExtension      As CERT_EXTENSION
+    Dim lAltInfoPtr     As Long
+    Dim uAltInfo        As CERT_ALT_NAME_INFO
+    Dim uEntry          As CERT_ALT_NAME_ENTRY
+    Dim vRetVal         As Variant
+
+    vRetVal = Array()
+    Call CopyMemory(lPtr, ByVal UnsignedAdd(pCertContext, 12), 4)               '--- dereference pCertContext->pCertInfo->cExtension
+    Call CopyMemory(uInfo, ByVal lPtr, Len(uInfo))
+    lPtr = CertFindExtension(szOID_SUBJECT_ALT_NAME2, uInfo.cExtension, uInfo.rgExtension)
+    If lPtr = 0 Then
+        GoTo QH
+    End If
+    Call CopyMemory(uExtension, ByVal lPtr, Len(uExtension))
+    If CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, szOID_SUBJECT_ALT_NAME2, ByVal uExtension.Value.pbData, _
+                uExtension.Value.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lAltInfoPtr, 0) = 0 Then
+        GoTo QH
+    End If
+    Call CopyMemory(uAltInfo, ByVal lAltInfoPtr, Len(uAltInfo))
+    For lIdx = 0 To uAltInfo.cAltEntry - 1
+        lPtr = UnsignedAdd(uAltInfo.rgAltEntry, lIdx * Len(uEntry))             '--- dereference lAltInfoPtr->rgAltEntry[lidx].dwAltNameChoice
+        Call CopyMemory(uEntry, ByVal lPtr, Len(uEntry))
+        If uEntry.dwAltNameChoice = lNameForm Then
+            ReDim Preserve vRetVal(0 To UBound(vRetVal) + 1) As Variant
+            vRetVal(UBound(vRetVal)) = pvToStringW(uEntry.pwszDNSName)
+        End If
+    Next
+    Call LocalFree(lAltInfoPtr)
+    lAltInfoPtr = 0
+QH:
+    pvPkiCertGetSubjectAltName2 = vRetVal
+End Function
+
+Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hRootStore As Long, sError As String) As Boolean
+    Const FUNC_NAME     As String = "pvPkiCertBuildChain"
+    Dim hChainEngine    As Long
+    Dim uEngineConfig   As CERT_CHAIN_ENGINE_CONFIG
+    Dim pChainContext   As Long
+    Dim lPtr            As Long
+    Dim dwErrorStatus   As Long
+    Dim dwFlags         As Long
+    Dim uChainParams    As CERT_CHAIN_PARA
+    Dim uChain          As CERT_CHAIN_CONTEXT
+    Dim uChainSmall     As CERT_CHAIN_CONTEXT
+    Dim uChainElem      As CERT_CHAIN_ELEMENT
+    Dim pExistContext   As Long
+    Dim lIdx            As Long
+    Dim hResult         As Long
+    Dim sApiSource      As String
+    
     '--- build custom chain engine that trusts the additional root CA certificates if provided
     If hRootStore <> 0 Then
         If OsVersion <= ucsOsvWin7 Then
@@ -2235,28 +2284,32 @@ Private Function pvPkiCertChainValidate(sRemoteHostName As String, cCerts As Col
     '---    and check this chain for revokation, expiry or missing link to a trust anchor
     uChainParams.cbSize = Len(uChainParams)
     dwFlags = IIf((m_eLocalFeatures And ucsTlsIgnoreServerCertificateRevocation) <> 0, 0, CERT_CHAIN_REVOCATION_CHECK_CHAIN)
-    If CertGetCertificateChain(hChainEngine, pCertContext, 0, hCertStore, uChainParams, dwFlags, 0, pChainContext) = 0 Then
+    If CertGetCertificateChain(hChainEngine, pCertContext, 0, 0, uChainParams, dwFlags, 0, pChainContext) = 0 Then
         hResult = Err.LastDllError
         sApiSource = "CertGetCertificateChain"
         GoTo QH
     End If
-    Call CopyMemory(uChain, ByVal pChainContext, Len(uChain))       '--- dereference pChainContext->rgpChain[0]->TrustStatus.dwErrorStatus
-    Call CopyMemory(lPtr, ByVal uChain.rgElem, 4)
-    Call CopyMemory(uChain, ByVal lPtr, Len(uChain))
-    dwErrorStatus = uChain.TrustStatus.dwErrorStatus And Not CERT_TRUST_IS_NOT_TIME_NESTED
-    If hRootStore <> 0 And uChain.cElems > 0 Then
-        '--- check if the last certificate in the chain is from our custom hRootStore and remove untrusted flags from status
-        Call CopyMemory(lPtr, ByVal UnsignedAdd(uChain.rgElem, (uChain.cElems - 1) * 4), 4)
-        Call CopyMemory(uChainElem, ByVal lPtr, Len(uChainElem))
-        pExistContext = CertFindCertificateInStore(hRootStore, X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, 0, CERT_FIND_EXISTING, ByVal uChainElem.pCertContext, 0)
-        If pExistContext <> 0 Then
-            Call CertFreeCertificateContext(pExistContext)
-            pExistContext = 0
-            dwErrorStatus = dwErrorStatus And Not CERT_TRUST_IS_UNTRUSTED_ROOT And Not CERT_TRUST_IS_NOT_SIGNATURE_VALID
+    Call CopyMemory(uChain, ByVal pChainContext, Len(uChain))
+    For lIdx = 0 To uChain.cElems - 1
+        Call CopyMemory(lPtr, ByVal UnsignedAdd(uChain.rgElem, lIdx * 4), 4)    '--- dereference pChainContext->rgpChain[lidx]->TrustStatus.dwErrorStatus
+        Call CopyMemory(uChainSmall, ByVal lPtr, Len(uChainSmall))
+        dwErrorStatus = uChainSmall.TrustStatus.dwErrorStatus And Not CERT_TRUST_IS_NOT_TIME_NESTED
+        If hRootStore <> 0 And uChainSmall.cElems > 0 Then
+            '--- check if the last certificate in the chain is from our custom hRootStore and remove untrusted flags from status
+            Call CopyMemory(lPtr, ByVal UnsignedAdd(uChainSmall.rgElem, (uChainSmall.cElems - 1) * 4), 4)
+            Call CopyMemory(uChainElem, ByVal lPtr, Len(uChainElem))
+            pExistContext = CertFindCertificateInStore(hRootStore, X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, 0, CERT_FIND_EXISTING, ByVal uChainElem.pCertContext, 0)
+            If pExistContext <> 0 Then
+                Call CertFreeCertificateContext(pExistContext)
+                pExistContext = 0
+                dwErrorStatus = dwErrorStatus And Not CERT_TRUST_IS_UNTRUSTED_ROOT And Not CERT_TRUST_IS_NOT_SIGNATURE_VALID
+            End If
         End If
-    End If
-    If dwErrorStatus <> 0 Then
-        If (dwErrorStatus And CERT_TRUST_IS_REVOKED) <> 0 Then
+        If dwErrorStatus = 0 Then
+            '--- success
+            pvPkiCertBuildChain = True
+            Exit For
+        ElseIf (dwErrorStatus And CERT_TRUST_IS_REVOKED) <> 0 Then
             sError = ERR_TRUST_IS_REVOKED
         ElseIf (dwErrorStatus And CERT_TRUST_IS_PARTIAL_CHAIN) <> 0 Then
             sError = ERR_TRUST_IS_PARTIAL_CHAIN
@@ -2269,19 +2322,10 @@ Private Function pvPkiCertChainValidate(sRemoteHostName As String, cCerts As Col
         Else
             sError = Replace(ERR_UNKNOWN_CERTIFICATECHAIN_ERROR_MASK, "%1", "&H" & Hex$(dwErrorStatus))
         End If
-        GoTo QH
-    End If
-    '--- success
-    pvPkiCertChainValidate = True
+    Next
 QH:
     If pChainContext <> 0 Then
         Call CertFreeCertificateChain(pChainContext)
-    End If
-    If pCertContext <> 0 Then
-        Call CertFreeCertificateContext(pCertContext)
-    End If
-    If hCertStore <> 0 Then
-        Call CertCloseStore(hCertStore, 0)
     End If
     If hChainEngine <> 0 Then
         Call CertFreeCertificateChainEngine(hChainEngine)
@@ -2350,7 +2394,7 @@ Private Function pvPkiAppendCertChain(ByVal pCertContext As Long, ByVal hCertSto
         sApiSource = "CertGetCertificateChain"
         GoTo QH
     End If
-    Call CopyMemory(uChain, ByVal pChainContext, Len(uChain))       '--- dereference pChainContext->rgpChain[0]
+    Call CopyMemory(uChain, ByVal pChainContext, Len(uChain))                   '--- dereference pChainContext->rgpChain[0]
     Call CopyMemory(lPtr, ByVal uChain.rgElem, 4)
     Call CopyMemory(uChain, ByVal lPtr, Len(uChain))
     For lIdx = 0 To IIf(uChain.cElems = 1, 0, uChain.cElems - 2)
