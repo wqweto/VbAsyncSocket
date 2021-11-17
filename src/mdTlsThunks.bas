@@ -3379,15 +3379,15 @@ Private Function pvTlsBulkDecrypt(ByVal eBulk As UcsTlsCryptoAlgorithmsEnum, baR
     
     Select Case eBulk
     Case ucsTlsAlgoBulkChacha20Poly1305
-        If Not pvCryptoAeadChacha20Poly1305Decrypt(baRemoteIV, baRemoteKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
+        If Not pvCryptoBulkChacha20Poly1305Decrypt(baRemoteIV, baRemoteKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
             GoTo QH
         End If
     Case ucsTlsAlgoBulkAesGcm128, ucsTlsAlgoBulkAesGcm256
-        If Not pvCryptoAeadAesGcmDecrypt(baRemoteIV, baRemoteKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
+        If Not pvCryptoBulkAesGcmDecrypt(baRemoteIV, baRemoteKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
             GoTo QH
         End If
     Case ucsTlsAlgoBulkAesCbc128, ucsTlsAlgoBulkAesCbc256
-        If Not pvCryptoAeadAesCbcDecrypt(baRemoteIV, baRemoteKey, baBuffer, lPos, lSize) Then
+        If Not pvCryptoBulkAesCbcDecrypt(baRemoteIV, baRemoteKey, baBuffer, lPos, lSize) Then
             GoTo QH
         End If
     Case Else
@@ -3403,16 +3403,16 @@ Private Sub pvTlsBulkEncrypt(ByVal eBulk As UcsTlsCryptoAlgorithmsEnum, baLocalI
     
     Select Case eBulk
     Case ucsTlsAlgoBulkChacha20Poly1305
-        If Not pvCryptoAeadChacha20Poly1305Encrypt(baLocalIV, baLocalKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoAeadChacha20Poly1305Encrypt")
+        If Not pvCryptoBulkChacha20Poly1305Encrypt(baLocalIV, baLocalKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
+            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoBulkChacha20Poly1305Encrypt")
         End If
     Case ucsTlsAlgoBulkAesGcm128, ucsTlsAlgoBulkAesGcm256
-        If Not pvCryptoAeadAesGcmEncrypt(baLocalIV, baLocalKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoAeadAesGcmEncrypt")
+        If Not pvCryptoBulkAesGcmEncrypt(baLocalIV, baLocalKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
+            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoBulkAesGcmEncrypt")
         End If
     Case ucsTlsAlgoBulkAesCbc128, ucsTlsAlgoBulkAesCbc256
-        If Not pvCryptoAeadAesCbcEncrypt(baLocalIV, baLocalKey, baBuffer, lPos, lSize) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoAeadAesCbcEncrypt")
+        If Not pvCryptoBulkAesCbcEncrypt(baLocalIV, baLocalKey, baBuffer, lPos, lSize) Then
+            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoBulkAesCbcEncrypt")
         End If
     Case Else
         Err.Raise vbObjectError, FUNC_NAME, "Unsupported bulk type " & eBulk
@@ -5290,7 +5290,7 @@ Private Function pvCryptoHmacSha384(baRetVal() As Byte, baKey() As Byte, baInput
     pvCryptoHmacSha384 = True
 End Function
 
-Private Function pvCryptoAeadChacha20Poly1305Encrypt( _
+Private Function pvCryptoBulkChacha20Poly1305Encrypt( _
             baNonce() As Byte, baKey() As Byte, _
             baAad() As Byte, ByVal lAadPos As Long, ByVal lAdSize As Long, _
             baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
@@ -5309,10 +5309,10 @@ Private Function pvCryptoAeadChacha20Poly1305Encrypt( _
             baBuffer(lPos), lSize, _
             baBuffer(lPos), baBuffer(lPos + lSize))
     '--- success
-    pvCryptoAeadChacha20Poly1305Encrypt = True
+    pvCryptoBulkChacha20Poly1305Encrypt = True
 End Function
 
-Private Function pvCryptoAeadChacha20Poly1305Decrypt( _
+Private Function pvCryptoBulkChacha20Poly1305Decrypt( _
             baNonce() As Byte, baKey() As Byte, _
             baAad() As Byte, ByVal lAadPos As Long, ByVal lAdSize As Long, _
             baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
@@ -5326,11 +5326,11 @@ Private Function pvCryptoAeadChacha20Poly1305Decrypt( _
             baBuffer(lPos), lSize - LNG_CHACHA20POLY1305_TAGSZ, _
             baBuffer(lPos + lSize - LNG_CHACHA20POLY1305_TAGSZ), baBuffer(lPos)) = 0 Then
         '--- success
-        pvCryptoAeadChacha20Poly1305Decrypt = True
+        pvCryptoBulkChacha20Poly1305Decrypt = True
     End If
 End Function
 
-Private Function pvCryptoAeadAesGcmEncrypt( _
+Private Function pvCryptoBulkAesGcmEncrypt( _
             baNonce() As Byte, baKey() As Byte, _
             baAad() As Byte, ByVal lAadPos As Long, ByVal lAdSize As Long, _
             baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
@@ -5349,10 +5349,10 @@ Private Function pvCryptoAeadAesGcmEncrypt( _
             lAdPtr, lAdSize, _
             baNonce(0), baKey(0), UBound(baKey) + 1)
     '--- success
-    pvCryptoAeadAesGcmEncrypt = True
+    pvCryptoBulkAesGcmEncrypt = True
 End Function
 
-Private Function pvCryptoAeadAesGcmDecrypt( _
+Private Function pvCryptoBulkAesGcmDecrypt( _
             baNonce() As Byte, baKey() As Byte, _
             baAad() As Byte, ByVal lAadPos As Long, ByVal lAdSize As Long, _
             baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
@@ -5367,11 +5367,11 @@ Private Function pvCryptoAeadAesGcmDecrypt( _
             baAad(lAadPos), lAdSize, _
             baNonce(0), baKey(0), UBound(baKey) + 1) = 0 Then
         '--- success
-        pvCryptoAeadAesGcmDecrypt = True
+        pvCryptoBulkAesGcmDecrypt = True
     End If
 End Function
 
-Private Function pvCryptoAeadAesCbcEncrypt( _
+Private Function pvCryptoBulkAesCbcEncrypt( _
             baNonce() As Byte, baKey() As Byte, _
             baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
     Debug.Assert pvArraySize(baNonce) = LNG_AESCBC_IVSZ
@@ -5383,10 +5383,10 @@ Private Function pvCryptoAeadAesCbcEncrypt( _
             baBuffer(lPos), baBuffer(lPos), lSize, _
             baNonce(0), baKey(0), UBound(baKey) + 1)
     '--- success
-    pvCryptoAeadAesCbcEncrypt = True
+    pvCryptoBulkAesCbcEncrypt = True
 End Function
 
-Private Function pvCryptoAeadAesCbcDecrypt( _
+Private Function pvCryptoBulkAesCbcDecrypt( _
             baNonce() As Byte, baKey() As Byte, _
             baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
     Debug.Assert pvArraySize(baNonce) = LNG_AESCBC_IVSZ
@@ -5398,7 +5398,7 @@ Private Function pvCryptoAeadAesCbcDecrypt( _
                 baBuffer(lPos), baBuffer(lPos), lSize, _
                 baNonce(0), baKey(0), UBound(baKey) + 1)
         '--- success
-        pvCryptoAeadAesCbcDecrypt = True
+        pvCryptoBulkAesCbcDecrypt = True
     End If
 End Function
 
