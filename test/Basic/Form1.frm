@@ -208,10 +208,12 @@ Private Sub Command2_Click()
         Set m_oRequest = New cHttpRequest
     End If
     m_oRequest.SetTimeouts 5000, 5000, 5000, 5000
+'    m_oRequest.Option_(WinHttpRequestOption_SslErrorIgnoreFlags) = SslErrorFlag_Ignore_All
+'    m_oRequest.Option_(WinHttpRequestOption_SecureProtocols) = SecureProtocol_TLS1
     m_oRequest.Option_(WinHttpRequestOption_EnableHttpsToHttpRedirects) = True
 '    m_oRequest.SetProxy 0
 '    m_oRequest.SetProxy 2, "http=ucsgate:3128;https=https://ucsgate:3129" ' , "*.unicontsoft.com"
-'    m_oRequest.SetProxy 2, "https://ucsgate:3129"
+'    m_oRequest.SetProxy 2, "https://ucsgate.unicontsoft.com:3129"
 '    m_oRequest.SetProxy 2, "http://ipbbbtvy:wqi9dnt558ex@209.127.191.180:9279"
     m_oRequest.Open_ "GET", IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://www.unicontsoft.com/bg/download.html"
     m_oRequest.SetRequestHeader "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.69 Safari/537.36"
@@ -224,6 +226,8 @@ Private Sub Command2_Click()
 '    m_oRequest.Send
 '    m_oRequest.Open_ "GET", "https://dl.unicontsoft.com/upload/UCS/"
 '    m_oRequest.SetCredentials "test", "test", 0
+'    m_oRequest.Send
+'    m_oRequest.Open_ "GET", "https://ucsgate.unicontsoft.com:3129"
 '    m_oRequest.Send
     DebugLog MODULE_NAME, FUNC_NAME, m_oRequest.Status & " " & m_oRequest.StatusText
     DebugLog MODULE_NAME, FUNC_NAME, m_oRequest.GetResponseHeader("Transfer-Encoding") & " " & m_oRequest.GetResponseHeader("Content-Encoding") & " " & m_oRequest.GetResponseHeader("Via")

@@ -196,6 +196,7 @@ End Enum
 Private Type UcsParsedUrl
     Protocol            As String
     Host                As String
+    UserPort            As String
     Port                As Long
     Path                As String
     QueryString         As String
@@ -566,7 +567,7 @@ Public Sub SetRequestHeader(ByVal Header As String, ByVal Value As String)
     With m_uRequest
         If LenB(Value) <> 0 Then
             .Headers.Item(Header) = Value
-        Else
+        ElseIf .Headers.Exists(Header) Then
             .Headers.Remove Header
         End If
     End With
@@ -1153,8 +1154,7 @@ Private Function pvConnectRemote(uRequest As UcsRequestType) As Boolean
         Next
         If LenB(.CurrentProxy.Host) <> 0 Then
             #If ImplUseTls Then
-                pvConnectRemote = m_oSocket.Connect(.CurrentProxy.Host, .CurrentProxy.Port, UseTls:=pvIsProtocolSecure(.CurrentProxy.Protocol), _
-                    LocalFeatures:=ucsTlsSupportAll Or ucsTlsIgnoreServerCertificateErrors Or ucsTlsIgnoreServerCertificateRevocation)
+                pvConnectRemote = m_oSocket.Connect(.CurrentProxy.Host, .CurrentProxy.Port, UseTls:=pvIsProtocolSecure(.CurrentProxy.Protocol), LocalFeatures:=pvLocalFeatures)
             #Else
                 pvConnectRemote = m_oSocket.Connect(.CurrentProxy.Host, .CurrentProxy.Port)
             #End If
@@ -1221,15 +1221,9 @@ Private Function pvIsProtocolSecure(sProtocol As String) As Boolean
 End Function
 
 Private Function pvFormatHost(uRemote As UcsParsedUrl) As String
-    Dim lDefPort        As Long
-    
-    Select Case LCase$(uRemote.Protocol)
-    Case "http"
-        lDefPort = 80
-    Case "https"
-        lDefPort = 433
-    End Select
-    pvFormatHost = uRemote.Protocol & "://" & uRemote.Host & IIf(uRemote.Port <> lDefPort, ":" & uRemote.Port, vbNullString)
+    If LenB(uRemote.Host) <> 0 Then
+        pvFormatHost = uRemote.Protocol & "://" & uRemote.Host & IIf(LenB(uRemote.UserPort) <> 0, ":" & uRemote.UserPort, vbNullString)
+    End If
 End Function
 
 Private Sub pvDrainKeepAlive()
@@ -1400,7 +1394,8 @@ Private Function pvParseUrl(sUrl As String, uParsed As UcsParsedUrl, Optional De
                         uParsed.Pass = .Item(2)
                     End If
                     uParsed.Host = .Item(3)
-                    uParsed.Port = Val(Mid$(.Item(4), 2))
+                    uParsed.UserPort = Mid$(.Item(4), 2)
+                    uParsed.Port = Val(uParsed.UserPort)
                     If uParsed.Port = 0 Then
                         Select Case LCase$(uParsed.Protocol)
                         Case "https"
