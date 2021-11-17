@@ -21,7 +21,7 @@ RevisionVer=0
 AutoIncrementVer=0
 ServerSupportFiles=0
 VersionCompanyName="Unicontsoft"
-CondComp="USE_DEBUG_LOG = 1 : Dummy = 1"
+CondComp="USE_DEBUG_LOG = 1 : ASYNCSOCKET_NO_LIBSODIUM = 0 : ASYNCSOCKET_NO_TLSSERVER = 0 : Dummy = 1"
 CompilationType=0
 OptimizationType=0
 FavorPentiumPro(tm)=0

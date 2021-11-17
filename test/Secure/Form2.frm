@@ -167,9 +167,7 @@ Private Sub Form_Load()
     End If
     Set m_cRequestHandlers = New Collection
     m_oServerSocket.Socket.GetSockName sAddr, lPort
-    #If ImplUseDebugLog Then
-        DebugLog MODULE_NAME, "Form_Load", "Listening on " & sAddr & ":" & lPort
-    #End If
+    DebugLog MODULE_NAME, "Form_Load", "Listening on " & sAddr & ":" & lPort
 QH:
     Exit Sub
 EH:
@@ -283,9 +281,7 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
             End If
         Else
             HttpsRequest = HttpsRequest & StrConv(baRecv, vbUnicode)
-            #If ImplUseDebugLog Then
-'                DebugLog MODULE_NAME, FUNC_NAME, "Len(HttpsRequest)=" & Len(HttpsRequest)
-            #End If
+'            DebugLog MODULE_NAME, FUNC_NAME, "Len(HttpsRequest)=" & Len(HttpsRequest)
         End If
         If IsEmpty(vHeaders) Then
             lHeaderLength = InStr(1, HttpsRequest, vbCrLf & vbCrLf) - 1
@@ -306,9 +302,7 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
         If lContentLength >= 0 Then
             If Len(HttpsRequest) >= lHeaderLength + lContentLength Then
                 If Len(HttpsRequest) <> lHeaderLength + lContentLength Then
-                    #If ImplUseDebugLog Then
-                        DebugLog MODULE_NAME, FUNC_NAME, "Received " & Len(HttpsRequest) & " instead of " & lHeaderLength + lContentLength, vbLogEventTypeWarning
-                    #End If
+                    DebugLog MODULE_NAME, FUNC_NAME, "Received " & Len(HttpsRequest) & " instead of " & lHeaderLength + lContentLength, vbLogEventTypeWarning
                 End If
                 Exit Do
             End If
@@ -436,42 +430,30 @@ Private Sub m_oSocket_OnClientCertificate(CaDn As Object, Confirmed As Boolean)
     DebugLog MODULE_NAME, "m_oSocket_OnClientCertificate", "Raised"
     If m_oSocket.LocalCertificates Is Nothing Then
         If SearchCollection(CaDn, 1, RetVal:=baDName) Then
-            #If ImplUseDebugLog Then
-                DebugLog MODULE_NAME, "m_oSocket_OnClientCertificate", "Certificate authority DN for client certificate:" & vbCrLf & DesignDumpArray(baDName)
-            #End If
+            DebugLog MODULE_NAME, "m_oSocket_OnClientCertificate", "Certificate authority DN for client certificate:" & vbCrLf & DesignDumpArray(baDName)
         End If
         Confirmed = m_oSocket.ImportPkcs12Certificates(App.Path & "\client1.full.pfx")
     End If
 End Sub
 
 Private Sub m_oSocket_OnResolve(IpAddress As String)
-    #If ImplUseDebugLog Then
-        DebugLog MODULE_NAME, "m_oSocket_OnResolve", "IpAddress=" & IpAddress
-    #End If
+    DebugLog MODULE_NAME, "m_oSocket_OnResolve", "IpAddress=" & IpAddress
 End Sub
 
 Private Sub m_oSocket_OnConnect()
-    #If ImplUseDebugLog Then
-        DebugLog MODULE_NAME, "m_oSocket_OnConnect", "Raised"
-    #End If
+    DebugLog MODULE_NAME, "m_oSocket_OnConnect", "Raised"
 End Sub
 
 Private Sub m_oSocket_OnReceive()
-    #If ImplUseDebugLog Then
-        DebugLog MODULE_NAME, "m_oSocket_OnReceive", "Raised"
-    #End If
+    DebugLog MODULE_NAME, "m_oSocket_OnReceive", "Raised"
 End Sub
 
 Private Sub m_oSocket_OnSend()
-    #If ImplUseDebugLog Then
-        DebugLog MODULE_NAME, "m_oSocket_OnSend", "Raised"
-    #End If
+    DebugLog MODULE_NAME, "m_oSocket_OnSend", "Raised"
 End Sub
 
 Private Sub m_oSocket_OnClose()
-    #If ImplUseDebugLog Then
-        DebugLog MODULE_NAME, "m_oSocket_OnClose", "Raised"
-    #End If
+    DebugLog MODULE_NAME, "m_oSocket_OnClose", "Raised"
 End Sub
 
 Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
@@ -479,11 +461,13 @@ Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsy
     
     With m_oSocket.LastError
         If .Number <> 0 Then
-            #If ImplUseDebugLog Then
-                DebugLog MODULE_NAME, FUNC_NAME & ", " & Replace(.Source, vbCrLf, ", "), .Description & " &H" & Hex$(.Number), vbLogEventTypeError
-            #Else
-                Debug.Print "Error: " & .Description & " &H" & Hex$(.Number) & " [" & MODULE_NAME & "." & FUNC_NAME & ", " & Replace(.Source, vbCrLf, ", ") & "]"
-            #End If
+            DebugLog MODULE_NAME, FUNC_NAME & ", " & Replace(.Source, vbCrLf, ", "), .Description & " &H" & Hex$(.Number), vbLogEventTypeError
         End If
     End With
 End Sub
+
+#If Not ImplUseDebugLog Then
+Private Sub DebugLog(sModule As String, sFunction As String, sText As String, Optional ByVal eType As LogEventTypeConstants = vbLogEventTypeInformation)
+    Debug.Print Format$(Timer, "0.00") & " [" & eType & "] " & sText & " [" & sModule & "." & sFunction & "]"
+End Sub
+#End If

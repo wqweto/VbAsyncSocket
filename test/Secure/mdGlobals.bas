@@ -1,6 +1,8 @@
 Attribute VB_Name = "mdGlobals"
 Option Explicit
 
+#Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
+
 '--- for WideCharToMultiByte
 Private Const CP_UTF8                       As Long = 65001
 
@@ -179,12 +181,14 @@ Public Property Get TimerEx() As Double
     TimerEx = cValue / cFreq
 End Property
 
+#If ImplUseDebugLog Then
 Public Sub DebugLog(sModule As String, sFunction As String, sText As String, Optional ByVal eType As LogEventTypeConstants = vbLogEventTypeInformation)
     Debug.Print Format$(TimerEx, "0.000") & " " & Switch( _
         eType = vbLogEventTypeError, "[ERROR]", _
         eType = vbLogEventTypeWarning, "[WARN]", _
         True, "[INFO]") & " " & sText & " [" & sModule & "." & sFunction & "]"
 End Sub
+#End If
 
 Public Function ConcatCollection(oCol As Collection, Optional Separator As String = vbCrLf) As String
     Dim lSize           As Long
