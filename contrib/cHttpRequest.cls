@@ -163,6 +163,8 @@ Private Const HDR_LOCATION          As String = "Location"
 Private Const HDR_CONNECTION        As String = "Connection"
 Private Const HDR_PROXY_AUTH        As String = "Proxy-Authorization"
 Private Const HDR_PROXY_CONNECTION  As String = "Proxy-Connection"
+Private Const HDR_SET_COOKIE        As String = "Set-Cookie"
+Private Const HDR_COOKIE            As String = "Cookie"
 Private Const HDR_DELIM             As String = vbCrLf & vbCrLf
 Private Const DEF_BUFFER_SIZE       As Long = 256& * 1024
 Private Const DEF_USER_AGENT        As String = "Mozilla/4.0 (compatible; Win32; VbAsyncSocket)"
@@ -181,6 +183,7 @@ Private m_eState                As UcsStateEnum
 Private m_vOptions(0 To WinHttpRequestOption_RejectUserpwd) As Variant
 Private m_uRequest              As UcsRequestType
 Private m_uResponse             As UcsResponseType
+Private m_oCookies              As Object '--- keyed on domains, contains collections of path + cookie per domain
 
 Private Enum UcsStateEnum
     ucsIdle
@@ -320,7 +323,7 @@ Public Property Get ResponseText() As String
         If .Text = vbNullChar Then
             eCodePage = ucsScpUtf8
             If .Headers.Exists(HDR_CONTENT_TYPE) Then
-                sCharset = pvParseHeaderAttrib(.Headers.Item(HDR_CONTENT_TYPE), "charset")
+                sCharset = pvParseHeaderAttribs(.Headers.Item(HDR_CONTENT_TYPE)).Item("charset")
                 If LenB(sCharset) <> 0 Then
                     eCodePage = pvMapCharset(sCharset)
                 End If
@@ -421,6 +424,7 @@ Public Sub Open_(ByVal Method As String, ByVal Url As String, Optional ByVal Asy
         .NumOfRedirects = 0
         '--- init headers
         SetRequestHeader HDR_HOST, .Remote.Host
+        SetRequestHeader HDR_COOKIE, pvGetAllCookies(.Remote.Host, .Remote.Path)
         SetRequestHeader HDR_USER_AGENT, m_vOptions(WinHttpRequestOption_UserAgentString)
         If m_vOptions(WinHttpRequestOption_EnableHttp1_1) Then
             SetRequestHeader HDR_CONNECTION, "Keep-Alive"
@@ -463,7 +467,7 @@ Public Sub Send(Optional ByVal Body As Variant)
                 If Not .Headers.Exists(HDR_CONTENT_TYPE) Then
                     SetRequestHeader HDR_CONTENT_TYPE, DEF_CONTENT_TYPE & "; " & DEF_CHARSET
                 Else
-                    sCharset = pvParseHeaderAttrib(.Headers.Item(HDR_CONTENT_TYPE), "charset")
+                    sCharset = pvParseHeaderAttribs(.Headers.Item(HDR_CONTENT_TYPE)).Item("charset")
                     If LenB(sCharset) <> 0 Then
                         eCodePage = pvMapCharset(sCharset)
                     Else
@@ -488,6 +492,7 @@ Public Sub Send(Optional ByVal Body As Variant)
                 pvToTextArray(.Remote.User & ":" & .Remote.Pass, ucsScpAcp)), vbCrLf, vbNullString)
         End If
         SetRequestHeader HDR_HOST, .Remote.Host
+        SetRequestHeader HDR_COOKIE, pvGetAllCookies(.Remote.Host, .Remote.Path)
         pvResetResponse m_uResponse
         '--- try to reuse socket if not closed (keep-alive)
         pvSetState ucsWaitResolve
@@ -843,12 +848,24 @@ Private Function pvRecvHeaders(baData() As Byte, uResponse As UcsResponseType, u
         lPos = InStrB(1, .RecvBuffer.Data, StrConv(HDR_DELIM, vbFromUnicode))
         If lPos > 0 Then
             .AllHeaders = Left$(pvFromTextArray(.RecvBuffer.Data, ucsScpAcp), lPos - 1)
+            '--- unfold headers
+            If InStr(.AllHeaders, vbCrLf & " ") > 0 Or InStr(.AllHeaders, vbCrLf & vbTab) > 0 Then
+                .AllHeaders = Replace(.AllHeaders, vbCrLf & " ", " ")
+                .AllHeaders = Replace(.AllHeaders, vbCrLf & vbTab, vbTab)
+            End If
             vSplit = Split(.AllHeaders, vbCrLf)
             lIdx = 0
             For Each vElem In vSplit
                 vElem = Split(vElem, ":", Limit:=2)
                 If UBound(vElem) > 0 Then
-                    .Headers.Item(vElem(0)) = Trim$(vElem(1))
+                    If Not .Headers.Exists(vElem(0)) Then
+                        .Headers.Item(vElem(0)) = Trim$(vElem(1))
+                    End If
+                    If LCase$(vElem(0)) = LCase$(HDR_SET_COOKIE) Then
+                        With pvParseHeaderAttribs(vElem(1))
+                            pvSetCookie .Item("domain"), .Item("path"), .Item(0)
+                        End With
+                    End If
                 Else
                     .Headers.Item(lIdx) = Trim$(vElem(0))
                 End If
@@ -903,6 +920,7 @@ Private Function pvRecvHeaders(baData() As Byte, uResponse As UcsResponseType, u
                     .Remote = uRedirect
                     '--- prepare headers
                     SetRequestHeader HDR_HOST, .Remote.Host
+                    SetRequestHeader HDR_COOKIE, pvGetAllCookies(.Remote.Host, .Remote.Path)
                     pvResetResponse uResponse
                     '--- try to reuse socket if not closed (keep-alive)
                     pvSetState ucsWaitResolve
@@ -1419,24 +1437,37 @@ Private Function pvParseUrl(sUrl As String, uParsed As UcsParsedUrl, Optional De
     End With
 End Function
 
-Private Function pvParseHeaderAttrib(sHeader As String, sAttrib As String) As String
+Private Function pvParseHeaderAttribs(ByVal sHeader As String) As Object
     Dim vSplit          As Variant
     Dim vElem           As Variant
+    Dim sKey            As String
+    Dim sValue          As String
+    Dim lIdx            As Long
     
     '--- TODO: need regex parser for semi-colons in quoted values
+    Set pvParseHeaderAttribs = CreateObject("Scripting.Dictionary")
+    m_uRequest.Headers.CompareMode = vbTextCompare
     vSplit = Split(sHeader, ";")
     If UBound(vSplit) > 0 Then
         For Each vElem In vSplit
+            pvParseHeaderAttribs.Item(lIdx) = Trim$(vElem)
             vElem = Split(vElem, "=", Limit:=2)
-            If UBound(vElem) > 0 Then
-                If LCase$(Trim$(vElem(0))) = LCase$(sAttrib) Then
-                    pvParseHeaderAttrib = Trim$(vElem(1))
-                    If Left$(pvParseHeaderAttrib, 1) = """" And Right$(pvParseHeaderAttrib, 1) = """" And Len(pvParseHeaderAttrib) > 1 Then
-                        pvParseHeaderAttrib = Trim$(Mid$(pvParseHeaderAttrib, 2, Len(pvParseHeaderAttrib) - 2))
-                    End If
-                    Exit For
-                End If
+            sKey = Trim$(vElem(0))
+            If Left$(sKey, 1) = """" And Right$(sKey, 1) = """" And Len(sKey) > 1 Then
+                sKey = Trim$(Mid$(sKey, 2, Len(sKey) - 2))
             End If
+            If UBound(vElem) > 0 Then
+                sValue = Trim$(vElem(1))
+                If Left$(sValue, 1) = """" And Right$(sValue, 1) = """" And Len(sValue) > 1 Then
+                    sValue = Trim$(Mid$(sValue, 2, Len(sValue) - 2))
+                End If
+            Else
+                sValue = vbNullString
+            End If
+            If Not pvParseHeaderAttribs.Exists(sKey) Then
+                pvParseHeaderAttribs.Item(sKey) = sValue
+            End If
+            lIdx = lIdx + 1
         Next
     End If
 End Function
@@ -1644,6 +1675,61 @@ Private Function pvToStringAndFree(ByVal lPtr As Long) As Variant
         Call CopyMemory(ByVal StrPtr(pvToStringAndFree), ByVal lPtr, LenB(pvToStringAndFree))
         Call GlobalFree(lPtr)
     End If
+End Function
+
+Private Function pvSetCookie(ByVal sDomain As String, ByVal sPath As String, ByVal sValue As String)
+    Dim oCol            As Collection
+    
+    If Left$(sDomain, 1) = "." Then
+        sDomain = Mid$(sDomain, 2)
+    End If
+    If Right$(sDomain, 1) = "." Then
+        sDomain = Left$(sDomain, Len(sDomain) - 1)
+    End If
+    If LenB(sDomain) = 0 Then
+        sDomain = m_uRequest.Remote.Host
+    End If
+    If Left$(sPath, 1) <> "/" Then
+        sPath = m_uRequest.Remote.Path
+    End If
+    If Right$(sPath, 1) <> "/" Then
+        sPath = sPath & "/"
+    End If
+    If m_oCookies.Exists(sDomain) Then
+        Set oCol = m_oCookies.Item(sDomain)
+    Else
+        Set oCol = New Collection
+        Set m_oCookies.Item(sDomain) = oCol
+    End If
+    oCol.Add sPath & Chr$(1) & sValue
+End Function
+
+Private Function pvGetAllCookies(ByVal sDomain As String, ByVal sPath As String) As String
+    Dim vRetVal         As Variant
+    Dim oCol            As Collection
+    Dim vKey            As Variant
+    
+    vRetVal = Array()
+    If Right$(sDomain, 1) = "." Then
+        sDomain = Left$(sDomain, Len(sDomain) - 1)
+    End If
+    If Left$(sPath, 1) <> "/" Then
+        sPath = "/"
+    End If
+    Do While InStr(sDomain, ".") <> 0
+        If m_oCookies.Exists(sDomain) Then
+            Set oCol = m_oCookies.Item(sDomain)
+            For Each vKey In oCol
+                vKey = Split(vKey, Chr$(1), Limit:=2)
+                If Left$(sPath, Len(vKey(0))) = vKey(0) Then
+                    ReDim Preserve vRetVal(0 To UBound(vRetVal) + 1) As Variant
+                    vRetVal(UBound(vRetVal)) = vKey(1)
+                End If
+            Next
+        End If
+        sDomain = Mid$(sDomain, InStr(sDomain, ".") + 1)
+    Loop
+    pvGetAllCookies = Join(vRetVal, "; ")
 End Function
 
 '= buffers ===============================================================
@@ -2023,6 +2109,8 @@ Private Sub Class_Initialize()
     m_uRequest.Headers.CompareMode = vbTextCompare
     Set m_uResponse.Headers = CreateObject("Scripting.Dictionary")
     m_uResponse.Headers.CompareMode = vbTextCompare
+    Set m_oCookies = CreateObject("Scripting.Dictionary")
+    m_oCookies.CompareMode = vbTextCompare
     ReDim m_uRequest.ProxyList(-1 To -1) As UcsParsedUrl
 End Sub
 

@@ -219,6 +219,8 @@ Private Sub Command2_Click()
     m_oRequest.SetRequestHeader "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.69 Safari/537.36"
     m_oRequest.SetRequestHeader "Accept-Encoding", "gzip"
     m_oRequest.Send
+    m_oRequest.Open_ "GET", IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://www.unicontsoft.com/"
+    m_oRequest.Send
 '    m_oRequest.Open_ "GET", "http://localhost/ТоваПапка?Параметър1&Парам2#Анкор"
 '    m_oRequest.Send
 '    m_oRequest.Open_ "GET", IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://www.epay.bg/v3main/certreq?action=attach&get_cert=1&ident=1"
