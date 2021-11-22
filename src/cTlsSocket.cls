@@ -1916,7 +1916,7 @@ Private Function pvPkiPemImportRootCaCertStore(sCaBundlePemFile As String) As Lo
     End If
     For Each vElem In cCerts
         baCert = vElem
-        If CertAddEncodedCertificateToStore(hCertStore, X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, baCert(0), UBound(baCert) + 1, CERT_STORE_ADD_USE_EXISTING, 0) = 0 Then
+        If CertAddEncodedCertificateToStore(hCertStore, X509_ASN_ENCODING, baCert(0), UBound(baCert) + 1, CERT_STORE_ADD_USE_EXISTING, 0) = 0 Then
             hResult = Err.LastDllError
             sApiSource = "CertAddEncodedCertificateToStore"
             GoTo QH
@@ -1996,7 +1996,7 @@ Public Function pvPkiImportCertificateByRDN(baRDN() As Byte, cCerts As Collectio
         hResult = Err.LastDllError
         sApiSource = "CryptDecodeObjectEx(X509_NAME)"
     End If
-    pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, 0, CERT_FIND_ISSUER_NAME, ByVal lNamePtr, 0)
+    pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, CERT_FIND_ISSUER_NAME, ByVal lNamePtr, 0)
     If pCertContext <> 0 Then
         If pvPkiAppendCertChain(pCertContext, hCertStore, cCerts, cPrivKey) Then
             '--- success
@@ -2048,11 +2048,11 @@ Public Function pvPkiImportCertificateBySubject(ByVal Subject As String, cCerts 
         GoTo QH
     End If
     If LenB(sCertName) = 0 Then
-        pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, 0, CERT_FIND_ANY, ByVal 0, 0)
+        pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, CERT_FIND_ANY, ByVal 0, 0)
     Else
-        pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, 0, CERT_FIND_SUBJECT_STR, ByVal StrPtr(sCertName), 0)
+        pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, CERT_FIND_SUBJECT_STR, ByVal StrPtr(sCertName), 0)
         If pCertContext = 0 Then
-            pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, 0, CERT_FIND_HASH_STR, ByVal StrPtr(sCertName), 0)
+            pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, CERT_FIND_HASH_STR, ByVal StrPtr(sCertName), 0)
         End If
     End If
     If pCertContext <> 0 Then
@@ -2157,7 +2157,7 @@ Private Function pvPkiCertValidate(ByVal sRemoteHostName As String, cCerts As Co
     End If
     For lIdx = 1 To pvCollectionCount(cCerts)
         baCert = cCerts.Item(lIdx)
-        If CertAddEncodedCertificateToStore(hCertStore, X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, baCert(0), UBound(baCert) + 1, CERT_STORE_ADD_USE_EXISTING, 0) = 0 Then
+        If CertAddEncodedCertificateToStore(hCertStore, X509_ASN_ENCODING, baCert(0), UBound(baCert) + 1, CERT_STORE_ADD_USE_EXISTING, 0) = 0 Then
             hResult = Err.LastDllError
             sApiSource = "CertAddEncodedCertificateToStore"
             GoTo QH
@@ -2298,7 +2298,7 @@ Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hRootStor
             '--- check if the last certificate in the chain is from our custom hRootStore and remove untrusted flags from status
             Call CopyMemory(lPtr, ByVal UnsignedAdd(uChainSmall.rgElem, (uChainSmall.cElems - 1) * 4), 4)
             Call CopyMemory(uChainElem, ByVal lPtr, Len(uChainElem))
-            pExistContext = CertFindCertificateInStore(hRootStore, X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, 0, CERT_FIND_EXISTING, ByVal uChainElem.pCertContext, 0)
+            pExistContext = CertFindCertificateInStore(hRootStore, X509_ASN_ENCODING, 0, CERT_FIND_EXISTING, ByVal uChainElem.pCertContext, 0)
             If pExistContext <> 0 Then
                 Call CertFreeCertificateContext(pExistContext)
                 pExistContext = 0

@@ -1303,7 +1303,7 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
     End If
     For lIdx = pvCollectionCount(cCerts) To 1 Step -1
         baCert = cCerts.Item(lIdx)
-        If CertAddEncodedCertificateToStore(hCertStore, X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, baCert(0), UBound(baCert) + 1, CERT_STORE_ADD_USE_EXISTING, IIf(lIdx = 1, VarPtr(pCertContext), 0)) = 0 Then
+        If CertAddEncodedCertificateToStore(hCertStore, X509_ASN_ENCODING, baCert(0), UBound(baCert) + 1, CERT_STORE_ADD_USE_EXISTING, IIf(lIdx = 1, VarPtr(pCertContext), 0)) = 0 Then
             hResult = Err.LastDllError
             sApiSource = "CertAddEncodedCertificateToStore"
             GoTo QH
