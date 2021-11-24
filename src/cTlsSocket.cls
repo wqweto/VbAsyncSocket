@@ -440,6 +440,7 @@ Public Property Get SocketHandle() As Long
 End Property
 
 Public Property Get LastError() As VBA.ErrObject
+    Const LNG_FACILITY_WIN32 As Long = &H80070000
     Dim lErrNumber      As Long
     Dim sErrSource      As String
     
@@ -447,7 +448,7 @@ Public Property Get LastError() As VBA.ErrObject
     With LastError
         .Description = TlsGetLastError(m_uCtx, lErrNumber, sErrSource)
         If LenB(.Description) <> 0 And lErrNumber <> 0 Then
-            .Number = lErrNumber
+            .Number = IIf(lErrNumber < 0, lErrNumber, lErrNumber Or LNG_FACILITY_WIN32)
             .Source = sErrSource
         ElseIf m_oSocket.HasPendingEvent Then
             .Number = 0
