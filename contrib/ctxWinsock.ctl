@@ -319,13 +319,13 @@ Public Sub Accept(ByVal requestID As Long)
     If m_oSocket Is Nothing Then
         If DuplicateHandle(GetCurrentProcess(), requestID, GetCurrentProcess(), hDuplicate, 0, 0, DUPLICATE_SAME_ACCESS) = 0 Then
             On Error GoTo 0
-            pvSetError Err.LastDllError, RaiseError:=True
+            pvSetError LastDllError:=Err.LastDllError, RaiseError:=True
             GoTo QH
         End If
         Set m_oSocket = New cTlsSocket
         If Not m_oSocket.Attach(hDuplicate) Then
             On Error GoTo 0
-            pvSetError m_oSocket.LastError, RaiseError:=True
+            pvSetError LastError:=m_oSocket.LastError, RaiseError:=True
             GoTo QH
         End If
     End If
@@ -362,7 +362,7 @@ Public Sub Bind(Optional ByVal LocalPort As Long, Optional LocalIP As String)
     End If
     If Not pvSocket.Bind(LocalIP, m_lLocalPort) Then
         On Error GoTo 0
-        pvSetError pvSocket.LastError, RaiseError:=True
+        pvSetError LastError:=m_oSocket.LastError, RaiseError:=True
     End If
     pvState = sckOpen
     Exit Sub
@@ -384,7 +384,7 @@ Public Sub Connect(Optional RemoteHost As String, Optional ByVal RemotePort As L
     pvState = sckResolvingHost
     If Not pvSocket.Connect(m_sRemoteHost, m_lRemotePort, UseTls:=(m_eProtocol = sckTLSProtocol)) Then
         On Error GoTo 0
-        pvSetError pvSocket.LastError, RaiseError:=True
+        pvSetError LastError:=m_oSocket.LastError, RaiseError:=True
     End If
     pvState = sckConnected
     Exit Sub
@@ -406,7 +406,7 @@ Public Sub Listen( _
     End If
     If Not pvSocket.Listen() Then
         On Error GoTo 0
-        pvSetError pvSocket.LastError, RaiseError:=True
+        pvSetError LastError:=m_oSocket.LastError, RaiseError:=True
     End If
     pvState = sckListening
     Exit Sub
@@ -511,18 +511,35 @@ End Sub
 
 Public Sub SendData(data As Variant)
     Const FUNC_NAME     As String = "SendData"
+    Dim baAppend()      As Byte
+    Dim lPos            As Long
     
     On Error GoTo EH
-    Select Case VarType(data)
-    Case vbString
-        m_baSendBuffer = pvSocket.ToTextArray(CStr(data), ucsScpAcp)
-    Case vbByte + vbArray
-        m_baSendBuffer = data
-    Case Else
-        Err.Raise vbObjectError, , "Unsupported data type: " & TypeName(data)
-    End Select
+    If UBound(m_baSendBuffer) < 0 Then
+        Select Case VarType(data)
+        Case vbString
+            m_baSendBuffer = pvSocket.ToTextArray(CStr(data), ucsScpAcp)
+        Case vbByte + vbArray
+            m_baSendBuffer = data
+        Case Else
+            Err.Raise vbObjectError, , "Unsupported data type: " & TypeName(data)
+        End Select
+    Else
+        Select Case VarType(data)
+        Case vbString
+            baAppend = pvSocket.ToTextArray(CStr(data), ucsScpAcp)
+        Case vbByte + vbArray
+            baAppend = data
+        Case Else
+            Err.Raise vbObjectError, , "Unsupported data type: " & TypeName(data)
+        End Select
+        If UBound(baAppend) >= 0 Then
+            lPos = UBound(m_baSendBuffer) + 1
+            ReDim Preserve m_baSendBuffer(0 To lPos + UBound(baAppend)) As Byte
+            Call CopyMemory(m_baSendBuffer(lPos), baAppend(0), UBound(baAppend) + 1)
+        End If
+    End If
     If UBound(m_baSendBuffer) >= 0 Then
-        m_lSendPos = 0
         m_oSocket_OnSend
     End If
     Exit Sub
@@ -530,13 +547,26 @@ EH:
     PrintError FUNC_NAME
 End Sub
 
-Private Sub pvSetError(ByVal lLastDllError As Long, Optional Source As String, Optional ByVal RaiseError As Boolean)
+Private Sub pvSetError(Optional ByVal LastDllError As Long, Optional LastError As VBA.ErrObject, Optional ByVal RaiseError As Boolean)
+    Const LNG_FACILITY_WIN32 As Long = &H80070000
+    Dim Number          As Long
+    Dim Description     As String
+    Dim Source          As String
     Dim bCancel         As Boolean
     
     pvState = sckError
-    RaiseEvent Error(vbObjectError, pvSocket.GetErrorDescription(lLastDllError), lLastDllError, Source, App.HelpFile, 0, bCancel)
+    If LastDllError <> 0 Then
+        Number = LastDllError Or LNG_FACILITY_WIN32
+        Description = pvSocket.GetErrorDescription(LastDllError)
+    ElseIf Not LastError Is Nothing Then
+        Number = LastError.Number
+        Source = LastError.Source
+        Description = LastError.Description
+        LastDllError = LastError.Number And &HFFFF&
+    End If
+    RaiseEvent Error(Number, Description, LastDllError, Source, App.HelpFile, 0, bCancel)
     If Not bCancel And RaiseError Then
-        Err.Raise vbObjectError, Source, pvSocket.GetErrorDescription(lLastDllError), App.HelpFile, 0
+        Err.Raise Number, Source, Description, App.HelpFile, 0
     End If
 End Sub
 
@@ -550,8 +580,19 @@ Private Sub m_oSocket_OnConnect()
 End Sub
 
 Private Sub m_oSocket_OnClose()
-    pvState = sckClosed
+    Const FUNC_NAME     As String = "m_oSocket_OnClose"
+    
+    On Error GoTo EH
+    pvState = sckClosing
     RaiseEvent CloseEvent
+    If Not m_oSocket Is Nothing Then
+        m_oSocket.Close_
+        Set m_oSocket = Nothing
+    End If
+    pvState = sckClosed
+    Exit Sub
+EH:
+    PrintError FUNC_NAME
 End Sub
 
 Private Sub m_oSocket_OnAccept()
@@ -562,7 +603,7 @@ Private Sub m_oSocket_OnAccept()
     pvState = sckConnectionPending
     Set oTemp = New cTlsSocket
     If Not m_oSocket.Accept(oTemp, UseTls:=(m_eProtocol = sckTLSProtocol)) Then
-        pvSetError m_oSocket.LastError
+        pvSetError LastError:=m_oSocket.LastError
         GoTo QH
     End If
     Set m_oRequestSocket = oTemp
@@ -599,10 +640,11 @@ Private Sub m_oSocket_OnSend()
     Do While m_lSendPos <= UBound(m_baSendBuffer)
         lSent = pvSocket.Send(VarPtr(m_baSendBuffer(m_lSendPos)), UBound(m_baSendBuffer) + 1 - m_lSendPos, m_sRemoteHost, m_lRemotePort)
         If lSent < 0 Then
-            pvSetError pvSocket.LastError
-            GoTo QH
-        ElseIf pvSocket.LastError = sckWouldBlock Then
-            GoTo QH
+            If Not pvSocket.HasPendingEvent Then
+                pvSetError LastError:=m_oSocket.LastError
+                GoTo QH
+            End If
+            Exit Do
         Else
             m_lSendPos = m_lSendPos + lSent
             RaiseEvent SendProgress(m_lSendPos, UBound(m_baSendBuffer) + 1)
@@ -624,7 +666,7 @@ Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsy
     
     On Error GoTo EH
     If m_oSocket.LastError <> 0 Then
-        pvSetError ErrorCode
+        pvSetError LastDllError:=ErrorCode
     End If
     Exit Sub
 EH:

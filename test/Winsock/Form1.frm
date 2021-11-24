@@ -89,10 +89,15 @@ Private Sub Command4_Click()
 End Sub
 
 Private Sub ctxWinsock_Connect()
+    Dim lIdx            As Long
+    
     Debug.Print "Connected to " & ctxWinsock.RemoteHostIP, Timer
     ctxWinsock.SendData "GET / HTTP/1.0" & vbCrLf & _
         "Host: www.bgdev.org" & vbCrLf & _
         "Connection: close" & vbCrLf & vbCrLf
+    For lIdx = 1 To 5000
+        ctxWinsock.SendData String(1000, "a")
+    Next
 End Sub
 
 Private Sub ctxWinsock_DataArrival(ByVal bytesTotal As Long)
@@ -141,7 +146,6 @@ End Sub
 Private Sub ctxServer_Close(Index As Integer)
     ctxServer_CloseEvent Index
 End Sub
-
 
 Private Sub ctxWinsock_Error(ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
     Debug.Print "Error: " & Description
