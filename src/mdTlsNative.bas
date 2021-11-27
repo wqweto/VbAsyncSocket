@@ -233,7 +233,7 @@ Private Type BCRYPT_ECCKEY_BLOB
     Buffer(0 To 1000)   As Byte
 End Type
 
-Private Type CRYPT_BLOB_DATA
+Private Type CRYPT_DATA_BLOB
     cbData              As Long
     pbData              As Long
 End Type
@@ -246,7 +246,7 @@ End Type
 
 Private Type CRYPT_ALGORITHM_IDENTIFIER
     pszObjId            As Long
-    Parameters          As CRYPT_BLOB_DATA
+    Parameters          As CRYPT_DATA_BLOB
 End Type
 
 Private Type CERT_PUBLIC_KEY_INFO
@@ -256,15 +256,15 @@ End Type
 
 Private Type CRYPT_ECC_PRIVATE_KEY_INFO
     dwVersion           As Long
-    PrivateKey          As CRYPT_BLOB_DATA
+    PrivateKey          As CRYPT_DATA_BLOB
     szCurveOid          As Long
-    PublicKey           As CRYPT_BLOB_DATA
+    PublicKey           As CRYPT_DATA_BLOB
 End Type
 
 Private Type CRYPT_PRIVATE_KEY_INFO
     dwVersion           As Long
     Algorithm           As CRYPT_ALGORITHM_IDENTIFIER
-    PrivateKey          As CRYPT_BLOB_DATA
+    PrivateKey          As CRYPT_DATA_BLOB
     pAttributes         As Long
 End Type
 
@@ -547,7 +547,7 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
     Dim pCertContext    As Long
     Dim aCred(0 To 0)   As Long
     Dim uIssuerInfo     As SecPkgContext_IssuerListInfoEx
-    Dim uIssuerList()   As CRYPT_BLOB_DATA
+    Dim uIssuerList()   As CRYPT_DATA_BLOB
     Dim cIssuers        As Collection
     Dim baCaDn()        As Byte
     Dim uCertContext    As CERT_CONTEXT
@@ -765,7 +765,7 @@ RetryCredentials:
                             GoTo QH
                         End If
                         If uIssuerInfo.cIssuers > 0 Then
-                            ReDim uIssuerList(0 To uIssuerInfo.cIssuers - 1) As CRYPT_BLOB_DATA
+                            ReDim uIssuerList(0 To uIssuerInfo.cIssuers - 1) As CRYPT_DATA_BLOB
                             Call CopyMemory(uIssuerList(0), ByVal uIssuerInfo.aIssuers, uIssuerInfo.cIssuers * Len(uIssuerList(0)))
                             Set cIssuers = New Collection
                             For lIdx = 0 To UBound(uIssuerList)

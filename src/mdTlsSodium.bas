@@ -129,27 +129,27 @@ Private Declare Function CertFreeCertificateContext Lib "crypt32" (ByVal pCertCo
     Private Declare Function crypto_aead_aes256gcm_encrypt Lib "libsodium" (lpOut As Any, lOutSize As Any, lConstIn As Any, ByVal lInSize As Long, ByVal lHighInSize As Long, lpConstAd As Any, ByVal lAdSize As Long, ByVal lHighAdSize As Long, ByVal nSec As Long, lpConstNonce As Any, lpConstKey As Any) As Long
 #End If
 
-Private Type CRYPT_BLOB_DATA
+Private Type CRYPT_DATA_BLOB
     cbData              As Long
     pbData              As Long
 End Type
 
 Private Type CRYPT_ALGORITHM_IDENTIFIER
     pszObjId            As Long
-    Parameters          As CRYPT_BLOB_DATA
+    Parameters          As CRYPT_DATA_BLOB
 End Type
 
 Private Type CRYPT_ECC_PRIVATE_KEY_INFO
     dwVersion           As Long
-    PrivateKey          As CRYPT_BLOB_DATA
+    PrivateKey          As CRYPT_DATA_BLOB
     szCurveOid          As Long
-    PublicKey           As CRYPT_BLOB_DATA
+    PublicKey           As CRYPT_DATA_BLOB
 End Type
 
 Private Type CRYPT_PRIVATE_KEY_INFO
     dwVersion           As Long
     Algorithm           As CRYPT_ALGORITHM_IDENTIFIER
-    PrivateKey          As CRYPT_BLOB_DATA
+    PrivateKey          As CRYPT_DATA_BLOB
     pAttributes         As Long
 End Type
 
@@ -202,8 +202,8 @@ Private Type BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO
 End Type
 
 Private Type CERT_ECC_SIGNATURE
-    rValue             As CRYPT_BLOB_DATA
-    sValue             As CRYPT_BLOB_DATA
+    rValue             As CRYPT_DATA_BLOB
+    sValue             As CRYPT_DATA_BLOB
 End Type
 
 '=========================================================================

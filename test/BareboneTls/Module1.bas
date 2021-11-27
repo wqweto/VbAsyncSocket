@@ -54,14 +54,14 @@ Private Declare Function CertGetCertificateContextProperty Lib "crypt32" (ByVal 
 Private Declare Function CertStrToName Lib "crypt32" Alias "CertStrToNameW" (ByVal dwCertEncodingType As Long, ByVal pszX500 As Long, ByVal dwStrType As Long, ByVal pvReserved As Long, pbEncoded As Any, pcbEncoded As Long, ByVal ppszError As Long) As Long
 Private Declare Function CertCreateSelfSignCertificate Lib "crypt32" (ByVal hCryptProvOrNCryptKey As Long, pSubjectIssuerBlob As Any, ByVal dwFlags As Long, pKeyProvInfo As Any, ByVal pSignatureAlgorithm As Long, pStartTime As Any, pEndTime As Any, ByVal pExtensions As Long) As Long
 
-Private Type CRYPT_BLOB_DATA
+Private Type CRYPT_DATA_BLOB
     cbData              As Long
     pbData              As Long
 End Type
 
 Private Type CRYPT_ALGORITHM_IDENTIFIER
     pszObjId            As Long
-    Parameters          As CRYPT_BLOB_DATA
+    Parameters          As CRYPT_DATA_BLOB
 End Type
 
 Private Type CRYPT_KEY_PROV_INFO
@@ -85,7 +85,7 @@ End Type
 Private Type CRYPT_PRIVATE_KEY_INFO
     Version             As Long
     Algorithm           As CRYPT_ALGORITHM_IDENTIFIER
-    PrivateKey          As CRYPT_BLOB_DATA
+    PrivateKey          As CRYPT_DATA_BLOB
     pAttributes         As Long
 End Type
 
@@ -109,7 +109,7 @@ Public Function PkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey As 
     Dim sName           As String
     Dim baName()        As Byte
     Dim lSize           As Long
-    Dim uName           As CRYPT_BLOB_DATA
+    Dim uName           As CRYPT_DATA_BLOB
     Dim uExpire         As SYSTEMTIME
     Dim uInfo           As CRYPT_KEY_PROV_INFO
     Dim pCertContext    As Long
