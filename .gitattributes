@@ -5,3 +5,4 @@
 *.cmp binary
 *.cobj binary
 *.pfx binary
+*.cer binary

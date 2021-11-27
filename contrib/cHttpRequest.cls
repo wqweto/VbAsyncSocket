@@ -1889,24 +1889,6 @@ Private Function InitAddressOfMethod(pObj As Object, ByVal MethodParamCount As L
     Debug.Assert lSize = THUNK_SIZE
 End Function
 
-Private Property Get ThunkPrivateData(pThunk As IUnknown, Optional ByVal Index As Long) As Long
-    Dim lPtr            As Long
-    
-    lPtr = ObjPtr(pThunk)
-    If lPtr <> 0 Then
-        Call CopyMemory(ThunkPrivateData, ByVal (lPtr Xor SIGN_BIT) + 8 + Index * 4 Xor SIGN_BIT, 4)
-    End If
-End Property
-
-Private Property Let ThunkPrivateData(pThunk As IUnknown, Optional ByVal Index As Long, ByVal lValue As Long)
-    Dim lPtr            As Long
-    
-    lPtr = ObjPtr(pThunk)
-    If lPtr <> 0 Then
-        Call CopyMemory(ByVal (lPtr Xor SIGN_BIT) + 8 + Index * 4 Xor SIGN_BIT, lValue, 4)
-    End If
-End Property
-
 Private Function pvThunkAllocate(sText As String, Optional ByVal Size As Long) As Long
     Static Map(0 To &H3FF) As Long
     Dim baInput()       As Byte
