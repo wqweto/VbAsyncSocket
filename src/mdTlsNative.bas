@@ -406,6 +406,7 @@ Public Type UcsTlsContext
     LocalCertificates   As Collection
     LocalPrivateKey     As Collection
     RemoteCertificates  As Collection
+    RemoteOcspResponse  As Collection
     '--- SSPI
     ContextReq          As Long
     hTlsCredentials     As Currency

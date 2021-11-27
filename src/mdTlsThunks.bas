@@ -103,7 +103,7 @@ Private Declare Function CryptDecodeObjectEx Lib "crypt32" (ByVal dwCertEncoding
 Private Declare Function CertCreateCertificateContext Lib "crypt32" (ByVal dwCertEncodingType As Long, pbCertEncoded As Any, ByVal cbCertEncoded As Long) As Long
 Private Declare Function CertFreeCertificateContext Lib "crypt32" (ByVal pCertContext As Long) As Long
 
-Private Type CRYPT_BLOB_DATA
+Private Type CRYPT_DATA_BLOB
     cbData              As Long
     pbData              As Long
 End Type
@@ -116,7 +116,7 @@ End Type
 
 Private Type CRYPT_ALGORITHM_IDENTIFIER
     pszObjId            As Long
-    Parameters          As CRYPT_BLOB_DATA
+    Parameters          As CRYPT_DATA_BLOB
 End Type
 
 Private Type CERT_PUBLIC_KEY_INFO
@@ -126,15 +126,15 @@ End Type
 
 Private Type CRYPT_ECC_PRIVATE_KEY_INFO
     dwVersion           As Long
-    PrivateKey          As CRYPT_BLOB_DATA
+    PrivateKey          As CRYPT_DATA_BLOB
     szCurveOid          As Long
-    PublicKey           As CRYPT_BLOB_DATA
+    PublicKey           As CRYPT_DATA_BLOB
 End Type
 
 Private Type CRYPT_PRIVATE_KEY_INFO
     Version             As Long
     Algorithm           As CRYPT_ALGORITHM_IDENTIFIER
-    PrivateKey          As CRYPT_BLOB_DATA
+    PrivateKey          As CRYPT_DATA_BLOB
     pAttributes         As Long
 End Type
 
@@ -177,7 +177,7 @@ Private Const TLS_HANDSHAKE_KEY_UPDATE                  As Long = 24
 Private Const TLS_HANDSHAKE_MESSAGE_HASH                As Long = 254
 '--- TLS Extensions from https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml
 Private Const TLS_EXTENSION_SERVER_NAME                 As Long = 0
-'Private Const TLS_EXTENSION_STATUS_REQUEST              As Long = 5
+Private Const TLS_EXTENSION_STATUS_REQUEST              As Long = 5
 Private Const TLS_EXTENSION_SUPPORTED_GROUPS            As Long = 10
 Private Const TLS_EXTENSION_EC_POINT_FORMAT             As Long = 11
 Private Const TLS_EXTENSION_SIGNATURE_ALGORITHMS        As Long = 13
@@ -444,6 +444,7 @@ Public Type UcsTlsContext
     RemoteExtensions    As Collection
     RemoteTickets       As Collection
     RemoteSupportedGroups As Collection
+    RemoteOcspResponse  As Collection
     '--- crypto settings
     ProtocolVersion     As Long
     ExchGroup           As Long
@@ -988,10 +989,14 @@ Private Sub pvTlsBuildClientHello(uCtx As UcsTlsContext, uOutput As UcsBuffer)
                             End If
                         pvBufferWriteBlockEnd uOutput
                     pvBufferWriteBlockEnd uOutput
+                    '--- Extension - OCSP Status Request
+                    pvArrayByte baTemp, 0, TLS_EXTENSION_STATUS_REQUEST, 0, 5, 1, 0, 0, 0, 0
+                    pvBufferWriteArray uOutput, baTemp
                     If (.LocalFeatures And ucsTlsSupportTls12) <> 0 Then
                         '--- Extension - EC Point Formats
                         pvArrayByte baTemp, 0, TLS_EXTENSION_EC_POINT_FORMAT, 0, 2, 1, 0
                         pvBufferWriteArray uOutput, baTemp     '--- uncompressed only
+                        '--- Extension - Extended Master Secret
                         pvArrayByte baTemp, 0, TLS_EXTENSION_EXTENDED_MASTER_SECRET, 0, 0
                         pvBufferWriteArray uOutput, baTemp     '--- supported
                         '--- Extension - Renegotiation Info
@@ -1775,6 +1780,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
     Dim lExtEnd         As Long
     Dim lStringSize     As Long
     Dim lExchGroup      As Long
+    Dim baResponse()    As Byte
     
     On Error GoTo EH
     With uCtx
@@ -1868,9 +1874,27 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                                 .RemoteCertificates.Add baCert
                             pvBufferReadBlockEnd uInput
                             If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
-                                pvBufferReadBlockStart uInput, Size:=2, BlockSize:=lCertSize
-                                    '--- certificate extensions -> skip
-                                    uInput.Pos = uInput.Pos + lCertSize
+                                pvBufferReadBlockStart uInput, Size:=2, BlockSize:=lBlockSize
+                                lBlockEnd = uInput.Pos + lBlockSize
+                                Do While uInput.Pos < lBlockEnd
+                                    pvBufferReadLong uInput, lExtType, Size:=2
+                                    #If ImplUseDebugLog Then
+'                                        DebugLog MODULE_NAME, FUNC_NAME, "CertificateExtensions " & pvTlsGetExtensionName(lExtType)
+                                    #End If
+                                    pvBufferReadBlockStart uInput, Size:=2, BlockSize:=lExtSize
+                                        lExtEnd = uInput.Pos + lExtSize
+                                        Select Case lExtType
+                                        Case TLS_EXTENSION_STATUS_REQUEST
+                                            pvBufferReadArray uInput, baResponse, lExtSize
+                                            If .RemoteOcspResponse Is Nothing Then
+                                                Set .RemoteOcspResponse = New Collection
+                                            End If
+                                            .RemoteOcspResponse.Add baResponse
+                                        Case Else
+                                            uInput.Pos = uInput.Pos + lExtSize
+                                        End Select
+                                    pvBufferReadBlockEnd uInput
+                                Loop
                                 pvBufferReadBlockEnd uInput
                             End If
                         Loop
@@ -2207,6 +2231,7 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
     Dim lPublicSize     As Long
     Dim lNameSize       As Long
     Dim lCookieSize     As Long
+    Dim baResponse()    As Byte
     
     On Error GoTo EH
     If pvArraySize(m_baHelloRetryRandom) = 0 Then
@@ -2288,6 +2313,12 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
                                     pvBufferReadString uInput, .AlpnNegotiated, lNameSize
                                 pvBufferReadBlockEnd uInput
                             pvBufferReadBlockEnd uInput
+                        Case TLS_EXTENSION_STATUS_REQUEST
+                            pvBufferReadArray uInput, baResponse, lExtSize
+                            If .RemoteOcspResponse Is Nothing Then
+                                Set .RemoteOcspResponse = New Collection
+                            End If
+                            .RemoteOcspResponse.Add baResponse
                         Case Else
                             uInput.Pos = uInput.Pos + lExtSize
                         End Select

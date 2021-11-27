@@ -121,6 +121,9 @@ Private Const CERT_FIND_HASH_STR                        As Long = &H140000
 Private Const CERT_ALT_NAME_DNS_NAME                    As Long = 3
 '--- for CertCreateCertificateChainEngine
 Private Const CERT_CHAIN_CACHE_END_CERT                 As Long = 1
+'--- for CertSetCertificateContextProperty
+Private Const CERT_OCSP_RESPONSE_PROP_ID                As Long = 70
+Private Const CERT_SET_PROPERTY_IGNORE_PERSIST_ERROR_FLAG As Long = &H80000000
 '--- OIDs
 Private Const szOID_RSA_RSA                             As String = "1.2.840.113549.1.1.1"
 Private Const szOID_ECC_CURVE_P256                      As String = "1.2.840.10045.3.1.7"
@@ -181,6 +184,7 @@ Private Declare Function CertGetCertificateChain Lib "crypt32" (ByVal hChainEngi
 Private Declare Function CertFreeCertificateChain Lib "crypt32" (ByVal pChainContext As Long) As Long
 Private Declare Function CertFindExtension Lib "crypt32" (ByVal pszObjId As String, ByVal cExtensions As Long, ByVal rgExtensions As Long) As Long
 Private Declare Function CertFindCertificateInStore Lib "crypt32" (ByVal hCertStore As Long, ByVal dwCertEncodingType As Long, ByVal dwFindFlags As Long, ByVal dwFindType As Long, pvFindPara As Any, ByVal pPrevCertContext As Long) As Long
+Private Declare Function CertSetCertificateContextProperty Lib "crypt32" (ByVal pCertContext As Long, ByVal dwPropId As Long, ByVal dwFlags As Long, pvData As Any) As Long
 '--- NCrypt
 Private Declare Function NCryptImportKey Lib "ncrypt" (ByVal hProvider As Long, ByVal hImportKey As Long, ByVal pszBlobType As Long, pParameterList As Any, phKey As Long, pbData As Any, ByVal cbData As Long, ByVal dwFlags As Long) As Long
 Private Declare Function NCryptExportKey Lib "ncrypt" (ByVal hKey As Long, ByVal hExportKey As Long, ByVal pszBlobType As Long, pParameterList As Any, pbOutput As Any, ByVal cbOutput As Long, pcbResult As Any, ByVal dwFlags As Long) As Long
@@ -193,7 +197,7 @@ Private Declare Function NCryptFinalizeKey Lib "ncrypt" (ByVal hKey As Long, ByV
     Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
 #End If
 
-Private Type CRYPT_BLOB_DATA
+Private Type CRYPT_DATA_BLOB
     cbData              As Long
     pbData              As Long
 End Type
@@ -206,7 +210,7 @@ End Type
 
 Private Type CRYPT_ALGORITHM_IDENTIFIER
     pszObjId            As Long
-    Parameters          As CRYPT_BLOB_DATA
+    Parameters          As CRYPT_DATA_BLOB
 End Type
 
 Private Type CERT_PUBLIC_KEY_INFO
@@ -216,9 +220,9 @@ End Type
 
 Private Type CRYPT_ECC_PRIVATE_KEY_INFO
     dwVersion           As Long
-    PrivateKey          As CRYPT_BLOB_DATA
+    PrivateKey          As CRYPT_DATA_BLOB
     szCurveOid          As Long
-    PublicKey           As CRYPT_BLOB_DATA
+    PublicKey           As CRYPT_DATA_BLOB
 End Type
 
 Private Type CRYPT_KEY_PROV_INFO
@@ -242,7 +246,7 @@ End Type
 Private Type CRYPT_PRIVATE_KEY_INFO
     dwVersion           As Long
     Algorithm           As CRYPT_ALGORITHM_IDENTIFIER
-    PrivateKey          As CRYPT_BLOB_DATA
+    PrivateKey          As CRYPT_DATA_BLOB
     pAttributes         As Long
 End Type
 
@@ -270,12 +274,12 @@ End Type
 
 Private Type CERT_INFO
     dwVersion           As Long
-    SerialNumber        As CRYPT_BLOB_DATA
+    SerialNumber        As CRYPT_DATA_BLOB
     SignatureAlgorithm  As CRYPT_ALGORITHM_IDENTIFIER
-    Issuer              As CRYPT_BLOB_DATA
+    Issuer              As CRYPT_DATA_BLOB
     NotBefore           As FILETIME
     NotAfter            As FILETIME
-    Subject             As CRYPT_BLOB_DATA
+    Subject             As CRYPT_DATA_BLOB
     SubjectPublicKeyInfo As CERT_PUBLIC_KEY_INFO
     IssuerUniqueId      As CRYPT_BIT_BLOB
     SubjectUniqueId     As CRYPT_BIT_BLOB
@@ -314,7 +318,7 @@ End Type
 Private Type CERT_EXTENSION
     pszObjId            As Long
     fCritical           As Long
-    Value               As CRYPT_BLOB_DATA
+    Value               As CRYPT_DATA_BLOB
 End Type
 
 Private Type NCryptBuffer
@@ -368,6 +372,7 @@ Private Const LNG_FACILITY_WIN32                        As Long = &H80070000
 Private Const ERR_NO_MATCHING_ALT_NAME                  As String = "No certificate subject name matches target host name"
 Private Const ERR_NO_CERTIFICATE                        As String = "No server certificate found"
 Private Const ERR_TRUST_IS_REVOKED                      As String = "Trust for this certificate or one of the certificates in the certificate chain has been revoked"
+Private Const ERR_TRUST_IS_NOT_SIGNATURE_VALID          As String = "The certificate or one of the certificates in the certificate chain does not have a valid signature"
 Private Const ERR_TRUST_IS_PARTIAL_CHAIN                As String = "The certificate chain is not complete"
 Private Const ERR_TRUST_IS_UNTRUSTED_ROOT               As String = "The certificate or certificate chain is based on an untrusted root"
 Private Const ERR_TRUST_IS_NOT_TIME_VALID               As String = "The certificate has expired"
@@ -520,6 +525,10 @@ End Property
 
 Public Property Get RemoteCertificates() As Collection
     Set RemoteCertificates = m_uCtx.RemoteCertificates
+End Property
+
+Public Property Get RemoteOcspResponse() As Collection
+    Set RemoteOcspResponse = m_uCtx.RemoteOcspResponse
 End Property
 
 Public Property Get AlpnNegotiated() As String
@@ -1344,7 +1353,7 @@ Private Function pvHandleReceive(Optional ByVal Flush As Boolean) As Boolean
                     pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
                     pvFireOnError LastError.Number, ucsSfdRead
                     GoTo QH
-                ElseIf Not pvPkiCertValidate(RemoteHostName, RemoteCertificates, frRootStore, sError) Then
+                ElseIf Not pvPkiCertValidate(RemoteHostName, RemoteCertificates, RemoteOcspResponse, frRootStore, sError) Then
                     pvSetLastError sError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & MODULE_NAME & ".pvPkiCertValidate"
                     pvFireOnError LastError.Number, ucsSfdRead
                     GoTo QH
@@ -1938,7 +1947,7 @@ End Function
 Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As String, cCerts As Collection, cPrivKey As Collection) As Boolean
     Const FUNC_NAME     As String = "pvPkiPkcs12ImportCertificates"
     Dim baPfx()         As Byte
-    Dim uBlob           As CRYPT_BLOB_DATA
+    Dim uBlob           As CRYPT_DATA_BLOB
     Dim hPfxStore       As Long
     Dim pCertContext    As Long
     Dim hResult         As Long
@@ -2082,7 +2091,7 @@ Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey 
     Dim sName           As String
     Dim baName()        As Byte
     Dim lSize           As Long
-    Dim uName           As CRYPT_BLOB_DATA
+    Dim uName           As CRYPT_DATA_BLOB
     Dim pCertContext    As Long
     Dim hResult         As Long
     Dim sApiSource      As String
@@ -2137,7 +2146,7 @@ QH:
     End If
 End Function
 
-Private Function pvPkiCertValidate(ByVal sRemoteHostName As String, cCerts As Collection, ByVal hRootStore As Long, sError As String) As Boolean
+Private Function pvPkiCertValidate(ByVal sHostName As String, cCerts As Collection, cOcspResponse As Collection, ByVal hRootStore As Long, sError As String) As Boolean
     Const FUNC_NAME     As String = "pvPkiCertValidate"
     Dim hCertStore      As Long
     Dim lIdx            As Long
@@ -2146,6 +2155,7 @@ Private Function pvPkiCertValidate(ByVal sRemoteHostName As String, cCerts As Co
     Dim vElem           As Variant
     Dim sDnsName        As String
     Dim bMatched        As Boolean
+    Dim uBlob           As CRYPT_DATA_BLOB
     Dim hResult         As Long
     Dim sApiSource      As String
     
@@ -2165,13 +2175,13 @@ Private Function pvPkiCertValidate(ByVal sRemoteHostName As String, cCerts As Co
         End If
     Next
     '--- search remote host FQDN in any X.509 certificate's "Subject Alternative Name" list of DNS names (incl. wildcards)
-    sRemoteHostName = LCase$(sRemoteHostName)
+    sHostName = LCase$(sHostName)
     sError = vbNullString
     Do
         pCertContext = CertEnumCertificatesInStore(hCertStore, pCertContext)
         If pCertContext = 0 Then
             If LenB(sError) = 0 Then
-                sError = Replace(ERR_NO_MATCHING_ALT_NAME, "%1", sRemoteHostName)
+                sError = Replace(ERR_NO_MATCHING_ALT_NAME, "%1", sHostName)
             End If
             Exit Do
         End If
@@ -2179,18 +2189,27 @@ Private Function pvPkiCertValidate(ByVal sRemoteHostName As String, cCerts As Co
         For Each vElem In pvPkiCertGetSubjectAltName2(pCertContext, CERT_ALT_NAME_DNS_NAME)
             sDnsName = LCase$(vElem)
             If Left$(sDnsName, 1) = "*" Then
-                If sRemoteHostName Like sDnsName And Not sRemoteHostName Like "*." & sDnsName Then
+                If sHostName Like sDnsName And Not sHostName Like "*." & sDnsName Then
                     bMatched = True
                     Exit For
                 End If
             Else
-                If sRemoteHostName = sDnsName Or "www." & sRemoteHostName = sDnsName Then
+                If sHostName = sDnsName Or "www." & sHostName = sDnsName Then
                     bMatched = True
                     Exit For
                 End If
             End If
         Next
         If bMatched Then
+            If SearchCollection(cOcspResponse, 1, RetVal:=baCert) And pvArraySize(baCert) > 0 Then
+                uBlob.cbData = pvArraySize(baCert)
+                uBlob.pbData = VarPtr(baCert(0))
+                If CertSetCertificateContextProperty(pCertContext, CERT_OCSP_RESPONSE_PROP_ID, CERT_SET_PROPERTY_IGNORE_PERSIST_ERROR_FLAG, uBlob) = 0 Then
+                    hResult = Err.LastDllError
+                    sApiSource = "CertSetCertificateContextProperty(CERT_OCSP_RESPONSE_PROP_ID)"
+                    GoTo QH
+                End If
+            End If
             If pvPkiCertBuildChain(pCertContext, hRootStore, sError) Then
                 '--- success
                 pvPkiCertValidate = True
@@ -2310,16 +2329,18 @@ Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hRootStor
             '--- success
             pvPkiCertBuildChain = True
             Exit For
-        ElseIf (dwErrorStatus And CERT_TRUST_IS_REVOKED) <> 0 Then
-            sError = ERR_TRUST_IS_REVOKED
-        ElseIf (dwErrorStatus And CERT_TRUST_IS_PARTIAL_CHAIN) <> 0 Then
-            sError = ERR_TRUST_IS_PARTIAL_CHAIN
-        ElseIf (dwErrorStatus And CERT_TRUST_IS_UNTRUSTED_ROOT) <> 0 Then
-            sError = ERR_TRUST_IS_UNTRUSTED_ROOT
         ElseIf (dwErrorStatus And CERT_TRUST_IS_NOT_TIME_VALID) <> 0 Then
             sError = ERR_TRUST_IS_NOT_TIME_VALID
+        ElseIf (dwErrorStatus And CERT_TRUST_IS_REVOKED) <> 0 Then
+            sError = ERR_TRUST_IS_REVOKED
+        ElseIf (dwErrorStatus And CERT_TRUST_IS_NOT_SIGNATURE_VALID) <> 0 Then
+            sError = ERR_TRUST_IS_NOT_SIGNATURE_VALID
+        ElseIf (dwErrorStatus And CERT_TRUST_IS_UNTRUSTED_ROOT) <> 0 Then
+            sError = ERR_TRUST_IS_UNTRUSTED_ROOT
         ElseIf (dwErrorStatus And CERT_TRUST_REVOCATION_STATUS_UNKNOWN) <> 0 Then
             sError = ERR_TRUST_REVOCATION_STATUS_UNKNOWN
+        ElseIf (dwErrorStatus And CERT_TRUST_IS_PARTIAL_CHAIN) <> 0 Then
+            sError = ERR_TRUST_IS_PARTIAL_CHAIN
         Else
             sError = Replace(ERR_UNKNOWN_CERTIFICATECHAIN_ERROR_MASK, "%1", "&H" & Hex$(dwErrorStatus))
         End If
