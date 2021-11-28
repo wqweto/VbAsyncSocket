@@ -177,7 +177,7 @@ Private Declare Function CertStrToName Lib "crypt32" Alias "CertStrToNameW" (ByV
 Private Declare Function CertCreateSelfSignCertificate Lib "crypt32" (ByVal hCryptProvOrNCryptKey As Long, pSubjectIssuerBlob As Any, ByVal dwFlags As Long, pKeyProvInfo As Any, ByVal pSignatureAlgorithm As Long, pStartTime As Any, pEndTime As Any, ByVal pExtensions As Long) As Long
 Private Declare Function CertOpenStore Lib "crypt32" (ByVal lpszStoreProvider As Long, ByVal dwEncodingType As Long, ByVal hCryptProv As Long, ByVal dwFlags As Long, ByVal pvPara As Long) As Long
 Private Declare Function CertCloseStore Lib "crypt32" (ByVal hCertStore As Long, ByVal dwFlags As Long) As Long
-Private Declare Function CertAddEncodedCertificateToStore Lib "crypt32" (ByVal hCertStore As Long, ByVal dwCertEncodingType As Long, pbCertEncoded As Any, ByVal cbCertEncoded As Long, ByVal dwAddDisposition As Long, ByVal ppCertContext As Long) As Long
+Private Declare Function CertAddEncodedCertificateToStore Lib "crypt32" (ByVal hCertStore As Long, ByVal dwCertEncodingType As Long, pbCertEncoded As Any, ByVal cbCertEncoded As Long, ByVal dwAddDisposition As Long, ppCertContext As Any) As Long
 Private Declare Function CertCreateCertificateChainEngine Lib "crypt32" (pConfig As Any, phChainEngine As Long) As Long
 Private Declare Function CertFreeCertificateChainEngine Lib "crypt32" (ByVal hChainEngine As Long) As Long
 Private Declare Function CertGetCertificateChain Lib "crypt32" (ByVal hChainEngine As Long, ByVal pCertContext As Long, ByVal pTime As Long, ByVal hAdditionalStore As Long, pChainPara As Any, ByVal dwFlags As Long, ByVal pvReserved As Long, ppChainContext As Long) As Long
@@ -527,8 +527,8 @@ Public Property Get RemoteCertificates() As Collection
     Set RemoteCertificates = m_uCtx.RemoteCertificates
 End Property
 
-Public Property Get RemoteOcspResponse() As Collection
-    Set RemoteOcspResponse = m_uCtx.RemoteOcspResponse
+Public Property Get RemoteCertStatuses() As Collection
+    Set RemoteCertStatuses = m_uCtx.RemoteCertStatuses
 End Property
 
 Public Property Get AlpnNegotiated() As String
@@ -1353,7 +1353,7 @@ Private Function pvHandleReceive(Optional ByVal Flush As Boolean) As Boolean
                     pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
                     pvFireOnError LastError.Number, ucsSfdRead
                     GoTo QH
-                ElseIf Not pvPkiCertValidate(RemoteHostName, RemoteCertificates, RemoteOcspResponse, frRootStore, sError) Then
+                ElseIf Not pvPkiCertValidate(RemoteHostName, RemoteCertificates, RemoteCertStatuses, frRootStore, sError) Then
                     pvSetLastError sError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & MODULE_NAME & ".pvPkiCertValidate"
                     pvFireOnError LastError.Number, ucsSfdRead
                     GoTo QH
@@ -1926,7 +1926,7 @@ Private Function pvPkiPemImportRootCaCertStore(sCaBundlePemFile As String) As Lo
     End If
     For Each vElem In cCerts
         baCert = vElem
-        If CertAddEncodedCertificateToStore(hCertStore, X509_ASN_ENCODING, baCert(0), UBound(baCert) + 1, CERT_STORE_ADD_USE_EXISTING, 0) = 0 Then
+        If CertAddEncodedCertificateToStore(hCertStore, X509_ASN_ENCODING, baCert(0), UBound(baCert) + 1, CERT_STORE_ADD_USE_EXISTING, ByVal 0) = 0 Then
             hResult = Err.LastDllError
             sApiSource = "CertAddEncodedCertificateToStore"
             GoTo QH
@@ -2146,7 +2146,7 @@ QH:
     End If
 End Function
 
-Private Function pvPkiCertValidate(ByVal sHostName As String, cCerts As Collection, cOcspResponse As Collection, ByVal hRootStore As Long, sError As String) As Boolean
+Private Function pvPkiCertValidate(ByVal sHostName As String, cCerts As Collection, cStatuses As Collection, ByVal hRootStore As Long, sError As String) As Boolean
     Const FUNC_NAME     As String = "pvPkiCertValidate"
     Dim hCertStore      As Long
     Dim lIdx            As Long
@@ -2155,7 +2155,7 @@ Private Function pvPkiCertValidate(ByVal sHostName As String, cCerts As Collecti
     Dim vElem           As Variant
     Dim sDnsName        As String
     Dim bMatched        As Boolean
-    Dim uBlob           As CRYPT_DATA_BLOB
+    Dim uProp           As CRYPT_DATA_BLOB
     Dim hResult         As Long
     Dim sApiSource      As String
     
@@ -2168,11 +2168,22 @@ Private Function pvPkiCertValidate(ByVal sHostName As String, cCerts As Collecti
     End If
     For lIdx = 1 To pvCollectionCount(cCerts)
         baCert = cCerts.Item(lIdx)
-        If CertAddEncodedCertificateToStore(hCertStore, X509_ASN_ENCODING, baCert(0), UBound(baCert) + 1, CERT_STORE_ADD_USE_EXISTING, 0) = 0 Then
+        If CertAddEncodedCertificateToStore(hCertStore, X509_ASN_ENCODING, baCert(0), UBound(baCert) + 1, CERT_STORE_ADD_USE_EXISTING, pCertContext) = 0 Then
             hResult = Err.LastDllError
             sApiSource = "CertAddEncodedCertificateToStore"
             GoTo QH
         End If
+        If SearchCollection(cStatuses, lIdx, RetVal:=baCert) And pvArraySize(baCert) > 0 Then
+            uProp.cbData = pvArraySize(baCert)
+            uProp.pbData = VarPtr(baCert(0))
+            If CertSetCertificateContextProperty(pCertContext, CERT_OCSP_RESPONSE_PROP_ID, CERT_SET_PROPERTY_IGNORE_PERSIST_ERROR_FLAG, uProp) = 0 Then
+                hResult = Err.LastDllError
+                sApiSource = "CertSetCertificateContextProperty(CERT_OCSP_RESPONSE_PROP_ID)"
+                GoTo QH
+            End If
+        End If
+        Call CertFreeCertificateContext(pCertContext)
+        pCertContext = 0
     Next
     '--- search remote host FQDN in any X.509 certificate's "Subject Alternative Name" list of DNS names (incl. wildcards)
     sHostName = LCase$(sHostName)
@@ -2201,15 +2212,6 @@ Private Function pvPkiCertValidate(ByVal sHostName As String, cCerts As Collecti
             End If
         Next
         If bMatched Then
-            If SearchCollection(cOcspResponse, 1, RetVal:=baCert) And pvArraySize(baCert) > 0 Then
-                uBlob.cbData = pvArraySize(baCert)
-                uBlob.pbData = VarPtr(baCert(0))
-                If CertSetCertificateContextProperty(pCertContext, CERT_OCSP_RESPONSE_PROP_ID, CERT_SET_PROPERTY_IGNORE_PERSIST_ERROR_FLAG, uBlob) = 0 Then
-                    hResult = Err.LastDllError
-                    sApiSource = "CertSetCertificateContextProperty(CERT_OCSP_RESPONSE_PROP_ID)"
-                    GoTo QH
-                End If
-            End If
             If pvPkiCertBuildChain(pCertContext, hRootStore, sError) Then
                 '--- success
                 pvPkiCertValidate = True

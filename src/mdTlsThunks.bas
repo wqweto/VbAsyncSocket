@@ -142,9 +142,9 @@ End Type
 ' Constants and member variables
 '=========================================================================
 
-Private Const STR_VL_ALERTS                             As String = "0|Close notify|10|Unexpected message|20|Bad record mac|21|Decryption failed|22|Record overflow|30|Decompression failure|40|Handshake failure|41|No certificate|42|Bad certificate|43|Unsupported certificate|44|Certificate revoked|45|Certificate expired|46|Certificate unknown|47|Illegal parameter|48|Unknown certificate authority|50|Decode error|51|Decrypt error|70|Protocol version|71|Insufficient security|80|Internal error|90|User canceled|100|No renegotiation|109|Missing extension|110|Unsupported extension|112|Unrecognized name|116|Certificate required|120|No application protocol"
+Private Const STR_VL_ALERTS                             As String = "0|Close notify|10|Unexpected message|20|Bad record mac|21|Decryption failed|22|Record overflow|30|Decompression failure|40|Handshake failure|41|No certificate|42|Bad certificate|43|Unsupported certificate|44|Certificate revoked|45|Certificate expired|46|Certificate unknown|47|Illegal parameter|48|Unknown certificate authority|50|Decode error|51|Decrypt error|70|Protocol version|71|Insufficient security|80|Internal error|90|User canceled|100|No renegotiation|109|Missing extension|110|Unsupported extension|111|Certificate unobtainable|112|Unrecognized name|113|Bad certificate status response|114|Bad certificate hash value|116|Certificate required|120|No application protocol"
 Private Const STR_VL_STATES                             As String = "0|New|1|Closed|2|HandshakeStart|3|ExpectServerHello|4|ExpectExtensions|5|ExpectServerFinished|6|ExpectClientHello|7|ExpectClientKeyExchange|8|ExpectClientFinished|9|PostHandshake|10|Shutdown"
-Private Const STR_VL_MESSAGE_NAMES                      As String = "1|client_hello|2|server_hello|4|new_session_ticket|5|end_of_early_data|8|encrypted_extensions|11|certificate|12|server_key_exchange|13|certificate_request|14|server_hello_done|15|certificate_verify|16|client_key_exchange|20|finished|24|key_update|25|compressed_certificate|254|message_hash"
+Private Const STR_VL_MESSAGE_NAMES                      As String = "1|client_hello|2|server_hello|4|new_session_ticket|5|end_of_early_data|8|encrypted_extensions|11|certificate|12|server_key_exchange|13|certificate_request|14|server_hello_done|15|certificate_verify|16|client_key_exchange|20|finished|21|certificate_url|22|certificate_status|24|key_update|25|compressed_certificate|254|message_hash"
 Private Const STR_VL_EXTENSION_NAMES                    As String = "0|server_name|1|max_fragment_length|2|client_certificate_url|3|trusted_ca_keys|4|truncated_hmac|5|status_request|6|user_mapping|7|client_authz|8|server_authz|9|cert_type|10|supported_groups|11|ec_point_formats|12|srp|13|signature_algorithms|14|use_srtp|15|heartbeat|16|application_layer_protocol_negotiation|17|status_request_v2|18|signed_certificate_timestamp|19|client_certificate_type|20|server_certificate_type|21|padding|22|encrypt_then_mac|23|extended_master_secret|24|token_binding|25|cached_info|26|tls_lts|27|compress_certificate|28|record_size_limit|29|pwd_protect|30|pwd_clear|31|password_salt|32|ticket_pinning|33|tls_cert_with_extern_psk|34|delegated_credentials|35|session_ticket|41|pre_shared_key|42|early_data|43|supported_versions|44|cookie|45|psk_key_exchange_modes|47|certificate_authorities|48|oid_filters|49|post_handshake_auth|" & _
                                                                     "50|signature_algorithms_cert|51|key_share|52|transparency_info|53|connection_id|55|external_id_hash|56|external_session_id"
 Private Const STR_UNKNOWN                               As String = "Unknown (%1)"
@@ -172,6 +172,7 @@ Private Const TLS_HANDSHAKE_SERVER_HELLO_DONE           As Long = 14
 Private Const TLS_HANDSHAKE_CERTIFICATE_VERIFY          As Long = 15
 Private Const TLS_HANDSHAKE_CLIENT_KEY_EXCHANGE         As Long = 16
 Private Const TLS_HANDSHAKE_FINISHED                    As Long = 20
+Private Const TLS_HANDSHAKE_CERTIFICATE_STATUS          As Long = 22
 Private Const TLS_HANDSHAKE_KEY_UPDATE                  As Long = 24
 'Private Const TLS_HANDSHAKE_COMPRESSED_CERTIFICATE      As Long = 25
 Private Const TLS_HANDSHAKE_MESSAGE_HASH                As Long = 254
@@ -444,7 +445,7 @@ Public Type UcsTlsContext
     RemoteExtensions    As Collection
     RemoteTickets       As Collection
     RemoteSupportedGroups As Collection
-    RemoteOcspResponse  As Collection
+    RemoteCertStatuses  As Collection
     '--- crypto settings
     ProtocolVersion     As Long
     ExchGroup           As Long
@@ -1780,7 +1781,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
     Dim lExtEnd         As Long
     Dim lStringSize     As Long
     Dim lExchGroup      As Long
-    Dim baResponse()    As Byte
+    Dim lStatusType     As Long
     
     On Error GoTo EH
     With uCtx
@@ -1866,6 +1867,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                         pvBufferReadBlockEnd uInput
                     End If
                     Set .RemoteCertificates = New Collection
+                    Set .RemoteCertStatuses = New Collection
                     pvBufferReadBlockStart uInput, Size:=3, BlockSize:=lCertSize
                         lCertEnd = uInput.Pos + lCertSize
                         Do While uInput.Pos < lCertEnd
@@ -1874,6 +1876,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                                 .RemoteCertificates.Add baCert
                             pvBufferReadBlockEnd uInput
                             If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
+                                baCert = vbNullString
                                 pvBufferReadBlockStart uInput, Size:=2, BlockSize:=lBlockSize
                                 lBlockEnd = uInput.Pos + lBlockSize
                                 Do While uInput.Pos < lBlockEnd
@@ -1885,17 +1888,14 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                                         lExtEnd = uInput.Pos + lExtSize
                                         Select Case lExtType
                                         Case TLS_EXTENSION_STATUS_REQUEST
-                                            pvBufferReadArray uInput, baResponse, lExtSize
-                                            If .RemoteOcspResponse Is Nothing Then
-                                                Set .RemoteOcspResponse = New Collection
-                                            End If
-                                            .RemoteOcspResponse.Add baResponse
+                                            pvBufferReadArray uInput, baCert, lExtSize
                                         Case Else
                                             uInput.Pos = uInput.Pos + lExtSize
                                         End Select
                                     pvBufferReadBlockEnd uInput
                                 Loop
                                 pvBufferReadBlockEnd uInput
+                                .RemoteCertStatuses.Add baCert
                             End If
                         Loop
                     pvBufferReadBlockEnd uInput
@@ -1960,7 +1960,23 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                     If Not pvTlsParseHandshakeCertificateRequest(uCtx, uInput, sError, eAlertCode) Then
                         GoTo QH
                     End If
+                Case TLS_HANDSHAKE_CERTIFICATE_STATUS
+                    Set .RemoteCertStatuses = New Collection
+                    pvBufferReadLong uInput, lStatusType, Size:=1
+                    If lStatusType = 1 Then '--- ocsp
+                        pvBufferReadBlockStart uInput, Size:=3, BlockSize:=lCertSize
+                            pvBufferReadArray uInput, baCert, lCertSize
+                            .RemoteCertStatuses.Add baCert
+                        pvBufferReadBlockEnd uInput
+                    Else
+                        #If ImplUseDebugLog Then
+                            DebugLog MODULE_NAME, FUNC_NAME, Replace("Unknown status_type (%1) in certificate_status", "%1", lStatusType)
+                        #End If
+                    End If
                 Case Else
+                    #If ImplUseDebugLog Then
+                        DebugLog MODULE_NAME, FUNC_NAME, Replace("Unknown handshake message (%1) during ExpectEncryptedExtensions", "%1", pvTlsGetMessageName(lMessageType))
+                    #End If
                     '--- do nothing
                     uInput.Pos = uInput.Pos + lMessageSize
                 End Select
@@ -2231,7 +2247,6 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
     Dim lPublicSize     As Long
     Dim lNameSize       As Long
     Dim lCookieSize     As Long
-    Dim baResponse()    As Byte
     
     On Error GoTo EH
     If pvArraySize(m_baHelloRetryRandom) = 0 Then
@@ -2313,12 +2328,6 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
                                     pvBufferReadString uInput, .AlpnNegotiated, lNameSize
                                 pvBufferReadBlockEnd uInput
                             pvBufferReadBlockEnd uInput
-                        Case TLS_EXTENSION_STATUS_REQUEST
-                            pvBufferReadArray uInput, baResponse, lExtSize
-                            If .RemoteOcspResponse Is Nothing Then
-                                Set .RemoteOcspResponse = New Collection
-                            End If
-                            .RemoteOcspResponse.Add baResponse
                         Case Else
                             uInput.Pos = uInput.Pos + lExtSize
                         End Select

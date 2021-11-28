@@ -474,7 +474,7 @@ Public Type UcsTlsContext
     RemoteExtensions    As Collection
     RemoteTickets       As Collection
     RemoteSupportedGroups As Collection
-    RemoteOcspResponse  As Collection
+    RemoteCertStatuses  As Collection
     '--- crypto settings
     ProtocolVersion     As Long
     ExchGroup           As Long
