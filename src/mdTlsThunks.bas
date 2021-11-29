@@ -195,7 +195,7 @@ Private Const TLS_EXTENSION_CERTIFICATE_AUTHORITIES     As Long = 47
 Private Const TLS_EXTENSION_POST_HANDSHAKE_AUTH         As Long = 49
 'Private Const TLS_EXTENSION_SIGNATURE_ALGORITHMS_CERT   As Long = 50
 Private Const TLS_EXTENSION_KEY_SHARE                   As Long = 51
-Private Const TLS_EXTENSION_RENEGOTIATION_INFO          As Long = &HFF01
+Private Const TLS_EXTENSION_RENEGOTIATION_INFO          As Long = &HFF01&
 '--- TLS Cipher Suites from http://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-4
 Private Const TLS_CS_AES_128_GCM_SHA256                 As Long = &H1301
 Private Const TLS_CS_AES_256_GCM_SHA384                 As Long = &H1302
@@ -256,6 +256,7 @@ Private Const TLS_HELLO_RANDOM_SIZE                     As Long = 32
 Private Const TLS_LEGACY_SECRET_SIZE                    As Long = 48
 Private Const TLS_AAD_SIZE                              As Long = 5     '--- size of additional authenticated data for TLS 1.3
 Private Const TLS_LEGACY_AAD_SIZE                       As Long = 13    '--- for TLS 1.2
+Private Const TLS_VERIFY_DATA_SIZE                      As Long = 12
 'Private Const TLS_PSK_KE_MODE_PSK_DHE                   As Long = 1
 '--- crypto constants
 Private Const LNG_X25519_KEYSZ                          As Long = 32
@@ -323,6 +324,7 @@ Private Const ERR_NO_SERVER_CERTIFICATE                 As String = "Missing ser
 Private Const ERR_NO_SUPPORTED_CIPHER_SUITE             As String = "Missing supported ciphersuite"
 Private Const ERR_NO_PRIVATE_KEY                        As String = "Missing server private key"
 Private Const ERR_NO_SERVER_COMPILED                    As String = "Server TLS not compiled (TLS_NOSERVER = 1)"
+Private Const ERR_FAILED_SECURE_RENEGOTIATION           As String = "Secure renegotiation failed"
 '--- numeric
 Private Const LNG_FACILITY_WIN32                        As Long = &H80070000
 
@@ -448,6 +450,7 @@ Public Type UcsTlsContext
     RemoteSupportedGroups As Collection
     RemoteCertStatuses  As Collection
     RemoteLegacyVerifyData() As Byte
+    RemoteLegacyRenegInfo() As Byte
     '--- crypto settings
     ProtocolVersion     As Long
     ExchGroup           As Long
@@ -1166,9 +1169,12 @@ Private Sub pvTlsBuildClientLegacyKeyExchange(uCtx As UcsTlsContext, uOutput As 
             pvBufferWriteLong uOutput, TLS_HANDSHAKE_FINISHED
             pvBufferWriteBlockStart uOutput, Size:=3
                 pvTlsGetHandshakeHash uCtx, baHandshakeHash
-                pvTlsKdfLegacyPrf baVerifyData, .DigestAlgo, .MasterSecret, "client finished", baHandshakeHash, 12
+                pvTlsKdfLegacyPrf baVerifyData, .DigestAlgo, .MasterSecret, "client finished", baHandshakeHash, TLS_VERIFY_DATA_SIZE
                 pvBufferWriteArray uOutput, baVerifyData
-                .LocalLegacyVerifyData = baVerifyData
+                '--- save for secure renegotiation check
+                If SearchCollection(.RemoteExtensions, "#" & TLS_EXTENSION_RENEGOTIATION_INFO) Then
+                    .LocalLegacyVerifyData = baVerifyData
+                End If
             pvBufferWriteBlockEnd uOutput
             pvTlsAppendHandshakeHash uCtx, uOutput.Data, lMessagePos, uOutput.Size - lMessagePos
         pvBufferWriteRecordEnd uOutput, uCtx
@@ -1503,7 +1509,7 @@ Private Sub pvTlsBuildServerLegacyFinished(uCtx As UcsTlsContext, uOutput As Ucs
             pvBufferWriteLong uOutput, TLS_HANDSHAKE_FINISHED
             pvBufferWriteBlockStart uOutput, Size:=3
                 pvTlsGetHandshakeHash uCtx, baHandshakeHash
-                pvTlsKdfLegacyPrf uVerify.Data, .DigestAlgo, .MasterSecret, "server finished", baHandshakeHash, 12
+                pvTlsKdfLegacyPrf uVerify.Data, .DigestAlgo, .MasterSecret, "server finished", baHandshakeHash, TLS_VERIFY_DATA_SIZE
                 pvBufferWriteArray uOutput, uVerify.Data
             pvBufferWriteBlockEnd uOutput
         pvBufferWriteRecordEnd uOutput, uCtx
@@ -1662,7 +1668,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                     pvTlsGetHmac baHmac, .MacAlgo, .RemoteMacKey, uAad.Data, 0, uAad.Size
                     pvArrayAllocate baRemoteIV, .MacSize, FUNC_NAME & ".baRemoteIV"
                     Call CopyMemory(baRemoteIV(0), ByVal VarPtr(uInput.Data(lEnd)), .MacSize)
-                    If InStrB(baHmac, baRemoteIV) = 0 Then
+                    If InStrB(baHmac, baRemoteIV) <> 1 Then
                         GoTo RecordMacFailed
                     End If
                 End If
@@ -1927,7 +1933,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                     pvTlsGetHandshakeHash uCtx, baHandshakeHash
                     pvTlsHkdfExpandLabel baTemp, .DigestAlgo, .RemoteTrafficSecret, "finished", baEmpty, .DigestSize
                     pvTlsHkdfExtract uVerify.Data, .DigestAlgo, baTemp, baHandshakeHash
-                    If InStrB(uVerify.Data, baMessage) = 0 Then
+                    If InStrB(uVerify.Data, baMessage) <> 1 Then
                         GoTo ServerHandshakeFailed
                     End If
                     .State = ucsTlsStatePostHandshake
@@ -1997,6 +2003,14 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                         End If
                         pvTlsSetupExchRsaCertificate uCtx, baCert
                     End If
+                    '--- secure renegotiation check
+                    If pvArraySize(.LocalLegacyVerifyData) > 0 Then
+                        If InStrB(.RemoteLegacyRenegInfo, .LocalLegacyVerifyData) <> 1 Then
+                            GoTo FailedSecureRenegotiation
+                        ElseIf InStrB(TLS_VERIFY_DATA_SIZE + 1, .RemoteLegacyRenegInfo, .RemoteLegacyVerifyData) <> TLS_VERIFY_DATA_SIZE + 1 Then
+                            GoTo FailedSecureRenegotiation
+                        End If
+                    End If
                     pvTlsBuildClientLegacyKeyExchange uCtx, .SendBuffer
                 End If
                 If .State = ucsTlsStatePostHandshake And .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
@@ -2010,11 +2024,14 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                 Case IIf(.ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12, TLS_HANDSHAKE_FINISHED, -1)
                     pvBufferReadArray uInput, baMessage, lMessageSize
                     pvTlsGetHandshakeHash uCtx, baHandshakeHash
-                    pvTlsKdfLegacyPrf uVerify.Data, .DigestAlgo, .MasterSecret, "server finished", baHandshakeHash, 12
-                    If InStrB(uVerify.Data, baMessage) = 0 Then
+                    pvTlsKdfLegacyPrf uVerify.Data, .DigestAlgo, .MasterSecret, "server finished", baHandshakeHash, TLS_VERIFY_DATA_SIZE
+                    If InStrB(uVerify.Data, baMessage) <> 1 Then
                         GoTo ServerHandshakeFailed
                     End If
-                    .RemoteLegacyVerifyData = baMessage
+                    '--- save for secure renegotiation check
+                    If SearchCollection(.RemoteExtensions, "#" & TLS_EXTENSION_RENEGOTIATION_INFO) Then
+                        .RemoteLegacyVerifyData = baMessage
+                    End If
                     .State = ucsTlsStatePostHandshake
                     pvTlsResetHandshakeHash uCtx
                 Case Else
@@ -2130,9 +2147,9 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                         pvTlsHkdfExtract uVerify.Data, .DigestAlgo, baTemp, baHandshakeHash
                     Else
                         Debug.Assert .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12
-                        pvTlsKdfLegacyPrf uVerify.Data, .DigestAlgo, .MasterSecret, "client finished", baHandshakeHash, 12
+                        pvTlsKdfLegacyPrf uVerify.Data, .DigestAlgo, .MasterSecret, "client finished", baHandshakeHash, TLS_VERIFY_DATA_SIZE
                     End If
-                    If InStrB(uVerify.Data, baMessage) = 0 Then
+                    If InStrB(uVerify.Data, baMessage) <> 1 Then
                         GoTo ServerHandshakeFailed
                     End If
                     .State = ucsTlsStatePostHandshake
@@ -2238,6 +2255,10 @@ InvalidStateHandshake:
     sError = Replace(ERR_INVALID_STATE_HANDSHAKE, "%1", pvTlsGetStateAsText(uCtx.State))
     eAlertCode = uscTlsAlertHandshakeFailure
     GoTo QH
+FailedSecureRenegotiation:
+    sError = ERR_FAILED_SECURE_RENEGOTIATION
+    eAlertCode = uscTlsAlertHandshakeFailure
+    GoTo QH
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
     eAlertCode = uscTlsAlertInternalError
@@ -2337,6 +2358,10 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
                                 pvBufferReadBlockStart uInput, BlockSize:=lNameSize
                                     pvBufferReadString uInput, .AlpnNegotiated, lNameSize
                                 pvBufferReadBlockEnd uInput
+                            pvBufferReadBlockEnd uInput
+                        Case TLS_EXTENSION_RENEGOTIATION_INFO
+                            pvBufferReadBlockStart uInput, Size:=1, BlockSize:=lNameSize
+                                pvBufferReadArray uInput, .RemoteLegacyRenegInfo, lNameSize
                             pvBufferReadBlockEnd uInput
                         Case Else
                             uInput.Pos = uInput.Pos + lExtSize
@@ -4514,7 +4539,7 @@ Private Function pvCryptoEmsaPssDecode(baMessage() As Byte, baEnc() As Byte, ByV
     pvArrayAllocate baBuffer, lHashSize, FUNC_NAME & ".baBuffer"
     Call CopyMemory(baBuffer(0), baEnc(lPos), lHashSize)
     '--- 14. If |H| = |H'|, output "consistent." Otherwise, output "inconsistent."
-    If InStrB(baHash, baBuffer) = 0 Then
+    If InStrB(baHash, baBuffer) <> 1 Then
         GoTo QH
     End If
     '--- success
