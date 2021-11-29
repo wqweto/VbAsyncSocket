@@ -40,7 +40,7 @@ Private Const MODULE_NAME As String = "mdTlsThunks"
 #Const ImplTlsServer = (ASYNCSOCKET_NO_TLSSERVER = 0)
 #Const ImplUseShared = (ASYNCSOCKET_USE_SHARED <> 0)
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
-#Const ImplCaptureTraffic = False
+#Const ImplCaptureTraffic = CLng(ASYNCSOCKET_CAPTURE_TRAFFIC) '--- bitmask: 1 - traffic, 2 - derived secrets
 #Const ImplExoticCiphers = False
 
 '=========================================================================
@@ -496,7 +496,7 @@ Public Type UcsTlsContext
     DecrBuffer          As UcsBuffer
     SendBuffer          As UcsBuffer
     MessBuffer          As UcsBuffer
-#If ImplCaptureTraffic Then
+#If ImplCaptureTraffic <> 0 Then
     TrafficDump         As Collection
 #End If
 End Type
@@ -601,7 +601,7 @@ Public Function TlsInitClient( _
         .OnClientCertificate = ObjPtr(OnClientCertificate)
         .AlpnProtocols = AlpnProtocols
         pvTlsGetRandom .LocalExchRandom, TLS_HELLO_RANDOM_SIZE
-        #If ImplCaptureTraffic Then
+        #If ImplCaptureTraffic <> 0 Then
             Set .TrafficDump = New Collection
         #End If
     End With
@@ -641,7 +641,7 @@ Public Function TlsInitServer( _
         Set .LocalPrivateKey = PrivateKey
         .AlpnProtocols = AlpnProtocols
         pvTlsGetRandom .LocalExchRandom, TLS_HELLO_RANDOM_SIZE
-        #If ImplCaptureTraffic Then
+        #If ImplCaptureTraffic <> 0 Then
             Set .TrafficDump = New Collection
         #End If
     End With
@@ -679,7 +679,7 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
             If lSize < 0 Then
                 lSize = pvArraySize(baInput)
             End If
-            #If ImplCaptureTraffic Then
+            #If (ImplCaptureTraffic And 1) <> 0 Then
                 If lSize <> 0 Then
                     .TrafficDump.Add FUNC_NAME & ".Input" & vbCrLf & TlsDesignDumpArray(baInput, Size:=lSize)
                 End If
@@ -695,7 +695,7 @@ QH:
         '--- swap-out
         pvArraySwap baOutput, lOutputPos, .SendBuffer.Data, .SendBuffer.Size
         pvArrayWriteEOF baOutput, lOutputPos
-        #If ImplCaptureTraffic Then
+        #If (ImplCaptureTraffic And 1) <> 0 Then
             If lOutputPos <> 0 Then
                 .TrafficDump.Add FUNC_NAME & ".Output" & vbCrLf & TlsDesignDumpArray(baOutput, Size:=lOutputPos)
             End If
@@ -715,7 +715,7 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
         If lSize < 0 Then
             lSize = pvArraySize(baInput)
         End If
-        #If ImplCaptureTraffic Then
+        #If (ImplCaptureTraffic And 1) <> 0 Then
             If lSize <> 0 Then
                 .TrafficDump.Add FUNC_NAME & ".Input (undecrypted)" & vbCrLf & TlsDesignDumpArray(baInput, Size:=lSize)
             End If
@@ -755,7 +755,7 @@ QH:
         pvArrayWriteEOF baPlainText, lPos
         pvArraySwap baOutput, lOutputPos, .SendBuffer.Data, .SendBuffer.Size
         pvArrayWriteEOF baOutput, lOutputPos
-        #If ImplCaptureTraffic Then
+        #If (ImplCaptureTraffic And 1) <> 0 Then
             If lOutputPos <> 0 Then
                 .TrafficDump.Add FUNC_NAME & ".Output (encrypted)" & vbCrLf & TlsDesignDumpArray(baOutput, Size:=lOutputPos)
             End If
@@ -793,7 +793,7 @@ QH:
         '--- swap-out
         pvArraySwap baOutput, lOutputPos, .SendBuffer.Data, .SendBuffer.Size
         pvArrayWriteEOF baOutput, lOutputPos
-        #If ImplCaptureTraffic Then
+        #If (ImplCaptureTraffic And 1) <> 0 Then
             If lOutputPos <> 0 Then
                 .TrafficDump.Add FUNC_NAME & ".Output (encrypted)" & vbCrLf & TlsDesignDumpArray(baOutput, Size:=lOutputPos)
             End If
@@ -1641,7 +1641,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                 If Not bResult Then
                     GoTo DecryptionFailed
                 End If
-                #If ImplCaptureTraffic Then
+                #If (ImplCaptureTraffic And 1) <> 0 Then
                     If lEnd - uInput.Pos <> 0 Then
                         .TrafficDump.Add FUNC_NAME & ".Input (decrypted)" & vbCrLf & TlsDesignDumpArray(uInput.Data, lRecordPos, lEnd - lRecordPos)
                     End If
@@ -3147,7 +3147,7 @@ Private Sub pvTlsSetLastError( _
             End If
             .State = ucsTlsStateClosed
         End If
-        #If ImplCaptureTraffic Then
+        #If ImplCaptureTraffic <> 0 Then
             Clipboard.Clear
             Clipboard.SetText TlsConcatCollection(.TrafficDump, vbCrLf)
             #If ImplUseDebugLog Then
@@ -3292,7 +3292,7 @@ Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext, baHandshakeHash() As
         Debug.Assert pvArraySize(.LocalExchRandom) = TLS_HELLO_RANDOM_SIZE
         Debug.Assert pvArraySize(.RemoteExchRandom) = TLS_HELLO_RANDOM_SIZE
         pvTlsGetSharedSecret baPreMasterSecret, .ExchAlgo, .LocalExchPrivate, .RemoteExchPublic
-        #If ImplCaptureTraffic Then
+        #If (ImplCaptureTraffic And 2) <> 0 Then
             .TrafficDump.Add FUNC_NAME & ".baPreMasterSecret" & vbCrLf & TlsDesignDumpArray(baPreMasterSecret)
         #End If
         If SearchCollection(.RemoteExtensions, "#" & TLS_EXTENSION_EXTENDED_MASTER_SECRET) Then
@@ -3308,7 +3308,7 @@ Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext, baHandshakeHash() As
             pvBufferWriteEOF uRandom
             pvTlsKdfLegacyPrf .MasterSecret, .DigestAlgo, baPreMasterSecret, "master secret", uRandom.Data, TLS_LEGACY_SECRET_SIZE
         End If
-        #If ImplCaptureTraffic Then
+        #If (ImplCaptureTraffic And 2) <> 0 Then
             .TrafficDump.Add FUNC_NAME & ".MasterSecret" & vbCrLf & TlsDesignDumpArray(.MasterSecret)
         #End If
         uRandom.Size = 0
@@ -3321,7 +3321,7 @@ Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext, baHandshakeHash() As
         End If
         pvBufferWriteEOF uRandom
         pvTlsKdfLegacyPrf uExpanded.Data, .DigestAlgo, .MasterSecret, "key expansion", uRandom.Data, 2 * (.MacSize + .KeySize + .IvSize)
-        #If ImplCaptureTraffic Then
+        #If (ImplCaptureTraffic And 2) <> 0 Then
             .TrafficDump.Add FUNC_NAME & ".uExpanded.Data" & vbCrLf & TlsDesignDumpArray(uExpanded.Data)
         #End If
         If uCtx.IsServer Then
@@ -3385,7 +3385,7 @@ Private Sub pvTlsGetHandshakeHash(uCtx As UcsTlsContext, baRetVal() As Byte)
     
     With uCtx
         pvTlsGetHash baRetVal, .DigestAlgo, .HandshakeMessages.Data, Size:=.HandshakeMessages.Size
-        #If ImplCaptureTraffic Then
+        #If (ImplCaptureTraffic And 2) <> 0 Then
             .TrafficDump.Add FUNC_NAME & ".baRetVal" & vbCrLf & TlsDesignDumpArray(baRetVal)
         #End If
     End With
@@ -3395,7 +3395,7 @@ Private Sub pvTlsAppendHandshakeHash(uCtx As UcsTlsContext, baInput() As Byte, B
     Const FUNC_NAME     As String = "pvTlsAppendHandshakeHash"
     
     With uCtx
-        #If ImplCaptureTraffic Then
+        #If (ImplCaptureTraffic And 2) <> 0 Then
             .TrafficDump.Add FUNC_NAME & ".baInput(" & lSize & ")" & vbCrLf & TlsDesignDumpArray(baInput, lPos, lSize)
         #End If
         pvBufferWriteBlob .HandshakeMessages, VarPtr(baInput(lPos)), lSize
@@ -3937,7 +3937,7 @@ Private Sub pvBufferWriteRecordEnd(uOutput As UcsBuffer, uCtx As UcsTlsContext)
                     End If
                 End If
             pvBufferWriteBlockEnd uOutput
-            #If ImplCaptureTraffic Then
+            #If (ImplCaptureTraffic And 1) <> 0 Then
                 If lMessageSize <> 0 Then
                     .TrafficDump.Add FUNC_NAME & ".Output (unencrypted)" & vbCrLf & TlsDesignDumpArray(uOutput.Data, lRecordPos, uOutput.Size - lRecordPos - .TagSize)
                 End If
@@ -5708,7 +5708,7 @@ Private Function Clamp( _
 End Function
 #End If ' Not ImplUseShared
 
-#If ImplCaptureTraffic Then
+#If (ImplCaptureTraffic And 1) <> 0 Then
 Public Function TlsDesignDumpArray(baData() As Byte, Optional ByVal Pos As Long, Optional ByVal Size As Long = -1) As String
     If Size < 0 Then
         Size = UBound(baData) + 1 - Pos

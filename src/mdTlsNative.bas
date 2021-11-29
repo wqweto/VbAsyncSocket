@@ -15,7 +15,7 @@ Private Const MODULE_NAME As String = "mdTlsNative"
 
 #Const ImplUseShared = (ASYNCSOCKET_USE_SHARED <> 0)
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
-#Const ImplCaptureTraffic = False
+#Const ImplCaptureTraffic = CLng(ASYNCSOCKET_CAPTURE_TRAFFIC) '--- bitmask: 1 - traffic
 
 '=========================================================================
 ' API
@@ -419,7 +419,7 @@ Public Type UcsTlsContext
     '--- I/O buffers
     RecvBuffer()        As Byte
     RecvPos             As Long
-#If ImplCaptureTraffic Then
+#If ImplCaptureTraffic <> 0 Then
     TrafficDump         As Collection
 #End If
 End Type
@@ -474,7 +474,7 @@ Public Function TlsInitClient( _
         If RealOsVersion >= [ucsOsvWin8.1] Then
             .AlpnProtocols = AlpnProtocols
         End If
-        #If ImplCaptureTraffic Then
+        #If ImplCaptureTraffic <> 0 Then
             Set .TrafficDump = New Collection
         #End If
     End With
@@ -507,7 +507,7 @@ Public Function TlsInitServer( _
         If RealOsVersion >= [ucsOsvWin8.1] Then
             .AlpnProtocols = AlpnProtocols
         End If
-        #If ImplCaptureTraffic Then
+        #If ImplCaptureTraffic <> 0 Then
             Set .TrafficDump = New Collection
         #End If
     End With
@@ -641,7 +641,7 @@ RetryCredentials:
         End If
         Do
             If .RecvPos > 0 Then
-                #If ImplCaptureTraffic Then
+                #If (ImplCaptureTraffic And 1) <> 0 Then
                     .TrafficDump.Add FUNC_NAME & ".Input" & vbCrLf & TlsDesignDumpArray(.RecvBuffer, 0, .RecvPos)
                 #End If
                 pvInitSecBuffer .InBuffers(0), SECBUFFER_TOKEN, VarPtr(.RecvBuffer(0)), .RecvPos
@@ -700,7 +700,7 @@ RetryCredentials:
                             Select Case .BufferType
                             Case SECBUFFER_TOKEN
                                 lOutputPos = pvWriteBuffer(baOutput, lOutputPos, .pvBuffer, .cbBuffer)
-                                #If ImplCaptureTraffic Then
+                                #If (ImplCaptureTraffic And 1) <> 0 Then
                                     uCtx.TrafficDump.Add FUNC_NAME & ".Output" & vbCrLf & TlsDesignDumpMemory(.pvBuffer, .cbBuffer)
                                 #End If
                             Case SECBUFFER_ALERT
@@ -829,7 +829,7 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
         Do
             If .RecvPos > 0 Then
                 lPtr = VarPtr(.RecvBuffer(0))
-                #If ImplCaptureTraffic Then
+                #If (ImplCaptureTraffic And 1) <> 0 Then
                     .TrafficDump.Add FUNC_NAME & ".Input" & vbCrLf & TlsDesignDumpArray(.RecvBuffer, 0, .RecvPos)
                 #End If
             Else
@@ -942,7 +942,7 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
                 pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "EncryptMessage"
                 GoTo QH
             End If
-            #If ImplCaptureTraffic Then
+            #If (ImplCaptureTraffic And 1) <> 0 Then
                 .TrafficDump.Add FUNC_NAME & ".Output" & vbCrLf & TlsDesignDumpArray(baOutput, lOutputPos, .InBuffers(0).cbBuffer + .InBuffers(1).cbBuffer + .InBuffers(2).cbBuffer)
             #End If
             '--- note: use cbBuffer's as returned by EncryptMessage because trailing MAC might be trimmed (shorter than initial .TlsSizes.cbTrailer)
@@ -1030,7 +1030,7 @@ Public Function TlsShutdown(uCtx As UcsTlsContext, baOutput() As Byte, lPos As L
         For lIdx = 0 To UBound(.OutBuffers)
             With .OutBuffers(lIdx)
                 If .BufferType = SECBUFFER_TOKEN And .cbBuffer > 0 Then
-                    #If ImplCaptureTraffic Then
+                    #If (ImplCaptureTraffic And 1) <> 0 Then
                         uCtx.TrafficDump.Add FUNC_NAME & ".Output" & vbCrLf & TlsDesignDumpMemory(.pvBuffer, .cbBuffer)
                     #End If
                     lPos = pvWriteBuffer(baOutput, lPos, .pvBuffer, .cbBuffer)
@@ -1100,7 +1100,7 @@ Private Sub pvTlsSetLastError( _
         If .LastErrNumber <> 0 Then
             .State = ucsTlsStateClosed
         End If
-        #If ImplCaptureTraffic Then
+        #If ImplCaptureTraffic <> 0 Then
             Clipboard.Clear
             Clipboard.SetText TlsConcatCollection(.TrafficDump, vbCrLf)
             #If ImplUseDebugLog Then
@@ -1818,7 +1818,7 @@ Public Function TlsDesignDumpMemory(ByVal lPtr As Long, ByVal lSize As Long) As 
     TlsDesignDumpMemory = Join(aResult, vbCrLf)
 End Function
 
-#If ImplCaptureTraffic Then
+#If ImplCaptureTraffic <> 0 Then
 Public Function TlsConcatCollection(oCol As Collection, Optional Separator As String = vbCrLf) As String
     Dim lSize           As Long
     Dim vElem           As Variant
