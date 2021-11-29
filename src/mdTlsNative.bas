@@ -35,6 +35,7 @@ Private Const SP_PROT_TLS1_2                            As Long = &H400 Or &H800
 Private Const SP_PROT_TLS1_3                            As Long = &H1000 Or &H2000
 Private Const SCH_CRED_MANUAL_CRED_VALIDATION           As Long = 8
 Private Const SCH_CRED_NO_DEFAULT_CREDS                 As Long = &H10
+Private Const SCH_CRED_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT As Long = &H400
 Private Const SCH_USE_STRONG_CRYPTO                     As Long = &H400000
 '-- for InitializeSecurityContext
 Private Const ISC_REQ_REPLAY_DETECT                     As Long = &H4
@@ -95,6 +96,7 @@ Private Const CRYPT_MACHINE_KEYSET                      As Long = &H20
 Private Const AT_KEYEXCHANGE                            As Long = 1
 '--- for CertGetCertificateContextProperty
 Private Const CERT_KEY_PROV_INFO_PROP_ID                As Long = 2
+Private Const CERT_OCSP_RESPONSE_PROP_ID                As Long = 70
 '--- for CryptImportKey
 Private Const CRYPT_EXPORTABLE                          As Long = 1
 '--- for ALPN
@@ -147,6 +149,7 @@ Private Declare Function CertSetCertificateContextProperty Lib "crypt32" (ByVal 
 Private Declare Function CertDuplicateCertificateContext Lib "crypt32" (ByVal pCertContext As Long) As Long
 Private Declare Function CertFreeCertificateContext Lib "crypt32" (ByVal pCertContext As Long) As Long
 Private Declare Function CertEnumCertificatesInStore Lib "crypt32" (ByVal hCertStore As Long, ByVal pPrevCertContext As Long) As Long
+Private Declare Function CertGetCertificateContextProperty Lib "crypt32" (ByVal pCertContext As Long, ByVal dwPropId As Long, pvData As Any, pcbData As Long) As Long
 '--- advapi32
 Private Declare Function CryptAcquireContext Lib "advapi32" Alias "CryptAcquireContextW" (phProv As Long, ByVal pszContainer As Long, ByVal pszProvider As Long, ByVal dwProvType As Long, ByVal dwFlags As Long) As Long
 Private Declare Function CryptReleaseContext Lib "advapi32" (ByVal hProv As Long, ByVal dwFlags As Long) As Long
@@ -591,6 +594,7 @@ RetryCredentials:
                 IIf((.LocalFeatures And ucsTlsSupportTls12) <> 0, SP_PROT_TLS1_2, 0)
             uCred.dwFlags = uCred.dwFlags Or SCH_CRED_MANUAL_CRED_VALIDATION    ' Prevent Schannel from validating the received server certificate chain.
             uCred.dwFlags = uCred.dwFlags Or SCH_CRED_NO_DEFAULT_CREDS          ' Prevent Schannel from attempting to automatically supply a certificate chain for client authentication.
+            uCred.dwFlags = uCred.dwFlags Or SCH_CRED_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT ' Force TLS certificate status request extension (commonly known as OCSP stapling) to be sent on Vista or later
             If pvCollectionCount(.LocalCertificates) > 0 Then
                 If pvTlsImportToCertStore(.LocalCertificates, .LocalPrivateKey, hMemStore) Then
                     pCertContext = CertEnumCertificatesInStore(hMemStore, pCertContext)
@@ -729,7 +733,7 @@ RetryCredentials:
                     pvInitSecDesc .OutDesc, .TlsSizes.cBuffers, .OutBuffers
                     If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_REMOTE_CERT_CONTEXT, pCertContext) = 0 Then
                         Call CopyMemory(uCertContext, ByVal pCertContext, Len(uCertContext))
-                        If Not pvTlsExportFromCertStore(uCertContext.hCertStore, .RemoteCertificates) Then
+                        If Not pvTlsExportFromCertStore(uCertContext.hCertStore, .RemoteCertificates, .RemoteCertStatuses) Then
                             GoTo QH
                         End If
                     End If
@@ -1414,14 +1418,18 @@ QH:
     End If
 End Function
 
-Private Function pvTlsExportFromCertStore(ByVal hCertStore As Long, cCerts As Collection) As Boolean
+Private Function pvTlsExportFromCertStore(ByVal hCertStore As Long, cCerts As Collection, cStatuses As Collection) As Boolean
     Const FUNC_NAME     As String = "pvTlsExportFromCertStore"
     Dim uCertContext    As CERT_CONTEXT
     Dim baCert()        As Byte
     Dim pCertContext    As Long
+    Dim lSize           As Long
+    Dim hResult         As Long
+    Dim sApiSource      As String
 
     '--- export server X.509 certificates from certificate store
     Set cCerts = New Collection
+    Set cStatuses = New Collection
     Do
         pCertContext = CertEnumCertificatesInStore(hCertStore, pCertContext)
         If pCertContext = 0 Then
@@ -1431,9 +1439,24 @@ Private Function pvTlsExportFromCertStore(ByVal hCertStore As Long, cCerts As Co
         pvWriteBuffer baCert, 0, uCertContext.pbCertEncoded, uCertContext.cbCertEncoded
         pvArrayReallocate baCert, uCertContext.cbCertEncoded, FUNC_NAME & ".baCert"
         cCerts.Add baCert
+        '--- collect OCSP response
+        baCert = vbNullString
+        lSize = 0
+        If CertGetCertificateContextProperty(pCertContext, CERT_OCSP_RESPONSE_PROP_ID, ByVal 0, lSize) <> 0 And lSize > 0 Then
+            pvArrayReallocate baCert, lSize, FUNC_NAME & ".baCert"
+            If CertGetCertificateContextProperty(pCertContext, CERT_OCSP_RESPONSE_PROP_ID, baCert(0), lSize) = 0 Then
+                hResult = Err.LastDllError
+                sApiSource = "CertGetCertificateContextProperty"
+            End If
+        End If
+        cStatuses.Add baCert
     Loop
     '--- success
     pvTlsExportFromCertStore = True
+QH:
+    If LenB(sApiSource) <> 0 Then
+        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+    End If
 End Function
 
 Private Function pvAsn1DecodePrivateKey(baPrivKey() As Byte, uRetVal As UcsKeyInfo) As Boolean
