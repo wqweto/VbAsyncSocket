@@ -72,6 +72,7 @@ Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleA"
 Private Declare Function lstrlen Lib "kernel32" Alias "lstrlenA" (ByVal lpString As Long) As Long
 Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
 Private Declare Function LoadLibrary Lib "kernel32" Alias "LoadLibraryA" (ByVal lpLibFileName As String) As Long
+Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableA" (ByVal lpName As String, ByVal lpBuffer As String, ByVal nSize As Long) As Long
 '--- msvbvm60
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
 #If ImplTlsServer Or Not ImplLibSodium Then
@@ -295,6 +296,7 @@ Private Const TLS_MAX_ENCRYPTED_RECORD_SIZE             As Long = (TLS_MAX_PLAIN
 Private Const TLS_HELLO_RANDOM_SIZE                     As Long = 32
 Private Const TLS_AAD_SIZE                              As Long = 5     '--- size of additional authenticated data for TLS 1.3
 Private Const TLS_LEGACY_AAD_SIZE                       As Long = 13    '--- for TLS 1.2
+Private Const TLS_VERIFY_DATA_SIZE                      As Long = 12
 '--- crypto constants
 Private Const LNG_X25519_KEYSZ                          As Long = 32
 Private Const LNG_SECP256R1_KEYSZ                       As Long = 32
@@ -1126,7 +1128,7 @@ Private Sub pvTlsBuildClientLegacyKeyExchange(uCtx As UcsTlsContext, uOutput As 
             pvBufferWriteLong uOutput, TLS_HANDSHAKE_FINISHED
             pvBufferWriteBlockStart uOutput, Size:=3
                 pvTlsGetHandshakeHash uCtx, baHandshakeHash
-                pvTlsKdfLegacyPrf baVerifyData, .DigestAlgo, .MasterSecret, "client finished", baHandshakeHash, 12
+                pvTlsKdfLegacyPrf baVerifyData, .DigestAlgo, .MasterSecret, "client finished", baHandshakeHash, TLS_VERIFY_DATA_SIZE
                 pvBufferWriteArray uOutput, baVerifyData
                 .LocalLegacyVerifyData = baVerifyData
             pvBufferWriteBlockEnd uOutput
@@ -1833,7 +1835,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                     If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
                         pvBufferReadArray uInput, baMessage, lMessageSize
                         pvTlsGetHandshakeHash uCtx, baHandshakeHash
-                        pvTlsKdfLegacyPrf uVerify.Data, .DigestAlgo, .MasterSecret, "server finished", baHandshakeHash, 12
+                        pvTlsKdfLegacyPrf uVerify.Data, .DigestAlgo, .MasterSecret, "server finished", baHandshakeHash, TLS_VERIFY_DATA_SIZE
                         If InStrB(uVerify.Data, baMessage) = 0 Then
                             GoTo ServerHandshakeFailed
                         End If
@@ -2761,10 +2763,12 @@ Private Sub pvTlsDeriveHandshakeSecrets(uCtx As UcsTlsContext)
         pvTlsHkdfExpandLabel .RemoteTrafficKey, .DigestAlgo, .RemoteTrafficSecret, "key", baEmpty, .KeySize
         pvTlsHkdfExpandLabel .RemoteTrafficIV, .DigestAlgo, .RemoteTrafficSecret, "iv", baEmpty, .IvSize
         .RemoteTrafficSeqNo = 0
+        pvTlsLogSecret uCtx, IIf(.IsServer, "CLIENT", "SERVER") & "_HANDSHAKE_TRAFFIC_SECRET", .RemoteTrafficSecret
         pvTlsHkdfExpandLabel .LocalTrafficSecret, .DigestAlgo, .HandshakeSecret, IIf(.IsServer, "s", "c") & " hs traffic", baHandshakeHash, .DigestSize
         pvTlsHkdfExpandLabel .LocalTrafficKey, .DigestAlgo, .LocalTrafficSecret, "key", baEmpty, .KeySize
         pvTlsHkdfExpandLabel .LocalTrafficIV, .DigestAlgo, .LocalTrafficSecret, "iv", baEmpty, .IvSize
         .LocalTrafficSeqNo = 0
+        pvTlsLogSecret uCtx, IIf(.IsServer, "SERVER", "CLIENT") & "_HANDSHAKE_TRAFFIC_SECRET", .LocalTrafficSecret
     End With
 End Sub
 
@@ -2787,10 +2791,12 @@ Private Sub pvTlsDeriveApplicationSecrets(uCtx As UcsTlsContext, baHandshakeHash
         pvTlsHkdfExpandLabel .RemoteTrafficKey, .DigestAlgo, .RemoteTrafficSecret, "key", baEmpty, .KeySize
         pvTlsHkdfExpandLabel .RemoteTrafficIV, .DigestAlgo, .RemoteTrafficSecret, "iv", baEmpty, .IvSize
         .RemoteTrafficSeqNo = 0
+        pvTlsLogSecret uCtx, IIf(.IsServer, "CLIENT", "SERVER") & "_TRAFFIC_SECRET_0", .RemoteTrafficSecret
         pvTlsHkdfExpandLabel .LocalTrafficSecret, .DigestAlgo, .MasterSecret, IIf(.IsServer, "s", "c") & " ap traffic", baHandshakeHash, .DigestSize
         pvTlsHkdfExpandLabel .LocalTrafficKey, .DigestAlgo, .LocalTrafficSecret, "key", baEmpty, .KeySize
         pvTlsHkdfExpandLabel .LocalTrafficIV, .DigestAlgo, .LocalTrafficSecret, "iv", baEmpty, .IvSize
         .LocalTrafficSeqNo = 0
+        pvTlsLogSecret uCtx, IIf(.IsServer, "SERVER", "CLIENT") & "_TRAFFIC_SECRET_0", .LocalTrafficSecret
     End With
 End Sub
 
@@ -2806,6 +2812,7 @@ Private Sub pvTlsDeriveKeyUpdate(uCtx As UcsTlsContext, ByVal bLocalUpdate As Bo
         pvTlsHkdfExpandLabel .RemoteTrafficKey, .DigestAlgo, .RemoteTrafficSecret, "key", baEmpty, .KeySize
         pvTlsHkdfExpandLabel .RemoteTrafficIV, .DigestAlgo, .RemoteTrafficSecret, "iv", baEmpty, .IvSize
         .RemoteTrafficSeqNo = 0
+        pvTlsLogSecret uCtx, IIf(.IsServer, "CLIENT", "SERVER") & "_TRAFFIC_SECRET_0", .RemoteTrafficSecret
         If bLocalUpdate Then
             If pvArraySize(.LocalTrafficSecret) = 0 Then
                 Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_NO_PREVIOUS_SECRET, "%1", "LocalTrafficSecret")
@@ -2814,6 +2821,7 @@ Private Sub pvTlsDeriveKeyUpdate(uCtx As UcsTlsContext, ByVal bLocalUpdate As Bo
             pvTlsHkdfExpandLabel .LocalTrafficKey, .DigestAlgo, .LocalTrafficSecret, "key", baEmpty, .KeySize
             pvTlsHkdfExpandLabel .LocalTrafficIV, .DigestAlgo, .LocalTrafficSecret, "iv", baEmpty, .IvSize
             .LocalTrafficSeqNo = 0
+            pvTlsLogSecret uCtx, IIf(.IsServer, "SERVER", "CLIENT") & "_TRAFFIC_SECRET_0", .LocalTrafficSecret
         End If
     End With
 End Sub
@@ -2877,6 +2885,7 @@ Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext, baHandshakeHash() As
             pvBufferWriteEOF uRandom
             pvTlsKdfLegacyPrf .MasterSecret, .DigestAlgo, baPreMasterSecret, "master secret", uRandom.Data, TLS_HELLO_RANDOM_SIZE + TLS_HELLO_RANDOM_SIZE \ 2    '--- always 48
         End If
+        pvTlsLogSecret uCtx, "CLIENT_RANDOM", .MasterSecret
         uRandom.Size = 0
         pvBufferWriteArray uRandom, .RemoteExchRandom
         pvBufferWriteArray uRandom, .LocalExchRandom
@@ -2934,6 +2943,27 @@ Private Sub pvTlsResetHandshakeHash(uCtx As UcsTlsContext)
         .HandshakeMessages.Size = 0
         pvBufferWriteEOF .HandshakeMessages
     End With
+End Sub
+
+Private Sub pvTlsLogSecret(uCtx As UcsTlsContext, sLabel As String, baSecret() As Byte, Optional ByVal Pos As Long, Optional ByVal Size As Long = -1)
+    Const ForAppending  As Long = 8
+    Dim sFileName       As String
+    Dim nFile           As Integer
+    
+    On Error GoTo EH
+    sFileName = String$(1000, 0)
+    Call GetEnvironmentVariable("SSLKEYLOGFILE", sFileName, Len(sFileName) + 1)
+    sFileName = Left$(sFileName, InStr(sFileName, vbNullChar) - 1)
+    If LenB(sFileName) <> 0 Then
+        If Size < 0 Then
+            Size = pvArraySize(baSecret) - Pos
+        End If
+        nFile = FreeFile
+        Open sFileName For Append Shared As nFile
+        Print #nFile, sLabel & " " & pvToHex(VarPtr(uCtx.LocalExchRandom(0)), UBound(uCtx.LocalExchRandom) + 1) & " " & pvToHex(VarPtr(baSecret(Pos)), Size)
+        Close nFile
+    End If
+EH:
 End Sub
 
 '= crypto wrappers =======================================================
@@ -3579,6 +3609,24 @@ Private Function pvCollectionFirst(oCol As Collection, vKeys As Variant) As Vari
             Exit For
         End If
     Next
+End Function
+
+Private Function pvToHex(ByVal lPtr As Long, ByVal lSize As Long) As String
+    Const FUNC_NAME     As String = "pvToHex"
+    Dim aText()         As String
+    Dim lByte           As Long
+    Dim lIdx            As Long
+    
+    If lSize <> 0 Then
+        ReDim aText(0 To lSize - 1) As String
+        Debug.Assert RedimStats(FUNC_NAME & ".aText", 0)
+        For lIdx = 0 To lSize - 1
+            Call CopyMemory(lByte, ByVal lPtr, 1)
+            lPtr = (lPtr Xor &H80000000) + 1 Xor &H80000000
+            aText(lIdx) = Right$("0" & Hex$(lByte), 2)
+        Next
+        pvToHex = Join(aText, vbNullString)
+    End If
 End Function
 
 '=========================================================================
