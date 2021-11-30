@@ -228,6 +228,7 @@ Private Const TLS_CONTENT_TYPE_ALERT                    As Long = 21
 Private Const TLS_CONTENT_TYPE_HANDSHAKE                As Long = 22
 Private Const TLS_CONTENT_TYPE_APPDATA                  As Long = 23
 '--- TLS HandshakeType from https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-7
+Private Const TLS_HANDSHAKE_HELLO_REQUEST               As Long = 0
 Private Const TLS_HANDSHAKE_CLIENT_HELLO                As Long = 1
 Private Const TLS_HANDSHAKE_SERVER_HELLO                As Long = 2
 Private Const TLS_HANDSHAKE_NEW_SESSION_TICKET          As Long = 4
@@ -980,12 +981,13 @@ Private Sub pvTlsBuildClientHello(uCtx As UcsTlsContext, uOutput As UcsBuffer)
 #End If
                         pvBufferWriteBlockEnd uOutput
                     pvBufferWriteBlockEnd uOutput
+                    '--- Extension - EC Point Formats
+                    pvArrayByte baTemp, 0, TLS_EXTENSION_EC_POINT_FORMAT, 0, 2, 1, 0
+                    pvBufferWriteArray uOutput, baTemp          '--- uncompressed only
                     If (.LocalFeatures And ucsTlsSupportTls12) <> 0 Then
-                        '--- Extension - EC Point Formats
-                        pvArrayByte baTemp, 0, TLS_EXTENSION_EC_POINT_FORMAT, 0, 2, 1, 0
-                        pvBufferWriteArray uOutput, baTemp     '--- uncompressed only
+                        '--- Extension - Extended Master Secret
                         pvArrayByte baTemp, 0, TLS_EXTENSION_EXTENDED_MASTER_SECRET, 0, 0
-                        pvBufferWriteArray uOutput, baTemp     '--- supported
+                        pvBufferWriteArray uOutput, baTemp      '--- supported
                         '--- Extension - Renegotiation Info
                         pvBufferWriteLong uOutput, TLS_EXTENSION_RENEGOTIATION_INFO, Size:=2
                         pvBufferWriteBlockStart uOutput, Size:=2
@@ -1093,6 +1095,8 @@ Private Sub pvTlsBuildClientLegacyKeyExchange(uCtx As UcsTlsContext, uOutput As 
                 End If
             pvBufferWriteBlockEnd uOutput
             pvTlsAppendHandshakeHash uCtx, uOutput.Data, lMessagePos, uOutput.Size - lMessagePos
+            '--- note: get handshake hash early (before certificate verify)
+            pvTlsGetHandshakeHash uCtx, baHandshakeHash
 #If ImplTlsServer Then
             If .CertRequestSignatureScheme > 0 Then
                 '--- Client Certificate Verify
@@ -1114,7 +1118,7 @@ Private Sub pvTlsBuildClientLegacyKeyExchange(uCtx As UcsTlsContext, uOutput As 
         pvBufferWriteRecordStart uOutput, TLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC, uCtx
             pvBufferWriteLong uOutput, 1
         pvBufferWriteRecordEnd uOutput, uCtx
-        pvTlsDeriveLegacySecrets uCtx
+        pvTlsDeriveLegacySecrets uCtx, baHandshakeHash
         '--- Record Header
         pvBufferWriteRecordStart uOutput, TLS_CONTENT_TYPE_HANDSHAKE, uCtx
             '--- Client Handshake Finished
@@ -1922,17 +1926,17 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
 #End If
             Case ucsTlsStatePostHandshake
                 Select Case lMessageType
-                Case 0 '--- Hello Request
+                Case TLS_HANDSHAKE_HELLO_REQUEST '--- Hello Request
                     If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
                         Debug.Assert lMessageSize = 0
                         #If ImplUseDebugLog Then
-                            DebugLog MODULE_NAME, FUNC_NAME, "Received empty message (Hello Request). Will renegotiate"
+                            DebugLog MODULE_NAME, FUNC_NAME, "Received Hello Request. Will renegotiate"
                         #End If
-                        pvTlsBuildClientHello uCtx, .SendBuffer
                         .State = ucsTlsStateExpectServerHello
                         '--- renegotiate ephemeral keys too
                         .ExchGroup = 0
                         .CipherSuite = 0
+                        pvTlsBuildClientHello uCtx, .SendBuffer
                     Else
                         GoTo UnexpectedMessageType
                     End If
@@ -2852,10 +2856,9 @@ End Sub
 
 '= legacy PRF-based key derivation functions =============================
 
-Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext)
+Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext, baHandshakeHash() As Byte)
     Const FUNC_NAME     As String = "pvTlsDeriveLegacySecrets"
     Dim baPreMasterSecret() As Byte
-    Dim baHandshakeHash() As Byte
     Dim uRandom         As UcsBuffer
     Dim uExpanded       As UcsBuffer
     
@@ -2867,7 +2870,6 @@ Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext)
         Debug.Assert pvArraySize(.RemoteExchRandom) = TLS_HELLO_RANDOM_SIZE
         pvTlsGetSharedSecret baPreMasterSecret, .ExchAlgo, .LocalExchPrivate, .RemoteExchPublic
         If SearchCollection(.RemoteExtensions, "#" & TLS_EXTENSION_EXTENDED_MASTER_SECRET) Then
-            pvTlsGetHandshakeHash uCtx, baHandshakeHash
             pvTlsKdfLegacyPrf .MasterSecret, .DigestAlgo, baPreMasterSecret, "extended master secret", baHandshakeHash, TLS_HELLO_RANDOM_SIZE + TLS_HELLO_RANDOM_SIZE \ 2    '--- always 48
         Else
             pvBufferWriteArray uRandom, .LocalExchRandom
