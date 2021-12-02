@@ -188,6 +188,7 @@ Private Const TLS_EXTENSION_ALPN                        As Long = 16
 Private Const TLS_EXTENSION_ENCRYPT_THEN_MAC            As Long = 22
 Private Const TLS_EXTENSION_EXTENDED_MASTER_SECRET      As Long = 23
 'Private Const TLS_EXTENSION_COMPRESS_CERTIFICATE        As Long = 27
+Private Const TLS_EXTENSION_SESSION_TICKET              As Long = 35
 'Private Const TLS_EXTENSION_PRE_SHARED_KEY              As Long = 41
 'Private Const TLS_EXTENSION_EARLY_DATA                  As Long = 42
 Private Const TLS_EXTENSION_SUPPORTED_VERSIONS          As Long = 43
@@ -435,6 +436,7 @@ Public Type UcsTlsContext
     SniRequested        As String
     '--- handshake
     LocalSessionID()    As Byte
+    LocalSessionTicket() As Byte
     LocalExchRandom()   As Byte
     LocalExchPrivate()  As Byte
     LocalExchPublic()   As Byte
@@ -1020,6 +1022,14 @@ Private Sub pvTlsBuildClientHello(uCtx As UcsTlsContext, uOutput As UcsBuffer)
                         pvBufferWriteBlockStart uOutput, Size:=2
                             pvBufferWriteBlockStart uOutput
                                 pvBufferWriteArray uOutput, .LocalLegacyVerifyData
+                            pvBufferWriteBlockEnd uOutput
+                        pvBufferWriteBlockEnd uOutput
+                        '--- Extension - Session Ticket
+                        pvBufferWriteLong uOutput, TLS_EXTENSION_SESSION_TICKET, Size:=2
+                        pvBufferWriteBlockStart uOutput, Size:=2
+                            pvBufferWriteLong uOutput, 0, Size:=4
+                            pvBufferWriteBlockStart uOutput, Size:=2
+                                pvBufferWriteArray uOutput, .LocalSessionTicket
                             pvBufferWriteBlockEnd uOutput
                         pvBufferWriteBlockEnd uOutput
                     End If
@@ -2000,6 +2010,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                 Case IIf(.ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12, TLS_HANDSHAKE_SERVER_HELLO_DONE, -1)
                     .State = ucsTlsStateExpectServerFinished
                     uInput.Pos = uInput.Pos + lMessageSize
+                    Set .RemoteTickets = New Collection
                 Case TLS_HANDSHAKE_CERTIFICATE_REQUEST
                     If Not pvTlsParseHandshakeCertificateRequest(uCtx, uInput, sError, eAlertCode) Then
                         GoTo QH
@@ -2051,6 +2062,11 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                 End If
             Case ucsTlsStateExpectServerFinished
                 Select Case lMessageType
+                Case IIf(.ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12, TLS_HANDSHAKE_NEW_SESSION_TICKET, -1)
+                    pvBufferReadArray uInput, baMessage, lMessageSize
+                    If Not .RemoteTickets Is Nothing Then
+                        .RemoteTickets.Add baMessage
+                    End If
                 Case IIf(.ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12, TLS_HANDSHAKE_FINISHED, -1)
                     pvBufferReadArray uInput, baMessage, lMessageSize
                     pvTlsGetHandshakeHash uCtx, baHandshakeHash
@@ -2063,10 +2079,14 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                         .RemoteLegacyVerifyData = baMessage
                     End If
                     .State = ucsTlsStatePostHandshake
-                    pvTlsResetHandshakeHash uCtx
                 Case Else
                     GoTo UnexpectedMessageType
                 End Select
+                If .State = ucsTlsStatePostHandshake Then
+                    pvTlsResetHandshakeHash uCtx
+                Else
+                    pvTlsAppendHandshakeHash uCtx, uInput.Data, lMessagePos, lMessageSize + 4
+                End If
 #If ImplTlsServer Then
             Case ucsTlsStateExpectClientHello
                 Select Case lMessageType
