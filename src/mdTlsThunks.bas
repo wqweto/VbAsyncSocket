@@ -185,6 +185,7 @@ Private Const TLS_EXTENSION_SUPPORTED_GROUPS            As Long = 10
 Private Const TLS_EXTENSION_EC_POINT_FORMAT             As Long = 11
 Private Const TLS_EXTENSION_SIGNATURE_ALGORITHMS        As Long = 13
 Private Const TLS_EXTENSION_ALPN                        As Long = 16
+Private Const TLS_EXTENSION_ENCRYPT_THEN_MAC            As Long = 22
 Private Const TLS_EXTENSION_EXTENDED_MASTER_SECRET      As Long = 23
 'Private Const TLS_EXTENSION_COMPRESS_CERTIFICATE        As Long = 27
 'Private Const TLS_EXTENSION_PRE_SHARED_KEY              As Long = 41
@@ -1001,15 +1002,18 @@ Private Sub pvTlsBuildClientHello(uCtx As UcsTlsContext, uOutput As UcsBuffer)
                             End If
                         pvBufferWriteBlockEnd uOutput
                     pvBufferWriteBlockEnd uOutput
-                    '--- Extension - EC Point Formats
-                    pvArrayByte baTemp, 0, TLS_EXTENSION_EC_POINT_FORMAT, 0, 2, 1, 0
-                    pvBufferWriteArray uOutput, baTemp          '--- uncompressed only
                     '--- Extension - OCSP Status Request
                     pvArrayByte baTemp, 0, TLS_EXTENSION_STATUS_REQUEST, 0, 5, 1, 0, 0, 0, 0
                     pvBufferWriteArray uOutput, baTemp
                     If (.LocalFeatures And ucsTlsSupportTls12) <> 0 Then
+                        '--- Extension - EC Point Formats
+                        pvArrayByte baTemp, 0, TLS_EXTENSION_EC_POINT_FORMAT, 0, 2, 1, 0
+                        pvBufferWriteArray uOutput, baTemp      '--- uncompressed only
                         '--- Extension - Extended Master Secret
                         pvArrayByte baTemp, 0, TLS_EXTENSION_EXTENDED_MASTER_SECRET, 0, 0
+                        pvBufferWriteArray uOutput, baTemp      '--- supported
+                        '--- Extension - Encrypt-then-MAC
+                        pvArrayByte baTemp, 0, TLS_EXTENSION_ENCRYPT_THEN_MAC, 0, 0
                         pvBufferWriteArray uOutput, baTemp      '--- supported
                         '--- Extension - Renegotiation Info
                         pvBufferWriteLong uOutput, TLS_EXTENSION_RENEGOTIATION_INFO, Size:=2
@@ -1331,6 +1335,10 @@ Private Sub pvTlsBuildServerHello(uCtx As UcsTlsContext, uOutput As UcsBuffer)
                             pvArrayByte baTemp, 0, TLS_EXTENSION_EXTENDED_MASTER_SECRET, 0, 0
                             pvBufferWriteArray uOutput, baTemp     '--- supported
                         End If
+                        If SearchCollection(.RemoteExtensions, "#" & TLS_EXTENSION_ENCRYPT_THEN_MAC) Then
+                            pvArrayByte baTemp, 0, TLS_EXTENSION_ENCRYPT_THEN_MAC, 0, 0
+                            pvBufferWriteArray uOutput, baTemp     '--- supported
+                        End If
                     End If
                 pvBufferWriteBlockEnd uOutput
             pvBufferWriteBlockEnd uOutput
@@ -1599,6 +1607,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
     Dim uAad            As UcsBuffer
     Dim bResult         As Boolean
     Dim baHmac()        As Byte
+    Dim bEncryptThenMac As Boolean
     
     On Error GoTo EH
     With uCtx
@@ -1627,6 +1636,9 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                     End If
                     bResult = pvTlsBulkDecrypt(.BulkAlgo, baRemoteIV, .RemoteTrafficKey, uInput.Data, lRecordPos, TLS_AAD_SIZE, uInput.Data, uInput.Pos, lRecordSize)
                 ElseIf .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
+                    If .MacSize > 0 Then
+                        bEncryptThenMac = SearchCollection(.RemoteExtensions, "#" & TLS_EXTENSION_ENCRYPT_THEN_MAC)
+                    End If
                     If .IvExplicitSize > 0 Then '--- AES in TLS 1.2
                         pvArrayWriteBlob baRemoteIV, .IvSize - .IvExplicitSize, VarPtr(uInput.Data(uInput.Pos)), .IvExplicitSize
                         uInput.Pos = uInput.Pos + .IvExplicitSize
@@ -1635,8 +1647,15 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                     pvBufferWriteLong uAad, 0, Size:=4
                     pvBufferWriteLong uAad, .RemoteTrafficSeqNo, Size:=4
                     pvBufferWriteBlob uAad, VarPtr(uInput.Data(lRecordPos)), 3
-                    pvBufferWriteLong uAad, lEnd - uInput.Pos, Size:=2
-                    Debug.Assert uAad.Size = TLS_LEGACY_AAD_SIZE
+                    If Not bEncryptThenMac Then
+                        pvBufferWriteLong uAad, lEnd - uInput.Pos, Size:=2
+                        Debug.Assert uAad.Size = TLS_LEGACY_AAD_SIZE
+                    Else
+                        lEnd = lEnd - .MacSize
+                        '--- prepare encrypted data for MAC
+                        pvBufferWriteLong uAad, lEnd - uInput.Pos + .IvExplicitSize, Size:=2
+                        pvBufferWriteBlob uAad, VarPtr(uInput.Data(uInput.Pos - .IvExplicitSize)), lEnd - uInput.Pos + .IvExplicitSize
+                    End If
                     bResult = pvTlsBulkDecrypt(.BulkAlgo, baRemoteIV, .RemoteTrafficKey, uAad.Data, 0, uAad.Size, uInput.Data, uInput.Pos, lEnd - uInput.Pos + .TagSize)
                 End If
                 If Not bResult Then
@@ -1658,19 +1677,29 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                     Loop
                     lRecordType = uInput.Data(lEnd)
                 ElseIf .MacSize > 0 Then
-                    lEnd = lEnd - uInput.Data(lEnd - 1) - 1 - .MacSize
-                    If lEnd <= uInput.Pos Then
-                        GoTo RecordMacFailed
+                    If Not bEncryptThenMac Then
+                        '--- remove padding and prepare decrypted data for MAC
+                        lEnd = lEnd - uInput.Data(lEnd - 1) - 1 - .MacSize
+                        If lEnd <= uInput.Pos Then
+                            GoTo RecordMacFailed
+                        End If
+                        uAad.Size = uAad.Size - 2
+                        pvBufferWriteLong uAad, lEnd - uInput.Pos, Size:=2
+                        pvBufferWriteBlob uAad, VarPtr(uInput.Data(uInput.Pos)), lEnd - uInput.Pos
                     End If
-                    '--- calc HMAC and compare
-                    uAad.Size = uAad.Size - 2
-                    pvBufferWriteLong uAad, lEnd - uInput.Pos, Size:=2
-                    pvBufferWriteBlob uAad, VarPtr(uInput.Data(uInput.Pos)), lEnd - uInput.Pos
+                    '--- calc MAC and compare
                     pvTlsGetHmac baHmac, .MacAlgo, .RemoteMacKey, uAad.Data, 0, uAad.Size
                     pvArrayAllocate baRemoteIV, .MacSize, FUNC_NAME & ".baRemoteIV"
                     Call CopyMemory(baRemoteIV(0), ByVal VarPtr(uInput.Data(lEnd)), .MacSize)
                     If InStrB(baHmac, baRemoteIV) <> 1 Then
                         GoTo RecordMacFailed
+                    End If
+                    If bEncryptThenMac Then
+                        '--- remove padding from decrypted data
+                        lEnd = lEnd - uInput.Data(lEnd - 1) - 1
+                        If lEnd <= uInput.Pos Then
+                            GoTo RecordMacFailed
+                        End If
                     End If
                 End If
             Else
@@ -3418,7 +3447,6 @@ Private Sub pvTlsResetHandshakeHash(uCtx As UcsTlsContext)
 End Sub
 
 Private Sub pvTlsLogSecret(uCtx As UcsTlsContext, sLabel As String, baSecret() As Byte, Optional ByVal Pos As Long, Optional ByVal Size As Long = -1)
-    Const ForAppending  As Long = 8
     Dim sFileName       As String
     Dim nFile           As Integer
     
@@ -3497,16 +3525,16 @@ Private Sub pvTlsGetHelloRetryRandom(baRetVal() As Byte)
     pvArrayByte baRetVal, &HCF, &H21, &HAD, &H74, &HE5, &H9A, &H61, &H11, &HBE, &H1D, &H8C, &H2, &H1E, &H65, &HB8, &H91, &HC2, &HA2, &H11, &H16, &H7A, &HBB, &H8C, &H5E, &H7, &H9E, &H9, &HE2, &HC8, &HA8, &H33, &H9C
 End Sub
 
-Private Function pvTlsBulkDecrypt(ByVal eBulk As UcsTlsCryptoAlgorithmsEnum, baRemoteIV() As Byte, baRemoteKey() As Byte, baAad() As Byte, ByVal lAadPos As Long, ByVal lAdSize As Long, baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
+Private Function pvTlsBulkDecrypt(ByVal eBulk As UcsTlsCryptoAlgorithmsEnum, baRemoteIV() As Byte, baRemoteKey() As Byte, baAad() As Byte, ByVal lAadPos As Long, ByVal lAadSize As Long, baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
     Const FUNC_NAME     As String = "pvTlsBulkDecrypt"
     
     Select Case eBulk
     Case ucsTlsAlgoBulkChacha20Poly1305
-        If Not pvCryptoBulkChacha20Poly1305Decrypt(baRemoteIV, baRemoteKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
+        If Not pvCryptoBulkChacha20Poly1305Decrypt(baRemoteIV, baRemoteKey, baAad, lAadPos, lAadSize, baBuffer, lPos, lSize) Then
             GoTo QH
         End If
     Case ucsTlsAlgoBulkAesGcm128, ucsTlsAlgoBulkAesGcm256
-        If Not pvCryptoBulkAesGcmDecrypt(baRemoteIV, baRemoteKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
+        If Not pvCryptoBulkAesGcmDecrypt(baRemoteIV, baRemoteKey, baAad, lAadPos, lAadSize, baBuffer, lPos, lSize) Then
             GoTo QH
         End If
     Case ucsTlsAlgoBulkAesCbc128, ucsTlsAlgoBulkAesCbc256
@@ -3521,16 +3549,16 @@ Private Function pvTlsBulkDecrypt(ByVal eBulk As UcsTlsCryptoAlgorithmsEnum, baR
 QH:
 End Function
 
-Private Sub pvTlsBulkEncrypt(ByVal eBulk As UcsTlsCryptoAlgorithmsEnum, baLocalIV() As Byte, baLocalKey() As Byte, baAad() As Byte, ByVal lAadPos As Long, ByVal lAdSize As Long, baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long)
+Private Sub pvTlsBulkEncrypt(ByVal eBulk As UcsTlsCryptoAlgorithmsEnum, baLocalIV() As Byte, baLocalKey() As Byte, baAad() As Byte, ByVal lAadPos As Long, ByVal lAadSize As Long, baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long)
     Const FUNC_NAME     As String = "pvTlsBulkEncrypt"
     
     Select Case eBulk
     Case ucsTlsAlgoBulkChacha20Poly1305
-        If Not pvCryptoBulkChacha20Poly1305Encrypt(baLocalIV, baLocalKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
+        If Not pvCryptoBulkChacha20Poly1305Encrypt(baLocalIV, baLocalKey, baAad, lAadPos, lAadSize, baBuffer, lPos, lSize) Then
             Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoBulkChacha20Poly1305Encrypt")
         End If
     Case ucsTlsAlgoBulkAesGcm128, ucsTlsAlgoBulkAesGcm256
-        If Not pvCryptoBulkAesGcmEncrypt(baLocalIV, baLocalKey, baAad, lAadPos, lAdSize, baBuffer, lPos, lSize) Then
+        If Not pvCryptoBulkAesGcmEncrypt(baLocalIV, baLocalKey, baAad, lAadPos, lAadSize, baBuffer, lPos, lSize) Then
             Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoBulkAesGcmEncrypt")
         End If
     Case ucsTlsAlgoBulkAesCbc128, ucsTlsAlgoBulkAesCbc256
@@ -3937,6 +3965,7 @@ Private Sub pvBufferWriteRecordEnd(uOutput As UcsBuffer, uCtx As UcsTlsContext)
     Dim uAad            As UcsBuffer
     Dim baHmac()        As Byte
     Dim lPadding        As Long
+    Dim bEncryptThenMac As Boolean
     
     With uCtx
         If pvArraySize(.LocalTrafficKey) > 0 Then
@@ -3955,26 +3984,42 @@ Private Sub pvBufferWriteRecordEnd(uOutput As UcsBuffer, uCtx As UcsTlsContext)
                     pvBufferWriteLong uAad, lMessageSize, Size:=2
                     Debug.Assert uAad.Size = TLS_LEGACY_AAD_SIZE
                     If .MacSize > 0 Then
-                        pvBufferWriteBlob uAad, VarPtr(uOutput.Data(lMessagePos)), lMessageSize
-                        pvTlsGetHmac baHmac, .MacAlgo, .LocalMacKey, uAad.Data, 0, uAad.Size
-                        pvBufferWriteArray uOutput, baHmac
+                        bEncryptThenMac = SearchCollection(.RemoteExtensions, "#" & TLS_EXTENSION_ENCRYPT_THEN_MAC)
+                        If Not bEncryptThenMac Then
+                            pvBufferWriteBlob uAad, VarPtr(uOutput.Data(lMessagePos)), lMessageSize
+                            pvTlsGetHmac baHmac, .MacAlgo, .LocalMacKey, uAad.Data, 0, uAad.Size
+                            pvBufferWriteArray uOutput, baHmac
+                        Else
+                            pvArrayAllocate baHmac, .IvSize, FUNC_NAME & ".baHmac"
+                        End If
                         lPadding = .IvSize - (uOutput.Size - lMessagePos) Mod .IvSize
                         Debug.Assert lPadding <= pvArraySize(baHmac)
                         Call FillMemory(baHmac(0), lPadding, lPadding - 1)
                         pvBufferWriteBlob uOutput, VarPtr(baHmac(0)), lPadding
                         lMessageSize = uOutput.Size - lMessagePos
+                        If bEncryptThenMac Then
+                            pvBufferWriteBlob uOutput, 0, .MacSize
+                        End If
                     End If
                 End If
             pvBufferWriteBlockEnd uOutput
             #If (ImplCaptureTraffic And 1) <> 0 Then
                 If lMessageSize <> 0 Then
-                    .TrafficDump.Add FUNC_NAME & ".Output (unencrypted)" & vbCrLf & TlsDesignDumpArray(uOutput.Data, lRecordPos, uOutput.Size - lRecordPos - .TagSize)
+                    .TrafficDump.Add FUNC_NAME & ".Output (unencrypted)" & vbCrLf & TlsDesignDumpArray(uOutput.Data, lRecordPos, uOutput.Size - lRecordPos - .TagSize - .MacSize)
                 End If
             #End If
             If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
                 pvTlsBulkEncrypt .BulkAlgo, baLocalIV, .LocalTrafficKey, uOutput.Data, lRecordPos, TLS_AAD_SIZE, uOutput.Data, lMessagePos, lMessageSize
             ElseIf .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
                 pvTlsBulkEncrypt .BulkAlgo, baLocalIV, .LocalTrafficKey, uAad.Data, 0, uAad.Size, uOutput.Data, lMessagePos, lMessageSize
+                If bEncryptThenMac Then
+                    uAad.Size = uAad.Size - 2
+                    pvBufferWriteLong uAad, lMessageSize + .IvExplicitSize, Size:=2
+                    pvBufferWriteBlob uAad, VarPtr(uOutput.Data(lMessagePos - .IvExplicitSize)), lMessageSize + .IvExplicitSize
+                    pvTlsGetHmac baHmac, .MacAlgo, .LocalMacKey, uAad.Data, 0, uAad.Size
+                    uOutput.Size = uOutput.Size - .MacSize
+                    pvBufferWriteArray uOutput, baHmac
+                End If
             End If
             .LocalTrafficSeqNo = UnsignedAdd(.LocalTrafficSeqNo, 1)
         Else
@@ -4345,6 +4390,8 @@ Private Function pvCryptoIsSupported(ByVal eAlgo As UcsTlsCryptoAlgorithmsEnum) 
     Case ucsTlsAlgoExchSecp521r1
         '--- not supported
     Case ucsTlsAlgoBulkAesGcm128, ucsTlsAlgoBulkAesGcm256
+        pvCryptoIsSupported = True
+    Case ucsTlsAlgoBulkChacha20Poly1305
         pvCryptoIsSupported = True
     Case PREF + ucsTlsAlgoBulkAesGcm128, PREF + ucsTlsAlgoBulkAesGcm256
         '--- signal if AES preferred over Chacha20
@@ -5433,20 +5480,20 @@ End Function
 
 Private Function pvCryptoBulkChacha20Poly1305Encrypt( _
             baNonce() As Byte, baKey() As Byte, _
-            baAad() As Byte, ByVal lAadPos As Long, ByVal lAdSize As Long, _
+            baAad() As Byte, ByVal lAadPos As Long, ByVal lAadSize As Long, _
             baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
-    Dim lAdPtr          As Long
+    Dim lAadPtr         As Long
     
     Debug.Assert pvArraySize(baNonce) = LNG_CHACHA20POLY1305_IVSZ
     Debug.Assert pvArraySize(baKey) = LNG_CHACHA20_KEYSZ
     Debug.Assert pvArraySize(baBuffer) >= lPos + lSize + LNG_CHACHA20POLY1305_TAGSZ
-    If lAdSize > 0 Then
-        lAdPtr = VarPtr(baAad(lAadPos))
+    If lAadSize > 0 Then
+        lAadPtr = VarPtr(baAad(lAadPos))
     End If
     Debug.Assert pvPatchTrampoline(AddressOf pvCallChacha20Poly1305Encrypt)
     Call pvCallChacha20Poly1305Encrypt(m_uData.Pfn(ucsPfnChacha20Poly1305Encrypt), _
             baKey(0), baNonce(0), _
-            lAdPtr, lAdSize, _
+            lAadPtr, lAadSize, _
             baBuffer(lPos), lSize, _
             baBuffer(lPos), baBuffer(lPos + lSize))
     '--- success
@@ -5455,7 +5502,7 @@ End Function
 
 Private Function pvCryptoBulkChacha20Poly1305Decrypt( _
             baNonce() As Byte, baKey() As Byte, _
-            baAad() As Byte, ByVal lAadPos As Long, ByVal lAdSize As Long, _
+            baAad() As Byte, ByVal lAadPos As Long, ByVal lAadSize As Long, _
             baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
     Debug.Assert pvArraySize(baNonce) = LNG_CHACHA20POLY1305_IVSZ
     Debug.Assert pvArraySize(baKey) = LNG_CHACHA20_KEYSZ
@@ -5463,7 +5510,7 @@ Private Function pvCryptoBulkChacha20Poly1305Decrypt( _
     Debug.Assert pvPatchTrampoline(AddressOf pvCallChacha20Poly1305Decrypt)
     If pvCallChacha20Poly1305Decrypt(m_uData.Pfn(ucsPfnChacha20Poly1305Decrypt), _
             baKey(0), baNonce(0), _
-            baAad(lAadPos), lAdSize, _
+            baAad(lAadPos), lAadSize, _
             baBuffer(lPos), lSize - LNG_CHACHA20POLY1305_TAGSZ, _
             baBuffer(lPos + lSize - LNG_CHACHA20POLY1305_TAGSZ), baBuffer(lPos)) = 0 Then
         '--- success
@@ -5473,21 +5520,21 @@ End Function
 
 Private Function pvCryptoBulkAesGcmEncrypt( _
             baNonce() As Byte, baKey() As Byte, _
-            baAad() As Byte, ByVal lAadPos As Long, ByVal lAdSize As Long, _
+            baAad() As Byte, ByVal lAadPos As Long, ByVal lAadSize As Long, _
             baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
-    Dim lAdPtr          As Long
+    Dim lAadPtr         As Long
     
     Debug.Assert pvArraySize(baNonce) = LNG_AESGCM_IVSZ
     Debug.Assert pvArraySize(baKey) = LNG_AES128_KEYSZ Or pvArraySize(baKey) = LNG_AES256_KEYSZ
     Debug.Assert pvArraySize(baBuffer) >= lPos + lSize + LNG_AESGCM_TAGSZ
-    If lAdSize > 0 Then
-        lAdPtr = VarPtr(baAad(lAadPos))
+    If lAadSize > 0 Then
+        lAadPtr = VarPtr(baAad(lAadPos))
     End If
     Debug.Assert pvPatchTrampoline(AddressOf pvCallAesGcmEncrypt)
     Call pvCallAesGcmEncrypt(m_uData.Pfn(ucsPfnAesGcmEncrypt), _
             baBuffer(lPos), baBuffer(lPos + lSize), _
             baBuffer(lPos), lSize, _
-            lAdPtr, lAdSize, _
+            lAadPtr, lAadSize, _
             baNonce(0), baKey(0), UBound(baKey) + 1)
     '--- success
     pvCryptoBulkAesGcmEncrypt = True
@@ -5495,7 +5542,7 @@ End Function
 
 Private Function pvCryptoBulkAesGcmDecrypt( _
             baNonce() As Byte, baKey() As Byte, _
-            baAad() As Byte, ByVal lAadPos As Long, ByVal lAdSize As Long, _
+            baAad() As Byte, ByVal lAadPos As Long, ByVal lAadSize As Long, _
             baBuffer() As Byte, ByVal lPos As Long, ByVal lSize As Long) As Boolean
     Debug.Assert pvArraySize(baNonce) = LNG_AESGCM_IVSZ
     Debug.Assert pvArraySize(baKey) = LNG_AES128_KEYSZ Or pvArraySize(baKey) = LNG_AES256_KEYSZ
@@ -5505,7 +5552,7 @@ Private Function pvCryptoBulkAesGcmDecrypt( _
             baBuffer(lPos), _
             baBuffer(lPos), lSize - LNG_AESGCM_TAGSZ, _
             baBuffer(lPos + lSize - LNG_AESGCM_TAGSZ), _
-            baAad(lAadPos), lAdSize, _
+            baAad(lAadPos), lAadSize, _
             baNonce(0), baKey(0), UBound(baKey) + 1) = 0 Then
         '--- success
         pvCryptoBulkAesGcmDecrypt = True
