@@ -2372,7 +2372,6 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
                         lExtEnd = uInput.Pos + lExtSize
                         Select Case lExtType
                         Case IIf((.LocalFeatures And ucsTlsSupportTls13) <> 0, TLS_EXTENSION_KEY_SHARE, -1)
-                            .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13
                             If lExtSize < 2 Then
                                 GoTo InvalidSize
                             End If
@@ -2564,7 +2563,6 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                 Loop
                             pvBufferReadBlockEnd uInput
                         Case IIf((.LocalFeatures And ucsTlsSupportTls13) <> 0, TLS_EXTENSION_KEY_SHARE, -1)
-                            .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13
                             If lExtSize < 2 Then
                                 GoTo InvalidSize
                             End If
@@ -2830,11 +2828,11 @@ Private Function pvTlsMatchSignatureScheme(uCtx As UcsTlsContext, ByVal lSignatu
     End Select
     Select Case lSignatureScheme
     Case TLS_SIGNATURE_RSA_PKCS1_SHA1
-        If (uCtx.LocalFeatures And ucsTlsSupportTls12) <> 0 And uKeyInfo.AlgoObjId = szOID_RSA_RSA Then
+        If (uCtx.LocalFeatures And ucsTlsSupportTls12) <> 0 And uKeyInfo.AlgoObjId = szOID_RSA_RSA And uCtx.ProtocolVersion <> TLS_PROTOCOL_VERSION_TLS13 Then
             pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoPaddingPkcs) And pvCryptoIsSupported(ucsTlsAlgoDigestSha1)
         End If
     Case TLS_SIGNATURE_RSA_PKCS1_SHA224, TLS_SIGNATURE_RSA_PKCS1_SHA256, TLS_SIGNATURE_RSA_PKCS1_SHA384, TLS_SIGNATURE_RSA_PKCS1_SHA512
-        If (uCtx.LocalFeatures And ucsTlsSupportTls12) <> 0 And uKeyInfo.AlgoObjId = szOID_RSA_RSA Then
+        If (uCtx.LocalFeatures And ucsTlsSupportTls12) <> 0 And uKeyInfo.AlgoObjId = szOID_RSA_RSA And uCtx.ProtocolVersion <> TLS_PROTOCOL_VERSION_TLS13 Then
             pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoPaddingPkcs)
         End If
     Case TLS_SIGNATURE_RSA_PSS_RSAE_SHA256, TLS_SIGNATURE_RSA_PSS_RSAE_SHA384, TLS_SIGNATURE_RSA_PSS_RSAE_SHA512
@@ -3029,6 +3027,10 @@ Private Sub pvTlsSetupCipherSuite(uCtx As UcsTlsContext, ByVal lCipherSuite As L
             Case TLS_CS_RSA_WITH_AES_128_CBC_SHA256, TLS_CS_RSA_WITH_AES_256_CBC_SHA256
                 .UseRsaKeyTransport = True
 #End If
+            End Select
+            Select Case lCipherSuite
+            Case TLS_CS_AES_128_GCM_SHA256, TLS_CS_AES_256_GCM_SHA384, TLS_CS_CHACHA20_POLY1305_SHA256
+                .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13
             End Select
             If .BulkAlgo = 0 Or .DigestAlgo = 0 Then
                 Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_CIPHER_SUITE, "%1", "0x" & Hex$(.CipherSuite))
@@ -4838,7 +4840,7 @@ Private Function pvAsn1EncodePkcs1Signature(baHash() As Byte, baRetVal() As Byte
     Case LNG_SHA512_HASHSZ
         pvArrayByte baPrefix, &H30, &H51, &H30, &HD, &H6, &H9, &H60, &H86, &H48, &H1, &H65, &H3, &H4, &H2, &H3, &H5, &H0, &H4, &H40
     End Select
-    pvArrayAllocate baRetVal, UBound(baPrefix) + UBound(baHash) + 1, FUNC_NAME & ".baRetVal"
+    pvArrayAllocate baRetVal, UBound(baPrefix) + UBound(baHash) + 2, FUNC_NAME & ".baRetVal"
     Call CopyMemory(baRetVal(0), baPrefix(0), UBound(baPrefix) + 1)
     Call CopyMemory(baRetVal(UBound(baPrefix) + 1), baHash(0), UBound(baHash) + 1)
     '--- success
