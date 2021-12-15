@@ -72,20 +72,20 @@ Cipher Suite | First&nbsp;In | Selection String | Notes
 <sub><sup>TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384           </sup></sub>|TLS 1.2|EECDH+AESGCM|AEAD
 <sub><sup>TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256   </sup></sub>|TLS 1.2|EECDH+CHACHA20|AEAD
 <sub><sup>TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256     </sup></sub>|TLS 1.2|EECDH+CHACHA20|AEAD
-<sub><sup>TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256         </sup></sub>|TLS 1.2|EECDH+AES+SHA256|Exotic
-<sub><sup>TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256           </sup></sub>|TLS 1.2|EECDH+AES+SHA256|Exotic
-<sub><sup>TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384         </sup></sub>|TLS 1.2|EECDH+AES+SHA384|Exotic
-<sub><sup>TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384           </sup></sub>|TLS 1.2|EECDH+AES+SHA384|Exotic
-<sub><sup>TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA            </sup></sub>|TLSv1|EECDH+AES+SHA1|HMAC-SHA1
-<sub><sup>TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA              </sup></sub>|TLSv1|EECDH+AES+SHA1|HMAC-SHA1
-<sub><sup>TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA            </sup></sub>|TLSv1|EECDH+AES+SHA1|HMAC-SHA1
-<sub><sup>TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA              </sup></sub>|TLSv1|EECDH+AES+SHA1|HMAC-SHA1
-<sub><sup>TLS_RSA_WITH_AES_128_GCM_SHA256                 </sup></sub>|TLS 1.2|RSA+AESGCM|No FS
-<sub><sup>TLS_RSA_WITH_AES_256_GCM_SHA384                 </sup></sub>|TLS 1.2|RSA+AESGCM|No FS
-<sub><sup>TLS_RSA_WITH_AES_128_CBC_SHA256                 </sup></sub>|TLS 1.2|RSA+AES+SHA256|No FS, Exotic
-<sub><sup>TLS_RSA_WITH_AES_256_CBC_SHA256                 </sup></sub>|TLS 1.2|RSA+AES+SHA256|No FS, Exotic
-<sub><sup>TLS_RSA_WITH_AES_128_CBC_SHA                    </sup></sub>|SSLv3|RSA+AES+SHA1|No FS, HMAC-SHA1
-<sub><sup>TLS_RSA_WITH_AES_256_CBC_SHA                    </sup></sub>|SSLv3|RSA+AES+SHA1|No FS, HMAC-SHA1
+<sub><sup>TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256         </sup></sub>|TLS 1.2|EECDH+AES+SHA256|Weak, Exotic
+<sub><sup>TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256           </sup></sub>|TLS 1.2|EECDH+AES+SHA256|Weak, Exotic
+<sub><sup>TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384         </sup></sub>|TLS 1.2|EECDH+AES+SHA384|Weak, Exotic
+<sub><sup>TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384           </sup></sub>|TLS 1.2|EECDH+AES+SHA384|Weak, Exotic
+<sub><sup>TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA            </sup></sub>|TLSv1|EECDH+AES+SHA1|Weak, HMAC-SHA1
+<sub><sup>TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA              </sup></sub>|TLSv1|EECDH+AES+SHA1|Weak, HMAC-SHA1
+<sub><sup>TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA            </sup></sub>|TLSv1|EECDH+AES+SHA1|Weak, HMAC-SHA1
+<sub><sup>TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA              </sup></sub>|TLSv1|EECDH+AES+SHA1|Weak, HMAC-SHA1
+<sub><sup>TLS_RSA_WITH_AES_128_GCM_SHA256                 </sup></sub>|TLS 1.2|RSA+AESGCM|Weak, No FS
+<sub><sup>TLS_RSA_WITH_AES_256_GCM_SHA384                 </sup></sub>|TLS 1.2|RSA+AESGCM|Weak, No FS
+<sub><sup>TLS_RSA_WITH_AES_128_CBC_SHA256                 </sup></sub>|TLS 1.2|RSA+AES+SHA256|Weak, No FS, Exotic
+<sub><sup>TLS_RSA_WITH_AES_256_CBC_SHA256                 </sup></sub>|TLS 1.2|RSA+AES+SHA256|Weak, No FS, Exotic
+<sub><sup>TLS_RSA_WITH_AES_128_CBC_SHA                    </sup></sub>|SSLv3|RSA+AES+SHA1|Weak, No FS, HMAC-SHA1
+<sub><sup>TLS_RSA_WITH_AES_256_CBC_SHA                    </sup></sub>|SSLv3|RSA+AES+SHA1|Weak, No FS, HMAC-SHA1
 
 Note that "exotic" cipher suites are included behind a conditional compilation flag only (off by default).
 

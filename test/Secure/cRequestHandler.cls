@@ -72,23 +72,28 @@ Private Function HandleRequest(sText As String) As Boolean
     
     On Error GoTo EH
     m_sRequest = m_sRequest & sText
-    If InStr(m_sRequest, vbCrLf) = 0 Then
+    If InStr(m_sRequest, vbCrLf) > 0 Then
+        vSplit = Split(m_sRequest, vbCrLf)
+    ElseIf InStr(m_sRequest, vbLf) > 0 Then
+        vSplit = Split(m_sRequest, vbCrLf)
+    Else
         Exit Function
     End If
-    vSplit = Split(m_sRequest, vbCrLf)
     vSplit = Split(vSplit(0), " ")
     #If ImplUseDebugLog Then
         DebugLog MODULE_NAME, FUNC_NAME, "Path=" & vSplit(1)
     #End If
-    sRetVal = "<html><body>" & Now & "</body></html>"
+    sRetVal = "<html><body>" & Now & "</body></html>" & vbCrLf
     sRetVal = "HTTP/1.0 200 Ok" & vbCrLf & _
         "Content-Type: text/html; charset=UTF-8" & vbCrLf & _
         "Content-Length: " & Len(sRetVal) & vbCrLf & _
         "Connection: Close" & vbCrLf & vbCrLf & _
         sRetVal
-    If Not m_oSocket.SendArray(ToUtf8Array(sRetVal)) Then
+    If Not m_oSocket.SyncSendArray(ToUtf8Array(sRetVal)) Then
         GoTo QH
     End If
+    Set m_oSocket = Nothing
+    '--- success
     HandleRequest = True
 QH:
     Exit Function
@@ -136,3 +141,4 @@ EH:
     PrintError FUNC_NAME
     Resume QH
 End Sub
+
