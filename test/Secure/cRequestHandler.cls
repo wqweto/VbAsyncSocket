@@ -80,6 +80,9 @@ Private Function HandleRequest(sText As String) As Boolean
         Exit Function
     End If
     vSplit = Split(vSplit(0), " ")
+    If UBound(vSplit) = 0 Then
+        Exit Function
+    End If
     #If ImplUseDebugLog Then
         DebugLog MODULE_NAME, FUNC_NAME, "Path=" & vSplit(1)
     #End If
@@ -92,6 +95,7 @@ Private Function HandleRequest(sText As String) As Boolean
     If Not m_oSocket.SyncSendArray(ToUtf8Array(sRetVal)) Then
         GoTo QH
     End If
+    m_oSocket.Close_
     Set m_oSocket = Nothing
     '--- success
     HandleRequest = True
