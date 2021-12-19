@@ -302,7 +302,7 @@ Private Const ERR_UNSUPPORTED_PUBLIC_KEY                As String = "Unsupported
 Private Const ERR_UNSUPPORTED_PRIVATE_KEY               As String = "Unsupported private key"
 Private Const ERR_UNSUPPORTED_CURVE_SIZE                As String = "Unsupported curve size (%1)"
 Private Const ERR_UNSUPPORTED_CURVE_TYPE                As String = "Unsupported curve type (%1)"
-Private Const ERR_UNSUPPORTED_PROTOCOL                  As String = "Invalid protocol version"
+Private Const ERR_UNSUPPORTED_PROTOCOL                  As String = "Invalid protocol version (%1)"
 Private Const ERR_ENCRYPTION_FAILED                     As String = "Encryption failed"
 Private Const ERR_SIGNATURE_FAILED                      As String = "Certificate signature failed (%1)"
 Private Const ERR_DECRYPTION_FAILED                     As String = "Decryption failed"
@@ -442,6 +442,7 @@ Public Type UcsTlsContext
     SniRequested        As String
     PrevRecordType      As Long
     '--- handshake
+    ProtocolVersion     As Long
     LocalSessionID()    As Byte
     LocalSessionTicket() As Byte
     LocalExchRandom()   As Byte
@@ -452,6 +453,7 @@ Public Type UcsTlsContext
     LocalPrivateKey     As Collection
     LocalSignatureScheme As Long
     LocalLegacyVerifyData() As Byte
+    RemoteProtocolVersion As Long
     RemoteSessionID()   As Byte
     RemoteExchRandom()  As Byte
     RemoteExchPublic()  As Byte
@@ -463,7 +465,6 @@ Public Type UcsTlsContext
     RemoteLegacyVerifyData() As Byte
     RemoteLegacyRenegInfo() As Byte
     '--- crypto settings
-    ProtocolVersion     As Long
     ExchGroup           As Long
     ExchAlgo            As UcsTlsCryptoAlgorithmsEnum
     CipherSuite         As Long
@@ -1681,7 +1682,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                 Exit Do
             End If
             '--- try to decrypt record
-            If pvArraySize(.RemoteTrafficKey) > 0 And lRecordSize > .TagSize Then
+            If pvArraySize(.RemoteTrafficKey) > 0 And lRecordSize >= .TagSize + .MacSize Then
                 lEnd = uInput.Pos + lRecordSize - .TagSize
                 bResult = False
                 pvArrayXor baRemoteIV, .RemoteTrafficIV, .RemoteTrafficSeqNo
@@ -1735,7 +1736,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                     If Not .RemoteEncryptThenMac Then
                         '--- remove padding and prepare decrypted data for MAC
                         lEnd = lEnd - uInput.Data(lEnd - 1) - 1 - .MacSize
-                        If lEnd <= uInput.Pos Then
+                        If lEnd < uInput.Pos Then
                             GoTo RecordMacFailed
                         End If
                         uAad.Size = uAad.Size - 2
@@ -2500,7 +2501,6 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
     Const FUNC_NAME     As String = "pvTlsParseHandshakeServerHello"
     Dim lBlockSize      As Long
     Dim lBlockEnd       As Long
-    Dim lLegacyVersion  As Long
     Dim lCipherSuite    As Long
     Dim lLegacyCompress As Long
     Dim lExtType        As Long
@@ -2516,8 +2516,8 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
         pvTlsGetHelloRetryRandom m_baHelloRetryRandom
     End If
     With uCtx
-        .ProtocolVersion = lRecordProtocol
-        pvBufferReadLong uInput, lLegacyVersion, Size:=2
+        .ProtocolVersion = IIf(lRecordProtocol <= TLS_PROTOCOL_VERSION_TLS12, TLS_PROTOCOL_VERSION_TLS12, TLS_PROTOCOL_VERSION_TLS13)
+        pvBufferReadLong uInput, .RemoteProtocolVersion, Size:=2
         pvBufferReadArray uInput, .RemoteExchRandom, TLS_HELLO_RANDOM_SIZE
         If .HelloRetryRequest Then
             '--- clear HelloRetryRequest
@@ -2586,6 +2586,9 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
                                 GoTo InvalidSize
                             End If
                             pvBufferReadLong uInput, .ProtocolVersion, Size:=2
+                            If .ProtocolVersion <> TLS_PROTOCOL_VERSION_TLS12 And .ProtocolVersion <> TLS_PROTOCOL_VERSION_TLS13 Then
+                                GoTo UnsupportedProtocol
+                            End If
                         Case IIf((.LocalFeatures And ucsTlsSupportTls13) <> 0, TLS_EXTENSION_COOKIE, -1)
                             If Not .HelloRetryRequest Then
                                 GoTo UnexpectedExtension
@@ -2651,6 +2654,10 @@ InvalidRemoteKey:
     sError = ERR_INVALID_REMOTE_KEY
     eAlertCode = uscTlsAlertIllegalParameter
     GoTo QH
+UnsupportedProtocol:
+    sError = Replace(ERR_UNSUPPORTED_PROTOCOL, "%1", "&H" & Hex$(uCtx.ProtocolVersion))
+    eAlertCode = uscTlsAlertIllegalParameter
+    GoTo QH
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
     eAlertCode = uscTlsAlertInternalError
@@ -2660,7 +2667,6 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
     Const FUNC_NAME     As String = "pvTlsParseHandshakeClientHello"
     Dim lSize           As Long
     Dim lEnd            As Long
-    Dim lLegacyVersion  As Long
     Dim lCipherSuite    As Long
     Dim lCipherPref     As Long
     Dim lLegacyCompress As Long
@@ -2699,8 +2705,8 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
         Next
         lCipherPref = 1000
         .ProtocolVersion = IIf((.LocalFeatures And ucsTlsSupportTls12) <> 0, TLS_PROTOCOL_VERSION_TLS12, TLS_PROTOCOL_VERSION_TLS13)
-        pvBufferReadLong uInput, lLegacyVersion, Size:=2
-        If lLegacyVersion < TLS_PROTOCOL_VERSION_TLS12 Then
+        pvBufferReadLong uInput, .RemoteProtocolVersion, Size:=2
+        If .RemoteProtocolVersion < TLS_PROTOCOL_VERSION_TLS12 Then
             GoTo UnsupportedProtocol
         End If
         '--- remote random
@@ -2987,7 +2993,7 @@ UnsupportedCertificate:
     eAlertCode = uscTlsAlertHandshakeFailure
     GoTo QH
 UnsupportedProtocol:
-    sError = ERR_UNSUPPORTED_PROTOCOL
+    sError = Replace(ERR_UNSUPPORTED_PROTOCOL, "%1", "&H" & Hex$(uCtx.RemoteProtocolVersion))
     eAlertCode = uscTlsAlertProtocolVersion
     GoTo QH
 NoCipherSuite:
@@ -3360,16 +3366,24 @@ Private Sub pvTlsSetupExchRsaPreMasterSecret(uCtx As UcsTlsContext, baEnc() As B
             Err.Raise vbObjectError, FUNC_NAME, ERR_UNSUPPORTED_PRIVATE_KEY
         End If
         If Not pvCryptoRsaCrtModExp(baEnc, uKeyInfo.PrivExp, uKeyInfo.Modulus, uKeyInfo.Prime1, uKeyInfo.Prime2, uKeyInfo.Coefficient, baDec) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoRsaCrtModExp")
+            GoTo UseRandom
         End If
-        If Not pvCryptoEmePkcs1Decode(.LocalExchPrivate, baDec, TLS_LEGACY_SECRET_SIZE) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEmePkcs1Decode")
+        If Not pvCryptoEmePkcs1Decode(.LocalExchPrivate, baDec) Then
+            GoTo UseRandom
         End If
-        Call CopyMemory(lVersion, .LocalExchPrivate(0), 2)
-        If lVersion <> TLS_LOCAL_LEGACY_VERSION Then
-            pvTlsGetRandom .LocalExchPrivate, TLS_LEGACY_SECRET_SIZE
+        If pvArraySize(.LocalExchPrivate) <> TLS_LEGACY_SECRET_SIZE Then
+            GoTo UseRandom
+        End If
+        If pvArraySize(.LocalExchPrivate) >= 2 Then
+            Call CopyMemory(lVersion, .LocalExchPrivate(0), 2)
+        End If
+        If lVersion <> .RemoteProtocolVersion Then
+            GoTo UseRandom
         End If
     End With
+    Exit Sub
+UseRandom:
+    pvTlsGetRandom uCtx.LocalExchPrivate, TLS_LEGACY_SECRET_SIZE
 End Sub
 
 Private Sub pvTlsSetupCipherSuite(uCtx As UcsTlsContext, ByVal lCipherSuite As Long)
@@ -4893,26 +4907,24 @@ Private Function pvCryptoEmePkcs1Encode(baRetVal() As Byte, baMessage() As Byte,
 QH:
 End Function
 
-Private Function pvCryptoEmePkcs1Decode(baRetVal() As Byte, baMessage() As Byte, ByVal lSize As Long) As Boolean
+Private Function pvCryptoEmePkcs1Decode(baRetVal() As Byte, baMessage() As Byte) As Boolean
     Const FUNC_NAME     As String = "CryptoEmePkcs1Decode"
     Dim lIdx            As Long
     
     If baMessage(0) <> 0 Or baMessage(1) <> 2 Then
         GoTo QH
     End If
-    If lSize > pvArraySize(baMessage) - 11 Then
-        GoTo QH
-    End If
-    For lIdx = 2 To UBound(baMessage) - lSize - 1
+    For lIdx = 2 To UBound(baMessage)
         If baMessage(lIdx) = 0 Then
-            GoTo QH
+            lIdx = lIdx + 1
+            Exit For
         End If
     Next
-    If baMessage(UBound(baMessage) - lSize) <> 0 Then
+    If lIdx > UBound(baMessage) Then
         GoTo QH
     End If
-    pvArrayAllocate baRetVal, lSize, FUNC_NAME & ".baRetVal"
-    Call CopyMemory(baRetVal(0), baMessage(UBound(baMessage) - UBound(baRetVal)), UBound(baRetVal) + 1)
+    pvArrayAllocate baRetVal, UBound(baMessage) + 1 - lIdx, FUNC_NAME & ".baRetVal"
+    Call CopyMemory(baRetVal(0), baMessage(lIdx), UBound(baRetVal) + 1)
     '--- success
     pvCryptoEmePkcs1Decode = True
 QH:
