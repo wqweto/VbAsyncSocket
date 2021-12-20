@@ -232,6 +232,8 @@ Private Const TLS_GROUP_SECP384R1                       As Long = 24
 Private Const TLS_GROUP_SECP521R1                       As Long = 25
 Private Const TLS_GROUP_X25519                          As Long = 29
 Private Const TLS_GROUP_X448                            As Long = 30
+Private Const TLS_GROUP_FFDHE_FIRST                     As Long = 256
+Private Const TLS_GROUP_FFDHE_LAST                      As Long = 511
 '--- TLS Signature Scheme from https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-signaturescheme
 Private Const TLS_SIGNATURE_RSA_PKCS1_SHA1              As Long = &H201 '--- TLS 1.2
 Private Const TLS_SIGNATURE_ECDSA_SHA1                  As Long = &H203
@@ -1672,7 +1674,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
     Dim uAad            As UcsBuffer
     Dim bResult         As Boolean
     Dim baHmac()        As Byte
-    Dim lPaddingSize    As Long
+    Dim lPadding        As Long
     Dim lIdx            As Long
     
     On Error GoTo EH
@@ -1748,16 +1750,16 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                 ElseIf .MacSize > 0 Then
                     If Not .RemoteEncryptThenMac Then
                         '--- remove padding and prepare decrypted data for MAC
-                        lPaddingSize = uInput.Data(lEnd - 1)
-                        For lIdx = 2 To lPaddingSize
-                            If uInput.Data(lEnd - lIdx) <> lPaddingSize Then
+                        lPadding = uInput.Data(lEnd - 1)
+                        If lEnd - lPadding - 1 - .MacSize < uInput.Pos Then
+                            GoTo RecordMacFailed
+                        End If
+                        For lIdx = 2 To lPadding
+                            If uInput.Data(lEnd - lIdx) <> lPadding Then
                                 GoTo RecordMacFailed
                             End If
                         Next
-                        lEnd = lEnd - lPaddingSize - 1 - .MacSize
-                        If lEnd < uInput.Pos Then
-                            GoTo RecordMacFailed
-                        End If
+                        lEnd = lEnd - lPadding - 1 - .MacSize
                         uAad.Size = uAad.Size - 2
                         pvBufferWriteLong uAad, lEnd - uInput.Pos, Size:=2
                         pvBufferWriteBlob uAad, VarPtr(uInput.Data(uInput.Pos)), lEnd - uInput.Pos
@@ -1771,10 +1773,16 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                     End If
                     If .RemoteEncryptThenMac Then
                         '--- remove padding from decrypted data
-                        lEnd = lEnd - uInput.Data(lEnd - 1) - 1
-                        If lEnd <= uInput.Pos Then
+                        lPadding = uInput.Data(lEnd - 1)
+                        If lEnd - lPadding - 1 < uInput.Pos Then
                             GoTo RecordMacFailed
                         End If
+                        For lIdx = 2 To lPadding
+                            If uInput.Data(lEnd - lIdx) <> lPadding Then
+                                GoTo RecordMacFailed
+                            End If
+                        Next
+                        lEnd = lEnd - uInput.Data(lEnd - 1) - 1
                     End If
                 End If
             Else
@@ -2921,6 +2929,8 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                             eExchAlgo = ucsTlsAlgoExchSecp384r1
                                         Case TLS_GROUP_X448, TLS_GROUP_SECP521R1
                                             eExchAlgo = 0
+                                        Case TLS_GROUP_FFDHE_FIRST To TLS_GROUP_FFDHE_LAST
+                                            eExchAlgo = 0
                                         Case Else
                                             GoTo UnsupportedExchGroup
                                         End Select
@@ -2981,7 +2991,9 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                     If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
                                         Select Case lExchGroup
                                         Case TLS_GROUP_X25519 To TLS_GROUP_X448, TLS_GROUP_SECP256R1 To TLS_GROUP_SECP521R1
-                                            '--- accept
+                                            '--- ecc curves
+                                        Case TLS_GROUP_FFDHE_FIRST To TLS_GROUP_FFDHE_LAST
+                                            '--- ffdhe
                                         Case Else
                                             GoTo UnsupportedExchGroup
                                         End Select
@@ -3474,6 +3486,9 @@ Private Sub pvTlsSetupExchRsaPreMasterSecret(uCtx As UcsTlsContext, baEnc() As B
     End With
     Exit Sub
 UseRandom:
+    #If ImplUseDebugLog Then
+        DebugLog MODULE_NAME, FUNC_NAME, "Will use random LocalExchPrivate"
+    #End If
     pvTlsGetRandom uCtx.LocalExchPrivate, TLS_LEGACY_SECRET_SIZE
 End Sub
 
