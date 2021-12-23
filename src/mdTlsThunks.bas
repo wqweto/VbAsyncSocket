@@ -1751,15 +1751,15 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                     If Not .RemoteEncryptThenMac Then
                         '--- remove padding and prepare decrypted data for MAC
                         lPadding = uInput.Data(lEnd - 1)
-                        If lEnd - lPadding - 1 - .MacSize < uInput.Pos Then
+                        If lEnd - (lPadding + 1) - .MacSize < uInput.Pos Then
                             GoTo RecordMacFailed
                         End If
-                        For lIdx = 2 To lPadding
+                        For lIdx = 2 To lPadding + 1
                             If uInput.Data(lEnd - lIdx) <> lPadding Then
                                 GoTo RecordMacFailed
                             End If
                         Next
-                        lEnd = lEnd - lPadding - 1 - .MacSize
+                        lEnd = lEnd - (lPadding + 1) - .MacSize
                         uAad.Size = uAad.Size - 2
                         pvBufferWriteLong uAad, lEnd - uInput.Pos, Size:=2
                         pvBufferWriteBlob uAad, VarPtr(uInput.Data(uInput.Pos)), lEnd - uInput.Pos
@@ -1774,15 +1774,15 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                     If .RemoteEncryptThenMac Then
                         '--- remove padding from decrypted data
                         lPadding = uInput.Data(lEnd - 1)
-                        If lEnd - lPadding - 1 < uInput.Pos Then
+                        If lEnd - (lPadding + 1) < uInput.Pos Then
                             GoTo RecordMacFailed
                         End If
-                        For lIdx = 2 To lPadding
+                        For lIdx = 2 To lPadding + 1
                             If uInput.Data(lEnd - lIdx) <> lPadding Then
                                 GoTo RecordMacFailed
                             End If
                         Next
-                        lEnd = lEnd - uInput.Data(lEnd - 1) - 1
+                        lEnd = lEnd - (lPadding + 1)
                     End If
                 End If
             Else
