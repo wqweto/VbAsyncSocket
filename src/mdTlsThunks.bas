@@ -196,7 +196,7 @@ Private Const TLS_EXTENSION_COOKIE                      As Long = 44
 'Private Const TLS_EXTENSION_PSK_KEY_EXCHANGE_MODES      As Long = 45
 Private Const TLS_EXTENSION_CERTIFICATE_AUTHORITIES     As Long = 47
 Private Const TLS_EXTENSION_POST_HANDSHAKE_AUTH         As Long = 49
-'Private Const TLS_EXTENSION_SIGNATURE_ALGORITHMS_CERT   As Long = 50
+Private Const TLS_EXTENSION_SIGNATURE_ALGORITHMS_CERT   As Long = 50
 Private Const TLS_EXTENSION_KEY_SHARE                   As Long = 51
 Private Const TLS_EXTENSION_RENEGOTIATION_INFO          As Long = &HFF01&
 '--- TLS Cipher Suites from http://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-4
@@ -218,14 +218,12 @@ Private Const TLS_CS_RSA_WITH_AES_256_CBC_SHA           As Long = &H35
 Private Const TLS_CS_RSA_WITH_AES_128_GCM_SHA256        As Long = &H9C
 Private Const TLS_CS_RSA_WITH_AES_256_GCM_SHA384        As Long = &H9D
 Private Const TLS_CS_EMPTY_RENEGOTIATION_INFO_SCSV      As Long = &HFF
-#If ImplExoticCiphers Then
-    Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256 As Long = &HC023&
-    Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384 As Long = &HC024&
-    Private Const TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA256  As Long = &HC027&
-    Private Const TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA384  As Long = &HC028&
-    Private Const TLS_CS_RSA_WITH_AES_128_CBC_SHA256        As Long = &H3C
-    Private Const TLS_CS_RSA_WITH_AES_256_CBC_SHA256        As Long = &H3D
-#End If
+Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256 As Long = &HC023&
+Private Const TLS_CS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384 As Long = &HC024&
+Private Const TLS_CS_ECDHE_RSA_WITH_AES_128_CBC_SHA256  As Long = &HC027&
+Private Const TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA384  As Long = &HC028&
+Private Const TLS_CS_RSA_WITH_AES_128_CBC_SHA256        As Long = &H3C
+Private Const TLS_CS_RSA_WITH_AES_256_CBC_SHA256        As Long = &H3D
 '--- TLS Supported Groups from https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-8
 Private Const TLS_GROUP_SECP256R1                       As Long = 23
 Private Const TLS_GROUP_SECP384R1                       As Long = 24
@@ -313,6 +311,7 @@ Private Const ERR_SERVER_HANDSHAKE_FAILED               As String = "Handshake v
 Private Const ERR_RECORD_MAC_FAILED                     As String = "MAC verification failed"
 Private Const ERR_HELLO_RETRY_FAILED                    As String = "HelloRetryRequest failed"
 Private Const ERR_NEGOTIATE_SIGNATURE_FAILED            As String = "Negotiate signature type failed"
+Private Const ERR_SECURE_RENEGOTIATION_FAILED           As String = "Secure renegotiation failed"
 Private Const ERR_CALL_FAILED                           As String = "Call failed (%1)"
 Private Const ERR_RECORD_OVERFLOW                       As String = "Record size too big"
 Private Const ERR_FATAL_ALERT                           As String = "Received fatal alert"
@@ -321,6 +320,7 @@ Private Const ERR_UNEXPECTED_MSG_TYPE                   As String = "Unexpected 
 Private Const ERR_UNEXPECTED_EXTENSION                  As String = "Unexpected extension (%1)"
 Private Const ERR_INVALID_STATE_HANDSHAKE               As String = "Invalid state for handshake content (%1)"
 Private Const ERR_INVALID_REMOTE_KEY                    As String = "Invalid remote key"
+Private Const ERR_INVALID_SIZE                          As String = "Invalid data size"
 Private Const ERR_INVALID_SIZE_EXTENSION                As String = "Invalid data size for %1"
 Private Const ERR_INVALID_SIGNATURE                     As String = "Invalid certificate signature"
 Private Const ERR_INVALID_HASH_SIZE                     As String = "Invalid hash size (%1)"
@@ -331,10 +331,9 @@ Private Const ERR_NO_SERVER_CERTIFICATE                 As String = "Missing ser
 Private Const ERR_NO_SUPPORTED_CIPHER_SUITE             As String = "Missing supported ciphersuite (%1)"
 Private Const ERR_NO_PRIVATE_KEY                        As String = "Missing server private key"
 Private Const ERR_NO_SERVER_COMPILED                    As String = "Server TLS not compiled (TLS_NOSERVER = 1)"
-Private Const ERR_FAILED_SECURE_RENEGOTIATION           As String = "Secure renegotiation failed"
 Private Const ERR_NO_SUPPORTED_GROUPS                   As String = "Missing supported remote group"
 Private Const ERR_NO_ALPN_NEGOTIATED                    As String = "No application protocol negotiated"
-Private Const ERR_NO_KEY_SHARE                          As String = "Missing key_share extension"
+Private Const ERR_NO_EXTENSION                          As String = "Missing extension (%1)"
 Private Const ERR_UNSUPPORTED_REQUEST_UPDATE            As String = "Unsupported request update (%1)"
 Private Const ERR_INVALID_COMPRESSION                   As String = "Invalid compression (%1)"
 Private Const ERR_INVALID_SERVER_NAME                   As String = "Invalid server name (%1)"
@@ -457,7 +456,6 @@ Public Type UcsTlsContext
     LocalExchRsaEncrPriv() As Byte
     LocalCertificates   As Collection
     LocalPrivateKey     As Collection
-    LocalSignatureScheme As Long
     LocalLegacyVerifyData() As Byte
     RemoteProtocolVersion As Long
     RemoteSessionID()   As Byte
@@ -474,6 +472,7 @@ Public Type UcsTlsContext
     ExchGroup           As Long
     ExchAlgo            As UcsTlsCryptoAlgorithmsEnum
     CipherSuite         As Long
+    SignatureScheme     As Long
     MacAlgo             As UcsTlsCryptoAlgorithmsEnum   '--- not used w/ AEAD ciphers
     MacSize             As Long                         '--- not used w/ AEAD ciphers
     BulkAlgo            As UcsTlsCryptoAlgorithmsEnum
@@ -1458,8 +1457,8 @@ Private Sub pvTlsBuildServerLegacyKeyExchange(uCtx As UcsTlsContext, uOutput As 
                     pvBufferWriteArray uVerify, .LocalExchRandom
                     pvBufferWriteBlob uVerify, VarPtr(uOutput.Data(lSignPos)), lSignSize
                     pvBufferWriteEOF uVerify
-                    pvTlsSignatureSign baSignature, .LocalPrivateKey, .LocalSignatureScheme, uVerify.Data
-                    pvBufferWriteLong uOutput, .LocalSignatureScheme, Size:=2
+                    pvTlsSignatureSign baSignature, .LocalPrivateKey, .SignatureScheme, uVerify.Data
+                    pvBufferWriteLong uOutput, .SignatureScheme, Size:=2
                     pvBufferWriteBlockStart uOutput, Size:=2
                         pvBufferWriteArray uOutput, baSignature
                     pvBufferWriteBlockEnd uOutput
@@ -1534,13 +1533,13 @@ Private Sub pvTlsBuildServerHandshakeFinished(uCtx As UcsTlsContext, uOutput As 
             lMessagePos = uOutput.Size
             pvBufferWriteLong uOutput, TLS_HANDSHAKE_CERTIFICATE_VERIFY
             pvBufferWriteBlockStart uOutput, Size:=3
-                pvBufferWriteLong uOutput, .LocalSignatureScheme, Size:=2
+                pvBufferWriteLong uOutput, .SignatureScheme, Size:=2
                 pvBufferWriteBlockStart uOutput, Size:=2
                     pvTlsGetHandshakeHash uCtx, baHandshakeHash
                     pvBufferWriteString uVerify, Space$(64) & "TLS 1.3, server CertificateVerify" & Chr$(0)
                     pvBufferWriteArray uVerify, baHandshakeHash
                     pvBufferWriteEOF uVerify
-                    pvTlsSignatureSign baSignature, .LocalPrivateKey, .LocalSignatureScheme, uVerify.Data
+                    pvTlsSignatureSign baSignature, .LocalPrivateKey, .SignatureScheme, uVerify.Data
                     pvBufferWriteArray uOutput, baSignature
                 pvBufferWriteBlockEnd uOutput
             pvBufferWriteBlockEnd uOutput
@@ -1687,9 +1686,6 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
         End If
         pvBufferReadLong uInput, lRecordProtocol, Size:=2
         pvBufferReadBlockStart uInput, Size:=2, BlockSize:=lRecordSize
-            If lRecordSize > IIf(lRecordType = TLS_CONTENT_TYPE_APPDATA, TLS_MAX_ENCRYPTED_RECORD_SIZE + .MacSize + .IvExplicitSize, TLS_MAX_PLAINTEXT_RECORD_SIZE) Then
-                GoTo RecordOverflow
-            End If
             If uInput.Pos + lRecordSize > uInput.Size Then
                 '--- back off and bail out early
                 uInput.Stack.Remove 1
@@ -1697,7 +1693,17 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                 Exit Do
             End If
             '--- try to decrypt record
-            If pvArraySize(.RemoteTrafficKey) > 0 And lRecordSize >= .TagSize + .MacSize Then
+            If pvArraySize(.RemoteTrafficKey) > 0 Then
+                '--- check ciphertext size
+                If lRecordSize > TLS_MAX_ENCRYPTED_RECORD_SIZE + .MacSize + .IvExplicitSize Then
+                    GoTo RecordOverflow
+                End If
+                If lRecordSize < .TagSize + .MacSize Then
+                    If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
+                        GoTo Unencrypted
+                    End If
+                    GoTo RecordMacFailed
+                End If
                 lEnd = uInput.Pos + lRecordSize - .TagSize
                 bResult = False
                 pvArrayXor baRemoteIV, .RemoteTrafficIV, .RemoteTrafficSeqNo
@@ -1786,7 +1792,12 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                     End If
                 End If
             Else
+Unencrypted:
                 lEnd = uInput.Pos + lRecordSize
+            End If
+            '--- check plaintext size
+            If lEnd - uInput.Pos > TLS_MAX_PLAINTEXT_RECORD_SIZE Then
+                GoTo RecordOverflow
             End If
             Select Case lRecordType
             Case TLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC
@@ -2209,11 +2220,11 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                     '--- secure renegotiation check
                     If pvArraySize(.LocalLegacyVerifyData) > 0 Then
                         If pvArraySize(.RemoteLegacyRenegInfo) <> 2 * TLS_VERIFY_DATA_SIZE Or pvArraySize(.RemoteLegacyVerifyData) <> TLS_VERIFY_DATA_SIZE Then
-                            GoTo FailedSecureRenegotiation
+                            GoTo SecureRenegotiationFailed
                         ElseIf InStrB(.RemoteLegacyRenegInfo, .LocalLegacyVerifyData) <> 1 Then
-                            GoTo FailedSecureRenegotiation
+                            GoTo SecureRenegotiationFailed
                         ElseIf InStrB(TLS_VERIFY_DATA_SIZE + 1, .RemoteLegacyRenegInfo, .RemoteLegacyVerifyData) <> TLS_VERIFY_DATA_SIZE + 1 Then
-                            GoTo FailedSecureRenegotiation
+                            GoTo SecureRenegotiationFailed
                         End If
                     End If
                     pvTlsBuildClientLegacyKeyExchange uCtx, .SendBuffer
@@ -2434,6 +2445,7 @@ RenegotiateClientHello:
                     '--- renegotiate ephemeral keys too
                     .ExchGroup = 0
                     .CipherSuite = 0
+                    .SignatureScheme = 0
                     .PrevRecordType = 0
                     pvTlsBuildClientHello uCtx, .SendBuffer
 #If ImplTlsServer Then
@@ -2447,6 +2459,7 @@ RenegotiateClientHello:
                     '--- renegotiate ephemeral keys too
                     .ExchGroup = 0
                     .CipherSuite = 0
+                    .SignatureScheme = 0
                     .PrevRecordType = 0
                     GoTo RenegotiateClientHello
 #End If
@@ -2508,7 +2521,7 @@ NoServerCertificate:
     eAlertCode = uscTlsAlertCertificateUnknown
     GoTo QH
 InvalidSize:
-    sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionName(lExtType))
+    sError = IIf(lExtType < 0, ERR_INVALID_SIZE, Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionName(lExtType)))
     eAlertCode = uscTlsAlertDecodeError
     GoTo QH
 UnsupportedCurveType:
@@ -2519,8 +2532,8 @@ InvalidStateHandshake:
     sError = Replace(ERR_INVALID_STATE_HANDSHAKE, "%1", pvTlsGetStateAsText(uCtx.State))
     eAlertCode = uscTlsAlertHandshakeFailure
     GoTo QH
-FailedSecureRenegotiation:
-    sError = ERR_FAILED_SECURE_RENEGOTIATION
+SecureRenegotiationFailed:
+    sError = ERR_SECURE_RENEGOTIATION_FAILED
     eAlertCode = uscTlsAlertHandshakeFailure
     GoTo QH
 InvalidRemoteKey:
@@ -2691,7 +2704,7 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
 QH:
     Exit Function
 InvalidSize:
-    sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionName(lExtType))
+    sError = IIf(lExtType < 0, ERR_INVALID_SIZE, Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionName(lExtType)))
     eAlertCode = uscTlsAlertDecodeError
     GoTo QH
 UnexpectedExtension:
@@ -2736,19 +2749,19 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
     Dim cAlpnPrefs      As Collection
     Dim lAlpnPref       As Long
     Dim lCompression    As Long
+    Dim cPrevRemoteExt  As Collection
     
     On Error GoTo EH
     lExtType = -1
     With uCtx
-        If .RemoteExtensions Is Nothing Then
-            Set .RemoteExtensions = New Collection
-        End If
+        Set cPrevRemoteExt = .RemoteExtensions
+        Set .RemoteExtensions = New Collection
         If SearchCollection(.LocalPrivateKey, 1, RetVal:=baPrivKey) Then
             If Not pvAsn1DecodePrivateKey(baPrivKey, uKeyInfo) Then
                 GoTo UnsupportedCertificate
             End If
         End If
-        .ProtocolVersion = IIf((.LocalFeatures And ucsTlsSupportTls12) <> 0, TLS_PROTOCOL_VERSION_TLS12, TLS_PROTOCOL_VERSION_TLS13)
+        .ProtocolVersion = IIf((.LocalFeatures And ucsTlsSupportTls12) <> 0 And Not .HelloRetryRequest, TLS_PROTOCOL_VERSION_TLS12, TLS_PROTOCOL_VERSION_TLS13)
         pvBufferReadLong uInput, .RemoteProtocolVersion, Size:=2
         If .RemoteProtocolVersion < TLS_PROTOCOL_VERSION_TLS12 Then
             GoTo UnsupportedProtocol
@@ -2786,8 +2799,13 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                 If Not SearchCollection(cCipherSuites, "#" & lIdx) Then
                     cCipherSuites.Add lIdx, "#" & lIdx
                 End If
-                If lIdx = TLS_CS_EMPTY_RENEGOTIATION_INFO_SCSV Then
+                If lIdx = TLS_CS_EMPTY_RENEGOTIATION_INFO_SCSV And .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 Then
                     lIdx = TLS_EXTENSION_RENEGOTIATION_INFO
+                    '--- 3.7, Server Behavior: Secure Renegotiation. When a ClientHello is received, the server MUST verify that it does not
+                    '---   contain the TLS_EMPTY_RENEGOTIATION_INFO_SCSV SCSV. If the SCSV is present, the server MUST abort the handshake.
+                    If SearchCollection(cPrevRemoteExt, "#" & lIdx) Then
+                        GoTo SecureRenegotiationFailed
+                    End If
                     If Not SearchCollection(.RemoteExtensions, "#" & lIdx) Then
                         .RemoteExtensions.Add lIdx, "#" & lIdx
                     End If
@@ -2806,18 +2824,20 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
             If lEnd > lInputEnd Then
                 GoTo InvalidSize
             End If
-            lIdx = 1
-            Do While uInput.Pos < lEnd
-                pvBufferReadLong uInput, lCompression
-                If lCompression <> 0 And lCompression <> 1 Then
+            If uInput.Pos < lEnd Then
+                lIdx = 1
+                Do While uInput.Pos < lEnd
+                    pvBufferReadLong uInput, lCompression
+                    If lCompression <> 0 And .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
+                        GoTo InvalidCompression
+                    End If
+                    If lCompression = 0 Then
+                        lIdx = 0
+                    End If
+                Loop
+                If lIdx > 0 Then
                     GoTo InvalidCompression
                 End If
-                If lCompression = 0 Then
-                    lIdx = 0
-                End If
-            Loop
-            If lIdx > 0 Then
-                GoTo InvalidCompression
             End If
         pvBufferReadBlockEnd uInput
         '--- extensions
@@ -2853,6 +2873,9 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                             GoTo InvalidSize
                                         End If
                                         If lNameType = TLS_SERVER_NAME_TYPE_HOSTNAME Then
+                                            If LenB(.SniRequested) <> 0 Then
+                                                GoTo InvalidServerName
+                                            End If
                                             pvBufferReadString uInput, .SniRequested, lNameSize
                                             If Not pvIsValidServerName(.SniRequested) Then
                                                 GoTo InvalidServerName
@@ -2932,7 +2955,11 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                         Case TLS_GROUP_FFDHE_FIRST To TLS_GROUP_FFDHE_LAST
                                             eExchAlgo = 0
                                         Case Else
-                                            GoTo UnsupportedExchGroup
+                                            If (lExchGroup And &HFF) = lExchGroup \ &H100 Then
+                                                eExchAlgo = 0 '--- grease
+                                            Else
+                                                GoTo UnsupportedExchGroup
+                                            End If
                                         End Select
                                         Select Case True
                                         Case eExchAlgo = 0, Not pvCryptoIsSupported(eExchAlgo)
@@ -2963,13 +2990,13 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                 GoTo InvalidSize
                             End If
                             pvBufferReadBlockStart uInput, Size:=2, BlockSize:=lBlockSize
-                                If uInput.Pos + lBlockSize <> lExtEnd Or lBlockSize = 0 Then
+                                If uInput.Pos + lBlockSize <> lExtEnd Or lBlockSize = 0 Or lBlockSize Mod 2 <> 0 Then
                                     GoTo InvalidSize
                                 End If
                                 Do While uInput.Pos + 1 < lExtEnd
                                     pvBufferReadLong uInput, lSignatureScheme, Size:=2
                                     If pvTlsMatchSignatureScheme(uCtx, lSignatureScheme, uKeyInfo) Then
-                                        .LocalSignatureScheme = lSignatureScheme
+                                        .SignatureScheme = lSignatureScheme
                                         uInput.Pos = lExtEnd
                                     End If
                                 Loop
@@ -2982,7 +3009,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                 GoTo InvalidSize
                             End If
                             pvBufferReadBlockStart uInput, Size:=2, BlockSize:=lBlockSize
-                                If uInput.Pos + lBlockSize <> lExtEnd Or lBlockSize = 0 Then
+                                If uInput.Pos + lBlockSize <> lExtEnd Or lBlockSize = 0 Or lBlockSize Mod 2 <> 0 Then
                                     GoTo InvalidSize
                                 End If
                                 Set .RemoteSupportedGroups = New Collection
@@ -2995,7 +3022,11 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                         Case TLS_GROUP_FFDHE_FIRST To TLS_GROUP_FFDHE_LAST
                                             '--- ffdhe
                                         Case Else
-                                            GoTo UnsupportedExchGroup
+                                            If (lExchGroup And &HFF) = lExchGroup \ &H100 Then
+                                                '--- grease
+                                            Else
+                                                GoTo UnsupportedExchGroup
+                                            End If
                                         End Select
                                     End If
                                     .RemoteSupportedGroups.Add lExchGroup, "#" & lExchGroup
@@ -3009,7 +3040,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                 GoTo InvalidSize
                             End If
                             pvBufferReadBlockStart uInput, BlockSize:=lBlockSize
-                                If uInput.Pos + lBlockSize <> lExtEnd Or lBlockSize = 0 Then
+                                If uInput.Pos + lBlockSize <> lExtEnd Or lBlockSize = 0 Or lBlockSize Mod 2 <> 0 Then
                                     GoTo InvalidSize
                                 End If
                                 Do While uInput.Pos + 1 < lExtEnd
@@ -3028,9 +3059,28 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                 GoTo UnsupportedProtocol
                             End If
                             .ProtocolVersion = lProtocolVersion
+                        Case IIf((.LocalFeatures And ucsTlsSupportTls12) <> 0, TLS_EXTENSION_RENEGOTIATION_INFO, -1)
+                            If lExtSize < 1 Then
+                                GoTo InvalidSize
+                            End If
+                            pvBufferReadBlockStart uInput, BlockSize:=lBlockSize
+                                If uInput.Pos + lBlockSize <> lExtEnd Then
+                                    GoTo InvalidSize
+                                End If
+                                pvBufferReadArray uInput, .RemoteLegacyRenegInfo, lBlockSize
+                            pvBufferReadBlockEnd uInput
+                            If lBlockSize > 0 Then
+                                If Not SearchCollection(cPrevRemoteExt, "#" & lExtType) Then
+                                    GoTo SecureRenegotiationFailed
+                                End If
+                            End If
+                        Case IIf((.LocalFeatures And ucsTlsSupportTls12) <> 0, TLS_EXTENSION_EXTENDED_MASTER_SECRET, -1)
+                            If lExtSize <> 0 Then
+                                GoTo InvalidSize
+                            End If
                         Case Else
                             If .HelloRetryRequest Then
-                                If Not SearchCollection(.RemoteExtensions, "#" & lExtType) Then
+                                If Not SearchCollection(cPrevRemoteExt, "#" & lExtType) Then
                                     GoTo UnexpectedExtension
                                 End If
                             End If
@@ -3060,15 +3110,31 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
             GoTo NoCipherSuite
         End If
         pvTlsSetupCipherSuite uCtx, lCipherSuite
-        If .LocalSignatureScheme = 0 Then
+        If .SignatureScheme = 0 Then
             If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
                 GoTo NegotiateSignatureFailed
+            ElseIf SearchCollection(.RemoteExtensions, "#" & TLS_EXTENSION_SIGNATURE_ALGORITHMS_CERT) Then
+                GoTo NegotiateSignatureFailed
             End If
-            .LocalSignatureScheme = TLS_SIGNATURE_RSA_PKCS1_SHA1
+            .SignatureScheme = TLS_SIGNATURE_RSA_PKCS1_SHA1
         End If
         If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
-            If Not SearchCollection(.RemoteExtensions, "#" & TLS_EXTENSION_KEY_SHARE) Then
-                GoTo NoKeyShare
+            lExtType = TLS_EXTENSION_KEY_SHARE
+            If Not SearchCollection(.RemoteExtensions, "#" & lExtType) Then
+                GoTo NoExtension
+            End If
+        Else
+            lExtType = TLS_EXTENSION_EXTENDED_MASTER_SECRET
+            If SearchCollection(cPrevRemoteExt, "#" & lExtType) Then
+                If Not SearchCollection(.RemoteExtensions, "#" & lExtType) Then
+                    GoTo NoExtension
+                End If
+            End If
+            lExtType = TLS_EXTENSION_ENCRYPT_THEN_MAC
+            If SearchCollection(cPrevRemoteExt, "#" & lExtType) Then
+                If Not SearchCollection(.RemoteExtensions, "#" & lExtType) Then
+                    GoTo NoExtension
+                End If
             End If
         End If
         #If ImplUseDebugLog Then
@@ -3095,7 +3161,7 @@ NoCipherSuite:
     eAlertCode = uscTlsAlertHandshakeFailure
     GoTo QH
 InvalidSize:
-    sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionName(lExtType))
+    sError = IIf(lExtType < 0, ERR_INVALID_SIZE, Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionName(lExtType)))
     eAlertCode = uscTlsAlertDecodeError
     GoTo QH
 InvalidRemoteKey:
@@ -3108,18 +3174,18 @@ NegotiateSignatureFailed:
     GoTo QH
 UnexpectedExtension:
     sError = Replace(ERR_UNEXPECTED_EXTENSION, "%1", pvTlsGetExtensionName(lExtType))
-    eAlertCode = uscTlsAlertIllegalParameter
+    eAlertCode = uscTlsAlertHandshakeFailure
     GoTo QH
 NoAlpnNegotiated:
     sError = ERR_NO_ALPN_NEGOTIATED
     eAlertCode = uscTlsAlertNoApplicationProtocol
     GoTo QH
 UnsupportedExchGroup:
-    sError = Replace(ERR_UNSUPPORTED_EXCH_GROUP, "%1", lExchGroup)
+    sError = Replace(ERR_UNSUPPORTED_EXCH_GROUP, "%1", pvTlsGetExchGroupName(lExchGroup))
     eAlertCode = uscTlsAlertIllegalParameter
     GoTo QH
-NoKeyShare:
-    sError = ERR_NO_KEY_SHARE
+NoExtension:
+    sError = Replace(ERR_NO_EXTENSION, "%1", pvTlsGetExtensionName(lExtType))
     eAlertCode = uscTlsAlertMissingExtension
     GoTo QH
 InvalidCompression:
@@ -3129,6 +3195,10 @@ InvalidCompression:
 InvalidServerName:
     sError = Replace(ERR_INVALID_SERVER_NAME, "%1", uCtx.SniRequested)
     eAlertCode = uscTlsAlertIllegalParameter
+    GoTo QH
+SecureRenegotiationFailed:
+    sError = ERR_SECURE_RENEGOTIATION_FAILED
+    eAlertCode = uscTlsAlertHandshakeFailure
     GoTo QH
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
@@ -3198,7 +3268,7 @@ Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, uI
                             End If
                             pvBufferReadBlockStart uInput, Size:=2, BlockSize:=lBlockSize
                                 lBlockEnd = uInput.Pos + lBlockSize
-                                If lBlockEnd <> lExtEnd Or lBlockSize = 0 Then
+                                If lBlockEnd <> lExtEnd Or lBlockSize = 0 Or lBlockSize Mod 2 <> 0 Then
                                     GoTo InvalidSize
                                 End If
                                 Set .CertRequestCaDn = New Collection
@@ -3290,7 +3360,7 @@ UnsupportedPrivateKey:
     eAlertCode = uscTlsAlertHandshakeFailure
     GoTo QH
 InvalidSize:
-    sError = Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionName(lExtType))
+    sError = IIf(lExtType < 0, ERR_INVALID_SIZE, Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionName(lExtType)))
     eAlertCode = uscTlsAlertDecodeError
     GoTo QH
 EH:
@@ -3426,7 +3496,7 @@ Private Sub pvTlsSetupExchGroup(uCtx As UcsTlsContext, ByVal lExchGroup As Long)
                     Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_GENER_KEYPAIR_FAILED, "%1", "secp384r1")
                 End If
             Case Else
-                Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_EXCH_GROUP, "%1", "0x" & Hex$(.ExchGroup))
+                Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_EXCH_GROUP, "%1", pvTlsGetExchGroupName(.ExchGroup))
             End Select
         End If
     End With
@@ -3593,7 +3663,7 @@ Private Sub pvTlsSetupCipherSuite(uCtx As UcsTlsContext, ByVal lCipherSuite As L
                 .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13
             End Select
             If .BulkAlgo = 0 Or .DigestAlgo = 0 Then
-                Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_CIPHER_SUITE, "%1", "0x" & Hex$(.CipherSuite))
+                Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_CIPHER_SUITE, "%1", pvTlsGetCipherSuiteName(.CipherSuite))
             End If
         End If
     End With
@@ -4227,7 +4297,6 @@ Private Function pvTlsGetCipherSuiteName(ByVal lCipherSuite As Long) As String
         pvTlsGetCipherSuiteName = "AES128-SHA"
     Case TLS_CS_RSA_WITH_AES_256_CBC_SHA
         pvTlsGetCipherSuiteName = "AES256-SHA"
-#If ImplExoticCiphers Then
     Case TLS_CS_RSA_WITH_AES_128_CBC_SHA256
         pvTlsGetCipherSuiteName = "AES128-SHA256"
     Case TLS_CS_RSA_WITH_AES_256_CBC_SHA256
@@ -4240,46 +4309,45 @@ Private Function pvTlsGetCipherSuiteName(ByVal lCipherSuite As Long) As String
         pvTlsGetCipherSuiteName = "ECDHE-RSA-AES128-SHA256"
     Case TLS_CS_ECDHE_RSA_WITH_AES_256_CBC_SHA384
         pvTlsGetCipherSuiteName = "ECDHE-RSA-AES256-SHA384"
-#End If
     Case Else
         pvTlsGetCipherSuiteName = Replace(STR_UNKNOWN, "%1", "0x" & Hex$(lCipherSuite))
     End Select
 End Function
 
-Private Function pvTlsSignatureName(ByVal lSignatureScheme As Long) As String
+Private Function pvTlsGetSignatureName(ByVal lSignatureScheme As Long) As String
     Select Case lSignatureScheme
     Case TLS_SIGNATURE_RSA_PKCS1_SHA1
-        pvTlsSignatureName = "RSA_PKCS1_SHA1"
+        pvTlsGetSignatureName = "RSA_PKCS1_SHA1"
     Case TLS_SIGNATURE_ECDSA_SHA1
-        pvTlsSignatureName = "ECDSA_SHA1"
+        pvTlsGetSignatureName = "ECDSA_SHA1"
     Case TLS_SIGNATURE_RSA_PKCS1_SHA224
-        pvTlsSignatureName = "RSA_PKCS1_SHA224"
+        pvTlsGetSignatureName = "RSA_PKCS1_SHA224"
     Case TLS_SIGNATURE_RSA_PKCS1_SHA256
-        pvTlsSignatureName = "RSA_PKCS1_SHA256"
+        pvTlsGetSignatureName = "RSA_PKCS1_SHA256"
     Case TLS_SIGNATURE_RSA_PKCS1_SHA384
-        pvTlsSignatureName = "RSA_PKCS1_SHA384"
+        pvTlsGetSignatureName = "RSA_PKCS1_SHA384"
     Case TLS_SIGNATURE_RSA_PKCS1_SHA512
-        pvTlsSignatureName = "RSA_PKCS1_SHA512"
+        pvTlsGetSignatureName = "RSA_PKCS1_SHA512"
     Case TLS_SIGNATURE_ECDSA_SECP256R1_SHA256
-        pvTlsSignatureName = "ECDSA_SECP256R1_SHA256"
+        pvTlsGetSignatureName = "ECDSA_SECP256R1_SHA256"
     Case TLS_SIGNATURE_ECDSA_SECP384R1_SHA384
-        pvTlsSignatureName = "ECDSA_SECP384R1_SHA384"
+        pvTlsGetSignatureName = "ECDSA_SECP384R1_SHA384"
     Case TLS_SIGNATURE_ECDSA_SECP521R1_SHA512
-        pvTlsSignatureName = "ECDSA_SECP521R1_SHA512"
+        pvTlsGetSignatureName = "ECDSA_SECP521R1_SHA512"
     Case TLS_SIGNATURE_RSA_PSS_RSAE_SHA256
-        pvTlsSignatureName = "RSA_PSS_RSAE_SHA256"
+        pvTlsGetSignatureName = "RSA_PSS_RSAE_SHA256"
     Case TLS_SIGNATURE_RSA_PSS_RSAE_SHA384
-        pvTlsSignatureName = "RSA_PSS_RSAE_SHA384"
+        pvTlsGetSignatureName = "RSA_PSS_RSAE_SHA384"
     Case TLS_SIGNATURE_RSA_PSS_RSAE_SHA512
-        pvTlsSignatureName = "RSA_PSS_RSAE_SHA512"
+        pvTlsGetSignatureName = "RSA_PSS_RSAE_SHA512"
     Case TLS_SIGNATURE_RSA_PSS_PSS_SHA256
-        pvTlsSignatureName = "RSA_PSS_PSS_SHA256"
+        pvTlsGetSignatureName = "RSA_PSS_PSS_SHA256"
     Case TLS_SIGNATURE_RSA_PSS_PSS_SHA384
-        pvTlsSignatureName = "RSA_PSS_PSS_SHA384"
+        pvTlsGetSignatureName = "RSA_PSS_PSS_SHA384"
     Case TLS_SIGNATURE_RSA_PSS_PSS_SHA512
-        pvTlsSignatureName = "RSA_PSS_PSS_SHA512"
+        pvTlsGetSignatureName = "RSA_PSS_PSS_SHA512"
     Case Else
-        pvTlsSignatureName = Replace(STR_UNKNOWN, "%1", "0x" & Hex$(lSignatureScheme))
+        pvTlsGetSignatureName = Replace(STR_UNKNOWN, "%1", "0x" & Hex$(lSignatureScheme))
     End Select
 End Function
 
@@ -4292,7 +4360,7 @@ Private Sub pvTlsSignatureSign(baRetVal() As Byte, cPrivKey As Collection, ByVal
     Dim baPrivKey()     As Byte
         
     #If ImplUseDebugLog Then
-        DebugLog MODULE_NAME, FUNC_NAME, "Signing with " & pvTlsSignatureName(lSignatureScheme) & " signature"
+        DebugLog MODULE_NAME, FUNC_NAME, "Signing with " & pvTlsGetSignatureName(lSignatureScheme) & " signature"
     #End If
     If Not SearchCollection(cPrivKey, 1, RetVal:=baPrivKey) Then
         Err.Raise vbObjectError, FUNC_NAME, ERR_NO_PRIVATE_KEY
@@ -4342,10 +4410,10 @@ Private Sub pvTlsSignatureSign(baRetVal() As Byte, cPrivKey As Collection, ByVal
             Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "Asn1EncodeEcdsaSignature")
         End If
     Case Else
-        Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_SIGNATURE_SCHEME, "%1", "0x" & Hex$(lSignatureScheme))
+        Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_SIGNATURE_SCHEME, "%1", pvTlsGetSignatureName(lSignatureScheme))
     End Select
     If pvArraySize(baRetVal) = 0 Then
-        Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_SIGNATURE_FAILED, "%1", pvTlsSignatureName(lSignatureScheme))
+        Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_SIGNATURE_FAILED, "%1", pvTlsGetSignatureName(lSignatureScheme))
     End If
 End Sub
 
@@ -4422,7 +4490,7 @@ Private Function pvTlsSignatureVerify(baCert() As Byte, ByVal lSignatureScheme A
     pvTlsSignatureVerify = True
 QH:
     #If ImplUseDebugLog Then
-        DebugLog MODULE_NAME, FUNC_NAME, IIf(pvTlsSignatureVerify, IIf(bSkip, "Skipping ", IIf(bDeprecated, "Deprecated ", "Valid ")), "Invalid ") & pvTlsSignatureName(lSignatureScheme) & " signature" & IIf(bDeprecated, " (lCurveSize=" & lCurveSize & " from server's public key)", vbNullString)
+        DebugLog MODULE_NAME, FUNC_NAME, IIf(pvTlsSignatureVerify, IIf(bSkip, "Skipping ", IIf(bDeprecated, "Deprecated ", "Valid ")), "Invalid ") & pvTlsGetSignatureName(lSignatureScheme) & " signature" & IIf(bDeprecated, " (lCurveSize=" & lCurveSize & " from server's public key)", vbNullString)
     #End If
     Exit Function
 UnsupportedCertificate:
@@ -4442,7 +4510,7 @@ UnsupportedCurveSize:
     eAlertCode = uscTlsAlertHandshakeFailure
     GoTo QH
 UnsupportedSignatureScheme:
-    sError = Replace(ERR_UNSUPPORTED_SIGNATURE_SCHEME, "%1", "0x" & Hex$(lSignatureScheme))
+    sError = Replace(ERR_UNSUPPORTED_SIGNATURE_SCHEME, "%1", pvTlsGetSignatureName(lSignatureScheme))
     eAlertCode = uscTlsAlertInternalError
     GoTo QH
 EH:
