@@ -132,7 +132,7 @@ Public Function FromUtf8Array(baText() As Byte) As String
     Dim lSize           As Long
     
     If UBound(baText) >= 0 Then
-        FromUtf8Array = String$(2 * UBound(baText), 0)
+        FromUtf8Array = String$(2 * (UBound(baText) + 1), 0)
         lSize = MultiByteToWideChar(CP_UTF8, 0, baText(0), UBound(baText) + 1, StrPtr(FromUtf8Array), Len(FromUtf8Array))
         FromUtf8Array = Left$(FromUtf8Array, lSize)
     End If

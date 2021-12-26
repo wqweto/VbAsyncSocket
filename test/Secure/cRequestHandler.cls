@@ -72,15 +72,19 @@ Private Function HandleRequest(sText As String) As Boolean
     
     On Error GoTo EH
     m_sRequest = m_sRequest & sText
-    If InStr(m_sRequest, vbCrLf) > 0 Then
-        vSplit = Split(m_sRequest, vbCrLf)
-    ElseIf InStr(m_sRequest, vbLf) > 0 Then
-        vSplit = Split(m_sRequest, vbCrLf)
+    If InStr(m_sRequest, vbCrLf & vbCrLf) > 0 Or InStr(m_sRequest, vbLf & vbLf) > 0 Then
+        If InStr(m_sRequest, vbCrLf) > 0 Then
+            vSplit = Split(m_sRequest, vbCrLf)
+        ElseIf InStr(m_sRequest, vbLf) > 0 Then
+            vSplit = Split(m_sRequest, vbLf)
+        Else
+            Exit Function
+        End If
     Else
         Exit Function
     End If
     vSplit = Split(vSplit(0), " ")
-    If UBound(vSplit) = 0 Then
+    If UBound(vSplit) < 1 Then
         Exit Function
     End If
     #If ImplUseDebugLog Then
