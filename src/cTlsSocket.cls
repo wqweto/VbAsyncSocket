@@ -1224,6 +1224,7 @@ Public Function SyncStartTls( _
     Const FUNC_NAME     As String = "SyncStartTls"
     
     On Error GoTo EH
+    m_eRaisedEvent = 0
     If Not StartTls(RemoteHostName, LocalFeatures) Then
         GoTo QH
     End If
