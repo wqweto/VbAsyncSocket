@@ -163,6 +163,7 @@ Private WithEvents m_oClientSocket As cTlsSocket
 Attribute m_oClientSocket.VB_VarHelpID = -1
 Private WithEvents m_oRequest As cHttpRequest
 Attribute m_oRequest.VB_VarHelpID = -1
+Private m_oRootCa As cTlsSocket
 
 Private Type UcsParsedUrl
     Protocol        As String
@@ -204,6 +205,10 @@ Private Sub Command2_Click()
     On Error GoTo EH
     pvTestSeecaoCom
     pvTestHowsMySsl
+    If m_oRootCa Is Nothing Then
+        Set m_oRootCa = New cTlsSocket
+        m_oRootCa.ImportPemRootCaCertStore App.Path & "\ca-bundle.pem"
+    End If
     If m_oRequest Is Nothing Then
         Set m_oRequest = New cHttpRequest
     End If
@@ -211,6 +216,7 @@ Private Sub Command2_Click()
 '    m_oRequest.Option_(WinHttpRequestOption_SslErrorIgnoreFlags) = SslErrorFlag_Ignore_All
 '    m_oRequest.Option_(WinHttpRequestOption_SecureProtocols) = SecureProtocol_TLS1
     m_oRequest.Option_(WinHttpRequestOption_EnableHttpsToHttpRedirects) = True
+    m_oRequest.Option_(WinHttpRequestOption_RootCA) = m_oRootCa
 '    m_oRequest.SetProxy 0
 '    m_oRequest.SetProxy 2, "http=ucsgate:3128;https=https://ucsgate:3129" ' , "*.unicontsoft.com"
 '    m_oRequest.SetProxy 2, "https://ucsgate.unicontsoft.com:3129"

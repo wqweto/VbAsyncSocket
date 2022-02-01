@@ -54,7 +54,9 @@ Public Enum WinHttpRequestOption
     WinHttpRequestOption_EnableHttp1_1 = 17
     WinHttpRequestOption_EnableCertificateRevocationCheck = 18
     WinHttpRequestOption_RejectUserpwd = 19
+    WinHttpRequestOption_RootCA = 20
 End Enum
+Private Const sizeof_WinHttpRequestOption As Long = WinHttpRequestOption_RootCA
 
 Public Enum WinHttpRequestAutoLogonPolicy
     AutoLogonPolicy_Always = 0
@@ -181,7 +183,7 @@ Attribute m_oSocket.VB_VarHelpID = -1
 #End If
 Private m_vLastError            As Variant
 Private m_eState                As UcsStateEnum
-Private m_vOptions(0 To WinHttpRequestOption_RejectUserpwd) As Variant
+Private m_vOptions(0 To sizeof_WinHttpRequestOption) As Variant
 Private m_uRequest              As UcsRequestType
 Private m_uResponse             As UcsResponseType
 Private m_oCookies              As Object '--- keyed on domains, contains collections of path + cookie per domain
@@ -344,19 +346,27 @@ Public Property Get StatusText() As String
 End Property
 
 Public Property Get Option_(ByVal eOption As WinHttpRequestOption) As Variant
-    Option_ = m_vOptions(eOption)
+    If IsObject(m_vOptions(eOption)) Then
+        Set Option_ = m_vOptions(eOption)
+    Else
+        Option_ = m_vOptions(eOption)
+    End If
 End Property
 
 Public Property Let Option_(ByVal eOption As WinHttpRequestOption, ByVal RHS As Variant)
-    Select Case VarType(m_vOptions(eOption))
-    Case vbBoolean
-        RHS = CBool(RHS)
-    Case vbLong
-        RHS = CLng(RHS)
-    Case vbString
-        RHS = CStr(RHS)
-    End Select
-    m_vOptions(eOption) = RHS
+    If IsObject(m_vOptions(eOption)) Then
+        Set m_vOptions(eOption) = RHS
+    Else
+        Select Case VarType(m_vOptions(eOption))
+        Case vbBoolean
+            RHS = CBool(RHS)
+        Case vbLong
+            RHS = CLng(RHS)
+        Case vbString
+            RHS = CStr(RHS)
+        End Select
+        m_vOptions(eOption) = RHS
+    End If
 End Property
 
 Private Property Get pvAddressOfReaderCallback() As cHttpRequest
@@ -1150,7 +1160,8 @@ End Function
 Private Function pvConnectRemote(uRequest As UcsRequestType) As Boolean
     Const FUNC_NAME     As String = "pvConnectRemote"
     Dim lIdx            As Long
-    
+    Dim uRemote         As UcsParsedUrl
+
     With uRequest
         .CurrentProxy.Host = vbNullString
         For lIdx = 0 To UBound(.ProxyList)
@@ -1174,18 +1185,20 @@ Private Function pvConnectRemote(uRequest As UcsRequestType) As Boolean
             End If
         Next
         If LenB(.CurrentProxy.Host) <> 0 Then
-            #If ImplUseTls Then
-                pvConnectRemote = m_oSocket.Connect(.CurrentProxy.Host, .CurrentProxy.Port, UseTls:=pvIsProtocolSecure(.CurrentProxy.Protocol), LocalFeatures:=pvLocalFeatures)
-            #Else
-                pvConnectRemote = m_oSocket.Connect(.CurrentProxy.Host, .CurrentProxy.Port)
-            #End If
+            uRemote = .CurrentProxy
         Else
-            #If ImplUseTls Then
-                pvConnectRemote = m_oSocket.Connect(.Remote.Host, .Remote.Port, UseTls:=pvIsProtocolSecure(.Remote.Protocol), LocalFeatures:=pvLocalFeatures)
-            #Else
-                pvConnectRemote = m_oSocket.Connect(.Remote.Host, .Remote.Port)
-            #End If
+            uRemote = .Remote
         End If
+        #If ImplUseTls Then
+            Dim oRootCa         As cTlsSocket
+            
+            Set oRootCa = m_vOptions(WinHttpRequestOption_RootCA)
+            pvConnectRemote = m_oSocket.Connect(uRemote.Host, uRemote.Port, _
+                UseTls:=pvIsProtocolSecure(uRemote.Protocol), LocalFeatures:=pvLocalFeatures, _
+                RootCa:=oRootCa)
+        #Else
+            pvConnectRemote = m_oSocket.Connect(uRemote.Host, uRemote.Port)
+        #End If
     End With
 End Function
 
@@ -1579,6 +1592,10 @@ Private Function pvUngzipStream(pInput As IUnknown, pOutput As IUnknown) As Bool
     ReDim baData(0 To BUFF_SIZE - 1) As Byte
     Do
         lSize = archive_read_data(hArchive, baData(0), UBound(baData) + 1)
+        If lSize < 0 Then
+            pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "archive_read_data", "Decompression error (" & lSize & ")"
+            GoTo QH
+        End If
         If lSize = 0 Then
             Exit Do
         End If
@@ -1587,6 +1604,15 @@ Private Function pvUngzipStream(pInput As IUnknown, pOutput As IUnknown) As Bool
         End If
         If pOutput Is Nothing Then
             Set pOutput = SHCreateMemStream(baData(0), UBound(baData) + 1)
+            If pOutput Is Nothing Then
+                pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "SHCreateMemStream", "Out of memory"
+                GoTo QH
+            End If
+            hResult = IStream_Seek(pOutput, 0, STREAM_SEEK_END, 0)
+            If hResult < 0 Then
+                pvSetError hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "IStream_Seek"
+                GoTo QH
+            End If
         Else
             hResult = IStream_Write(pOutput, baData)
             If hResult < 0 Then
@@ -2095,6 +2121,7 @@ Private Sub Class_Initialize()
     m_vOptions(WinHttpRequestOption_EnableHttp1_1) = True
     m_vOptions(WinHttpRequestOption_EnableCertificateRevocationCheck) = False
     m_vOptions(WinHttpRequestOption_RejectUserpwd) = False
+    Set m_vOptions(WinHttpRequestOption_RootCA) = Nothing
     SetTimeouts 5000, 5000, 15000, 15000
     Set m_uRequest.Headers = CreateObject("Scripting.Dictionary")
     m_uRequest.Headers.CompareMode = vbTextCompare
