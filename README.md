@@ -57,6 +57,10 @@ Which produces debug output in `Immediate Window` similar to this:
     TLS handshake complete: smtp.gmail.com
     221 2.0.0 closing connection c69sm2955334lfg.23 - gsmtp
 
+### Is it any good?
+
+[Yes](https://news.ycombinator.com/item?id=3067434).
+
 ### Implemented Cipher Suites
 
 This list includes cipher suites as implemented in the ASM thunks backend while the native backend list depends on the OS version and SSPI/Schannel settings.
