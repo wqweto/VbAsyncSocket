@@ -647,7 +647,7 @@ Private Sub m_oSocket_OnSend()
             Exit Do
         Else
             m_lSendPos = m_lSendPos + lSent
-            RaiseEvent SendProgress(m_lSendPos, UBound(m_baSendBuffer) + 1)
+            RaiseEvent SendProgress(m_lSendPos, UBound(m_baSendBuffer) + 1 - m_lSendPos)
         End If
     Loop
     If m_lSendPos > UBound(m_baSendBuffer) And m_lSendPos > 0 Then
