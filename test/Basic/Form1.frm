@@ -205,6 +205,7 @@ Private Sub Command2_Click()
     On Error GoTo EH
     pvTestSeecaoCom
     pvTestHowsMySsl
+    pvTestSslLabs
     If m_oRootCa Is Nothing Then
         Set m_oRootCa = New cTlsSocket
         m_oRootCa.ImportPemRootCaCertStore App.Path & "\ca-bundle.pem"
@@ -246,6 +247,33 @@ EH:
     MsgBox Err.Description & " [" & Replace(Err.Source, vbCrLf, "; ") & "]", vbCritical, FUNC_NAME
 End Sub
 
+Private Sub pvTestSslLabs()
+    Dim objhttp As cHttpRequest
+    Set objhttp = New cHttpRequest
+   
+    With objhttp
+        
+        'Allow redirects
+        .Option_(WinHttpRequestOption_EnableRedirects) = True
+        'Enable Https To Http Redirects
+        .Option_(WinHttpRequestOption_EnableHttpsToHttpRedirects) = True
+        'Enable Http 1.1
+        .Option_(WinHttpRequestOption_EnableHttp1_1) = True
+        'Ignore all certificate errors
+        .Option_(WinHttpRequestOption_SslErrorIgnoreFlags) = SslErrorFlag_Ignore_All
+        'Allow 15 seconds for everything to do what it has to do
+        .SetTimeouts 15000, 15000, 15000, 15000
+        .Open_ "GET", "https://clienttest.ssllabs.com:8443/ssltest/viewMyClient.html", False
+        .SetRequestHeader "User-Agent", "Mozilla/5.0 (Windows NT 5.1; rv:31.0) Gecko/20100101 Firefox/31.0"
+        .SetRequestHeader "Content-type", "text/html"
+        .Send
+        Debug.Print "RESPONSE LENGTH: "; Len(.ResponseText)
+        Debug.Print "RESPONSE: "; Right(.ResponseText, 100)
+    End With
+
+    Set objhttp = Nothing
+End Sub
+
 Private Sub pvTestHowsMySsl()
        
     ' Create a reference to MSXML6 if you want to use the next line,
@@ -264,12 +292,12 @@ End Sub
 
 Private Sub pvTestSeecaoCom()
 Dim req As New cHttpRequest
-Dim Body As String, Url As String
-Url = "https://auctions.seecao.com/api/DailyAuction/GetDailyAuctionList"
+Dim Body As String, URL As String
+URL = "https://auctions.seecao.com/api/DailyAuction/GetDailyAuctionList"
 Body = "{""parameters"":{""dayFrom"":""2021-05-12"",""dayTill"":""2021-05-12"",""auctionState"":[0,3,4,5,6,7,9]}}"
 
 With req
-    .Open_ "POST", Url, False
+    .Open_ "POST", URL, False
     .SetRequestHeader "Content-Type", "application/json"
     .Option_(WinHttpRequestOption_SslErrorIgnoreFlags) = 13056 '&H3300
     .Send Body
