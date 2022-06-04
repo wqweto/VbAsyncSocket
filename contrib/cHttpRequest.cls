@@ -990,7 +990,6 @@ TryDownload:
                     .RecvBuffer.Size = 0
                     Set .Stream = SHCreateMemStream(ByVal 0, 0)
                     .Text = vbNullChar
-                    pvRecvBody baData, uResponse
                 End If
             End Select
         ElseIf .RecvBuffer.Size > m_vOptions(WinHttpRequestOption_MaxResponseHeaderSize) Then
