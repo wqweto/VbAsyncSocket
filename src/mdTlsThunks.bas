@@ -2955,8 +2955,8 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                         Case TLS_GROUP_FFDHE_FIRST To TLS_GROUP_FFDHE_LAST
                                             eExchAlgo = 0
                                         Case Else
-                                            If (lExchGroup And &HFF) = lExchGroup \ &H100 Then
-                                                eExchAlgo = 0 '--- grease
+                                            If (lExchGroup And &HFF) = lExchGroup \ &H100 And (lExchGroup And &HF) = &HA Then
+                                                eExchAlgo = 0 '--- grease from RFC8701
                                             Else
                                                 GoTo UnsupportedExchGroup
                                             End If
@@ -3022,8 +3022,8 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                         Case TLS_GROUP_FFDHE_FIRST To TLS_GROUP_FFDHE_LAST
                                             '--- ffdhe
                                         Case Else
-                                            If (lExchGroup And &HFF) = lExchGroup \ &H100 Then
-                                                '--- grease
+                                            If (lExchGroup And &HFF) = lExchGroup \ &H100 And (lExchGroup And &HF) = &HA Then
+                                                '--- grease from RFC8701
                                             Else
                                                 GoTo UnsupportedExchGroup
                                             End If
@@ -5676,10 +5676,17 @@ End Sub
 
 Private Function pvCryptoEcdhCurve25519MakeKey(baPrivate() As Byte, baPublic() As Byte) As Boolean
     Const FUNC_NAME     As String = "CryptoEcdhCurve25519MakeKey"
+    Const MAX_RETRIES   As Long = 16
+    Dim lIdx            As Long
     
     pvArrayAllocate baPrivate, LNG_X25519_KEYSZ, FUNC_NAME & ".baPrivate"
     pvArrayAllocate baPublic, LNG_X25519_KEYSZ, FUNC_NAME & ".baPublic"
-    pvCryptoRandomBytes VarPtr(baPrivate(0)), LNG_X25519_KEYSZ
+    For lIdx = 1 To MAX_RETRIES
+        pvCryptoRandomBytes VarPtr(baPrivate(0)), LNG_X25519_KEYSZ
+        If pvArrayAccumulateOr(baPrivate) <> 0 Then
+            Exit For
+        End If
+    Next
     '--- fix privkey randomness
     baPrivate(0) = baPrivate(0) And &HF8
     baPrivate(LNG_X25519_KEYSZ - 1) = (baPrivate(LNG_X25519_KEYSZ - 1) And &H7F) Or &H40
