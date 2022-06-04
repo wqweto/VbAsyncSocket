@@ -1007,7 +1007,6 @@ End Function
 
 Private Function pvRecvBody(baData() As Byte, uResponse As UcsResponseType, Optional ByVal Flush As Boolean) As Boolean
     Const FUNC_NAME     As String = "pvRecvBody"
-    Const sizeof_CrLf   As Long = 2
     Dim hResult         As Long
     Dim baTemp()        As Byte
     Dim lPos            As Long
@@ -1024,7 +1023,7 @@ Private Function pvRecvBody(baData() As Byte, uResponse As UcsResponseType, Opti
                 pvParseChunks .ChunksBuffer, .TransferChunks, lSize
                 For lIdx = 0 To lSize - 1
                     uChunk = .TransferChunks(lIdx)
-                    lPos = uChunk.Pos + uChunk.Size + sizeof_CrLf
+                    lPos = uChunk.Pos + uChunk.Size
                     If uChunk.Size = 0 Then
                         pvSetState ucsIdle
                         Flush = True
@@ -1040,8 +1039,10 @@ Private Function pvRecvBody(baData() As Byte, uResponse As UcsResponseType, Opti
                     lSize = .ChunksBuffer.Size - lPos
                     If lSize > 0 Then
                         Call CopyMemory(.ChunksBuffer.Data(0), .ChunksBuffer.Data(lPos), lSize)
+                        .ChunksBuffer.Size = lSize
+                    Else
+                        .ChunksBuffer.Size = 0
                     End If
-                    .ChunksBuffer.Size = lSize
                 End If
             Else
                 .BytesProgress = .BytesProgress + UBound(baData) + 1
@@ -1052,6 +1053,9 @@ Private Function pvRecvBody(baData() As Byte, uResponse As UcsResponseType, Opti
                     Flush = True
                 End If
             End If
+        ElseIf .BytesProgress >= .ContentLength And .ContentLength >= 0 Then
+            pvSetState ucsIdle
+            Flush = True
         End If
         If .RecvBuffer.Size > 0 Then
             If .RecvBuffer.Size >= DEF_BUFFER_SIZE Or Flush Then
@@ -1386,6 +1390,10 @@ Private Sub pvParseChunks(uBuffer As UcsBuffer, aOutput() As UcsBuffer, lOutSize
     End If
     lStart = 1
     lPos = InStrB(lStart, uBuffer.Data, StrConv(vbCrLf, vbFromUnicode))
+    If lPos = 1 Then
+        lStart = 3
+        lPos = InStrB(lStart, uBuffer.Data, StrConv(vbCrLf, vbFromUnicode))
+    End If
     Do While lPos > 0 And lPos < uBuffer.Size
         sTemp = String$(lPos - lStart, 0)
         Call CopyMemory(ByVal sTemp, uBuffer.Data(lStart - 1), Len(sTemp))
