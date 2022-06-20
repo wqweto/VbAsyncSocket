@@ -100,6 +100,9 @@ Private Const CERT_STORE_PROV_SYSTEM                    As Long = 10
 Private Const CERT_STORE_CREATE_NEW_FLAG                As Long = &H2000
 Private Const CERT_SYSTEM_STORE_CURRENT_USER            As Long = &H10000
 Private Const CERT_SYSTEM_STORE_LOCAL_MACHINE           As Long = &H20000
+Private Const CERT_SYSTEM_STORE_CURRENT_SERVICE         As Long = &H40000
+Private Const CERT_SYSTEM_STORE_SERVICES                As Long = &H50000
+Private Const CERT_SYSTEM_STORE_USERS                   As Long = &H60000
 '--- for CertAddEncodedCertificateToStore
 Private Const CERT_STORE_ADD_USE_EXISTING               As Long = 2
 '--- for CertGetCertificateChain
@@ -1847,7 +1850,7 @@ Public Function ImportSystemStoreCertificates(SubjectOrRDN As Variant) As Boolea
         If Not pvPkiImportCertificateByRDN(baRDN, cCerts, cPrivKey) Then
             GoTo QH
         End If
-    Else
+    ElseIf LenB(SubjectOrRDN) <> 0 Then
         If Not pvPkiImportCertificateBySubject(SubjectOrRDN, cCerts, cPrivKey) Then
             GoTo QH
         End If
@@ -2034,7 +2037,7 @@ Public Function pvPkiImportCertificateBySubject(ByVal Subject As String, cCerts 
     Dim lStoreFlags     As String
     Dim sStoreName      As String
     Dim sCertName       As String
-    Dim vSplit          As Variant
+    Dim lPos            As Long
     Dim hCertStore      As Long
     Dim pCertContext    As Long
     Dim hResult         As Long
@@ -2042,29 +2045,48 @@ Public Function pvPkiImportCertificateBySubject(ByVal Subject As String, cCerts 
     
     lStoreFlags = CERT_SYSTEM_STORE_CURRENT_USER
     sStoreName = "MY"
-    vSplit = Split(Subject, "\")
-    sCertName = vSplit(UBound(vSplit))
-    If UBound(vSplit) > 0 Then
-        If LCase$(vSplit(0)) = "local_machine" Then
-            lStoreFlags = CERT_SYSTEM_STORE_LOCAL_MACHINE
-        End If
-        If LenB(vSplit(1)) <> 0 And vSplit(1) <> sCertName Then
-            sStoreName = vSplit(1)
-        End If
+    lPos = InStr(Subject, "\")
+    If lPos = 0 Then
+        lPos = Len(Subject) + 1
+    End If
+    Select Case Left$(Subject, lPos - 1)
+    Case "CURRENT_USER"
+        lStoreFlags = CERT_SYSTEM_STORE_CURRENT_USER
+    Case "LOCAL_MACHINE"
+        lStoreFlags = CERT_SYSTEM_STORE_LOCAL_MACHINE
+    Case "CURRENT_SERVICE"
+        lStoreFlags = CERT_SYSTEM_STORE_CURRENT_SERVICE
+    Case "SERVICES"
+        lStoreFlags = CERT_SYSTEM_STORE_SERVICES
+    Case "USERS"
+        lStoreFlags = CERT_SYSTEM_STORE_USERS
+    Case Else
+        lPos = 0
+    End Select
+    If lPos > 0 Then
+        Subject = Mid$(Subject, lPos + 1)
+    End If
+    lPos = InStrRev(Subject, "\")
+    If lPos > 0 Then
+        sStoreName = Left$(Subject, lPos - 1)
+        sCertName = Mid$(Subject, lPos + 1)
+    Else
+        sCertName = Subject
     End If
     hCertStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0, lStoreFlags, StrPtr(sStoreName))
     If hCertStore = 0 Then
         hResult = Err.LastDllError
-        sApiSource = "CertOpenStore(" & sStoreName & ")"
+        sApiSource = "CertOpenStore(&H" & Hex$(lStoreFlags) & ", " & sStoreName & ")"
         GoTo QH
     End If
     If LenB(sCertName) = 0 Then
         pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, CERT_FIND_ANY, ByVal 0, 0)
-    Else
+    End If
+    If pCertContext = 0 Then
         pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, CERT_FIND_SUBJECT_STR, ByVal StrPtr(sCertName), 0)
-        If pCertContext = 0 Then
-            pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, CERT_FIND_HASH_STR, ByVal StrPtr(sCertName), 0)
-        End If
+    End If
+    If pCertContext = 0 Then
+        pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, CERT_FIND_HASH_STR, ByVal StrPtr(sCertName), 0)
     End If
     If pCertContext <> 0 Then
         If pvPkiAppendCertChain(pCertContext, hCertStore, cCerts, cPrivKey) Then
