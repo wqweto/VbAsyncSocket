@@ -42,6 +42,7 @@ Private Const MODULE_NAME As String = "mdTlsThunks"
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
 #Const ImplCaptureTraffic = CLng(ASYNCSOCKET_CAPTURE_TRAFFIC) '--- bitmask: 1 - traffic, 2 - derived secrets
 #Const ImplExoticCiphers = False
+#Const ImplTlsServerAllowInsecureRenegotiation = False
 
 '=========================================================================
 ' API
@@ -2453,6 +2454,11 @@ RenegotiateClientHello:
                     #If ImplUseDebugLog Then
                         DebugLog MODULE_NAME, FUNC_NAME, "Received Client Hello. Will renegotiate"
                     #End If
+                    #If Not ImplTlsServerAllowInsecureRenegotiation Then
+                        If pvArraySize(.RemoteLegacyVerifyData) = 0 Then
+                            GoTo SecureRenegotiationFailed
+                        End If
+                    #End If
                     .State = ucsTlsStateExpectClientHello
                     .AlpnNegotiated = vbNullString
                     .SniRequested = vbNullString
@@ -3070,7 +3076,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                 pvBufferReadArray uInput, .RemoteLegacyRenegInfo, lBlockSize
                             pvBufferReadBlockEnd uInput
                             If lBlockSize > 0 Then
-                                If Not SearchCollection(cPrevRemoteExt, "#" & lExtType) Then
+                                If Not pvArrayEqual(.RemoteLegacyRenegInfo, .RemoteLegacyVerifyData) Then
                                     GoTo SecureRenegotiationFailed
                                 End If
                             End If
@@ -3124,18 +3130,13 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                 GoTo NoExtension
             End If
         Else
-            lExtType = TLS_EXTENSION_EXTENDED_MASTER_SECRET
-            If SearchCollection(cPrevRemoteExt, "#" & lExtType) Then
-                If Not SearchCollection(.RemoteExtensions, "#" & lExtType) Then
-                    GoTo NoExtension
+            For Each vElem In Array(TLS_EXTENSION_EXTENDED_MASTER_SECRET, TLS_EXTENSION_ENCRYPT_THEN_MAC, TLS_EXTENSION_RENEGOTIATION_INFO)
+                If SearchCollection(cPrevRemoteExt, "#" & vElem) Then
+                    If Not SearchCollection(.RemoteExtensions, "#" & vElem) Then
+                        GoTo NoExtension
+                    End If
                 End If
-            End If
-            lExtType = TLS_EXTENSION_ENCRYPT_THEN_MAC
-            If SearchCollection(cPrevRemoteExt, "#" & lExtType) Then
-                If Not SearchCollection(.RemoteExtensions, "#" & lExtType) Then
-                    GoTo NoExtension
-                End If
-            End If
+            Next
         End If
         #If ImplUseDebugLog Then
             DebugLog MODULE_NAME, FUNC_NAME, "Using " & pvTlsGetCipherSuiteName(.CipherSuite) & " from " & .RemoteHostName
