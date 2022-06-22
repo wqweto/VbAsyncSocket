@@ -429,7 +429,7 @@ Public Sub Open_(ByVal Method As String, ByVal Url As String, Optional ByVal Asy
             m_oSocket.Close_
             Set m_oSocket = pvCreateNewSocket
         End If
-        .Method = Method
+        .Method = UCase$(Method)
         .Remote = uParsed
         .Async = IIf(Not IsMissing(Async), Async, False)
         .NumOfRedirects = 0
@@ -495,7 +495,7 @@ Public Sub Send(Optional ByVal Body As Variant)
             GoTo QH
         End If
         '--- prepare headers
-        If Not .Stream Is Nothing Then
+        If Not .Stream Is Nothing Or .Method <> "GET" Then
             SetRequestHeader HDR_CONTENT_LENGTH, IStream_GetSize(.Stream)
         End If
         If LenB(.Remote.User) <> 0 Or LenB(.Remote.Pass) <> 0 Then
