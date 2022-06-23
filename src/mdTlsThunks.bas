@@ -43,6 +43,7 @@ Private Const MODULE_NAME As String = "mdTlsThunks"
 #Const ImplCaptureTraffic = CLng(ASYNCSOCKET_CAPTURE_TRAFFIC) '--- bitmask: 1 - traffic, 2 - derived secrets
 #Const ImplExoticCiphers = False
 #Const ImplTlsServerAllowInsecureRenegotiation = False
+#Const ImplTestCrypto = (ASYNCSOCKET_TEST_CRYPTO <> 0)
 
 '=========================================================================
 ' API
@@ -60,6 +61,7 @@ Private Const X509_ASN_ENCODING                         As Long = 1
 Private Const PKCS_7_ASN_ENCODING                       As Long = &H10000
 Private Const PKCS_RSA_PRIVATE_KEY                      As Long = 43
 Private Const PKCS_PRIVATE_KEY_INFO                     As Long = 44
+Private Const X509_PUBLIC_KEY_INFO                      As Long = 8
 Private Const X509_ECC_PRIVATE_KEY                      As Long = 82
 Private Const CRYPT_DECODE_NOCOPY_FLAG                  As Long = &H1
 Private Const CRYPT_DECODE_ALLOC_FLAG                   As Long = &H8000
@@ -6948,6 +6950,356 @@ Public Function TlsConcatCollection(oCol As Collection, Optional Separator As St
     End If
 End Function
 #End If ' ImplCaptureTraffic
+
+#If ImplTestCrypto Then
+
+Public Sub TestCryptoAesGcm(oJson As Object)
+    Const FUNC_NAME     As String = "TlsTestCryptoAesGcm"
+    Dim oGroup          As Object
+    Dim oTest           As Object
+    Dim sComment        As String
+    Dim sResult         As String
+    Dim lPassed         As Long
+    Dim lFailed         As Long
+    Dim lSkipped        As Long
+    '--- local
+    Dim baNonce()       As Byte
+    Dim baKey()         As Byte
+    Dim baAad()         As Byte
+    Dim baMsg()         As Byte
+    Dim baCt()          As Byte
+    Dim baTag()         As Byte
+    Dim baBuffer()      As Byte
+    
+    pvCryptoInit
+    For Each oGroup In JsonValue(oJson, "testGroups")
+        For Each oTest In JsonValue(oGroup, "tests")
+            baNonce = FromHex(JsonValue(oTest, "iv"))
+            If pvArraySize(baNonce) = LNG_AESGCM_IVSZ Then
+                baKey = FromHex(JsonValue(oTest, "key"))
+                If pvArraySize(baKey) = LNG_AES128_KEYSZ Or pvArraySize(baKey) = LNG_AES256_KEYSZ Then
+                    baAad = FromHex(JsonValue(oTest, "aad"))
+                    baMsg = FromHex(JsonValue(oTest, "msg"))
+                    baCt = FromHex(JsonValue(oTest, "ct"))
+                    baTag = FromHex(JsonValue(oTest, "tag"))
+                    baBuffer = baMsg
+                    ReDim Preserve baBuffer(0 To UBound(baMsg) + UBound(baTag) + 1) As Byte
+                    sResult = "valid"
+                    If Not pvCryptoBulkAesGcmEncrypt(baNonce, baKey, baAad, 0, UBound(baAad) + 1, baBuffer, 0, UBound(baMsg) + 1) Then
+                        sResult = "invalid"
+                    Else
+                        pvArrayWriteBlob baCt, UBound(baCt) + 1, VarPtr(baTag(0)), UBound(baTag) + 1
+                        If Not pvArrayEqual(baBuffer, baCt) Then
+                            sResult = "invalid"
+                        End If
+                    End If
+                    If JsonValue(oTest, "result") = sResult Then
+                        lPassed = lPassed + 1
+                    Else
+                        lFailed = lFailed + 1
+                        sComment = JsonValue(oTest, "comment")
+                        DebugLog MODULE_NAME, FUNC_NAME, "[-] " & JsonValue(oTest, "tcId") & IIf(LenB(sComment) <> 0, " (" & sComment & ")", vbNullString)
+                    End If
+                Else
+                    lSkipped = lSkipped + 1
+                End If
+            Else
+                lSkipped = lSkipped + 1
+            End If
+        Next
+    Next
+    DebugLog MODULE_NAME, FUNC_NAME, "[+] Passed=" & lPassed & ", Failed=" & lFailed & ", Skipped=" & lSkipped
+End Sub
+
+Public Sub TestCryptoAesCbc(oJson As Object)
+    Const FUNC_NAME     As String = "TlsTestCryptoAesCbc"
+    Dim oGroup          As Object
+    Dim oTest           As Object
+    Dim sComment        As String
+    Dim sResult         As String
+    Dim lPassed         As Long
+    Dim lFailed         As Long
+    Dim lSkipped        As Long
+    '--- local
+    Dim baNonce()       As Byte
+    Dim baKey()         As Byte
+    Dim baMsg()         As Byte
+    Dim baCt()          As Byte
+    Dim baBuffer()      As Byte
+    Dim lPadding        As Long
+    Dim baHmac(0 To 15) As Byte
+    
+    pvCryptoInit
+    For Each oGroup In JsonValue(oJson, "testGroups")
+        For Each oTest In JsonValue(oGroup, "tests")
+            baNonce = FromHex(JsonValue(oTest, "iv"))
+            If pvArraySize(baNonce) = LNG_AESCBC_IVSZ Then
+                baKey = FromHex(JsonValue(oTest, "key"))
+                If pvArraySize(baKey) = LNG_AES128_KEYSZ Or pvArraySize(baKey) = LNG_AES256_KEYSZ Then
+                    baMsg = FromHex(JsonValue(oTest, "msg"))
+                    baCt = FromHex(JsonValue(oTest, "ct"))
+                    baBuffer = baMsg
+                    '--- PKCS5 padding (note: different than padding for TLS in pvBufferWriteRecordEnd)
+                    lPadding = LNG_AESCBC_IVSZ - pvArraySize(baMsg) Mod LNG_AESCBC_IVSZ
+                    Debug.Assert lPadding <= pvArraySize(baHmac)
+                    Call FillMemory(baHmac(0), lPadding, lPadding)
+                    pvArrayWriteBlob baBuffer, UBound(baBuffer) + 1, VarPtr(baHmac(0)), lPadding
+                    sResult = "valid"
+                    If Not pvCryptoBulkAesCbcEncrypt(baNonce, baKey, baBuffer, 0, UBound(baBuffer) + 1) Then
+                        sResult = "invalid"
+                    ElseIf Not pvArrayEqual(baBuffer, baCt) Then
+                        sResult = "invalid"
+                    End If
+                    If JsonValue(oTest, "result") = sResult Then
+                        lPassed = lPassed + 1
+                    Else
+                        lFailed = lFailed + 1
+                        sComment = JsonValue(oTest, "comment")
+                        DebugLog MODULE_NAME, FUNC_NAME, "[-] " & JsonValue(oTest, "tcId") & IIf(LenB(sComment) <> 0, " (" & sComment & ")", vbNullString)
+                    End If
+                Else
+                    lSkipped = lSkipped + 1
+                End If
+            Else
+                lSkipped = lSkipped + 1
+            End If
+        Next
+    Next
+    DebugLog MODULE_NAME, FUNC_NAME, "[+] Passed=" & lPassed & ", Failed=" & lFailed & ", Skipped=" & lSkipped
+End Sub
+
+Public Sub TestCryptoChacha20(oJson As Object)
+    Const FUNC_NAME     As String = "TlsTestCryptoChacha20"
+    Dim oGroup          As Object
+    Dim oTest           As Object
+    Dim sComment        As String
+    Dim sResult         As String
+    Dim lPassed         As Long
+    Dim lFailed         As Long
+    Dim lSkipped        As Long
+    '--- local
+    Dim baNonce()       As Byte
+    Dim baKey()         As Byte
+    Dim baAad()         As Byte
+    Dim baMsg()         As Byte
+    Dim baCt()          As Byte
+    Dim baTag()         As Byte
+    Dim baBuffer()      As Byte
+    
+    pvCryptoInit
+    For Each oGroup In JsonValue(oJson, "testGroups")
+        For Each oTest In JsonValue(oGroup, "tests")
+            baNonce = FromHex(JsonValue(oTest, "iv"))
+            If pvArraySize(baNonce) = LNG_CHACHA20POLY1305_IVSZ Then
+                baKey = FromHex(JsonValue(oTest, "key"))
+                If pvArraySize(baKey) = LNG_CHACHA20_KEYSZ Then
+                    baAad = FromHex(JsonValue(oTest, "aad"))
+                    baMsg = FromHex(JsonValue(oTest, "msg"))
+                    baCt = FromHex(JsonValue(oTest, "ct"))
+                    baTag = FromHex(JsonValue(oTest, "tag"))
+                    baBuffer = baMsg
+                    ReDim Preserve baBuffer(0 To UBound(baMsg) + UBound(baTag) + 1) As Byte
+                    sResult = "valid"
+                    If Not pvCryptoBulkChacha20Poly1305Encrypt(baNonce, baKey, baAad, 0, UBound(baAad) + 1, baBuffer, 0, UBound(baMsg) + 1) Then
+                        sResult = "invalid"
+                    Else
+                        pvArrayWriteBlob baCt, UBound(baCt) + 1, VarPtr(baTag(0)), UBound(baTag) + 1
+                        If Not pvArrayEqual(baBuffer, baCt) Then
+                            sResult = "invalid"
+                        End If
+                    End If
+                    If JsonValue(oTest, "result") = sResult Then
+                        lPassed = lPassed + 1
+                    Else
+                        lFailed = lFailed + 1
+                        sComment = JsonValue(oTest, "comment")
+                        DebugLog MODULE_NAME, FUNC_NAME, "[-] " & JsonValue(oTest, "tcId") & IIf(LenB(sComment) <> 0, " (" & sComment & ")", vbNullString)
+                    End If
+                Else
+                    lSkipped = lSkipped + 1
+                End If
+            Else
+                lSkipped = lSkipped + 1
+            End If
+        Next
+    Next
+    DebugLog MODULE_NAME, FUNC_NAME, "[+] Passed=" & lPassed & ", Failed=" & lFailed & ", Skipped=" & lSkipped
+End Sub
+
+Public Sub TestCryptoEcdh(oJson As Object)
+    Const FUNC_NAME     As String = "TestCryptoEcdh"
+    Dim oGroup          As Object
+    Dim oTest           As Object
+    Dim sComment        As String
+    Dim sResult         As String
+    Dim lPassed         As Long
+    Dim lFailed         As Long
+    Dim lSkipped        As Long
+    '--- local
+    Dim baPublic()      As Byte
+    Dim baPrivate()     As Byte
+    Dim baShared()      As Byte
+    Dim baBuffer()      As Byte
+    Dim lPtr            As Long
+    Dim lSize           As Long
+    Dim uPublicKeyInfo  As CERT_PUBLIC_KEY_INFO
+    Dim sFlags          As String
+    Dim sCurve          As String
+
+    pvCryptoInit
+    For Each oGroup In JsonValue(oJson, "testGroups")
+        sCurve = JsonValue(oGroup, "curve")
+        If sCurve = "secp256r1" Or sCurve = "secp384r1" Then
+            For Each oTest In JsonValue(oGroup, "tests")
+                baPublic = FromHex(JsonValue(oTest, "public"))
+                baPrivate = FromHex(JsonValue(oTest, "private"))
+                baShared = FromHex(JsonValue(oTest, "shared"))
+                sFlags = Join(JsonValue(oTest, "flags/*"), ", ")
+                If InStr(sFlags, "InvalidAsn") = 0 Then
+                    If UBound(baPublic) >= 0 Then
+                        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_PUBLIC_KEY_INFO, baPublic(0), UBound(baPublic) + 1, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, lSize) <> 0 Then
+                            Call CopyMemory(uPublicKeyInfo, ByVal lPtr, Len(uPublicKeyInfo))
+                            Debug.Assert pvToString(uPublicKeyInfo.Algorithm.pszObjId) = szOID_ECC_PUBLIC_KEY
+                            If uPublicKeyInfo.PublicKey.cbData = 0 Then
+                                baPublic = vbNullString
+                            Else
+                                ReDim baPublic(0 To uPublicKeyInfo.PublicKey.cbData - 1) As Byte
+                                Call CopyMemory(baPublic(0), ByVal uPublicKeyInfo.PublicKey.pbData, UBound(baPublic) + 1)
+                            End If
+                            Call LocalFree(lPtr)
+                        End If
+                    End If
+                    If UBound(baPrivate) >= 0 Then
+                        If baPrivate(0) = 0 Then
+                            Call CopyMemory(baPrivate(0), baPrivate(1), UBound(baPrivate))
+                            ReDim Preserve baPrivate(0 To UBound(baPrivate) - 1) As Byte
+                        End If
+                    End If
+                    If sCurve = "secp256r1" And UBound(baPrivate) = LNG_SECP256R1_KEYSZ - 1 And UBound(baPublic) >= LNG_SECP256R1_KEYSZ Then
+                        sResult = "valid"
+                        If Not pvCryptoEcdhSecp256r1SharedSecret(baBuffer, baPrivate, baPublic) Then
+                            sResult = "invalid"
+                        ElseIf Not pvArrayEqual(baBuffer, baShared) Then
+                            sResult = "invalid"
+                        End If
+                        If JsonValue(oTest, "result") = "acceptable" And sResult = "valid" Then
+                            lPassed = lPassed + 1
+                        ElseIf JsonValue(oTest, "result") = sResult Then
+                            lPassed = lPassed + 1
+                        Else
+                            lFailed = lFailed + 1
+                            sComment = JsonValue(oTest, "comment")
+                            DebugLog MODULE_NAME, FUNC_NAME, "[-] " & sCurve & ", " & JsonValue(oTest, "tcId") & IIf(LenB(sComment) <> 0, " (" & sComment & ")", vbNullString) & _
+                                IIf(LenB(sFlags) <> 0, ", " & sFlags, vbNullString) & ", sResult=" & sResult & " vs " & JsonValue(oTest, "result")
+                        End If
+                    ElseIf sCurve = "secp384r1" And UBound(baPrivate) = LNG_SECP384R1_KEYSZ - 1 And UBound(baPublic) >= LNG_SECP384R1_KEYSZ Then
+                        sResult = "valid"
+                        If Not pvCryptoEcdhSecp384r1SharedSecret(baBuffer, baPrivate, baPublic) Then
+                            sResult = "invalid"
+                        ElseIf Not pvArrayEqual(baBuffer, baShared) Then
+                            sResult = "invalid"
+                        End If
+                        If JsonValue(oTest, "result") = "acceptable" And sResult = "valid" Then
+                            lPassed = lPassed + 1
+                        ElseIf JsonValue(oTest, "result") = sResult Then
+                            lPassed = lPassed + 1
+                        Else
+                            lFailed = lFailed + 1
+                            sComment = JsonValue(oTest, "comment")
+                            DebugLog MODULE_NAME, FUNC_NAME, "[-] " & sCurve & ", " & JsonValue(oTest, "tcId") & IIf(LenB(sComment) <> 0, " (" & sComment & ")", vbNullString) & _
+                                IIf(LenB(sFlags) <> 0, ", " & sFlags, vbNullString) & ", sResult=" & sResult & " vs " & JsonValue(oTest, "result")
+                        End If
+                    Else
+                        lSkipped = lSkipped + 1
+                    End If
+                Else
+                    lSkipped = lSkipped + 1
+                End If
+            Next
+        End If
+    Next
+    DebugLog MODULE_NAME, FUNC_NAME, "[+] Passed=" & lPassed & ", Failed=" & lFailed & ", Skipped=" & lSkipped
+End Sub
+
+Public Sub TestCryptoEcdsa(oJson As Object)
+    Const FUNC_NAME     As String = "TestCryptoEcdsa"
+    Dim oGroup          As Object
+    Dim oTest           As Object
+    Dim sComment        As String
+    Dim sResult         As String
+    Dim lPassed         As Long
+    Dim lFailed         As Long
+    Dim lSkipped        As Long
+    '--- local
+    Dim baPublic()      As Byte
+    Dim baMsg()         As Byte
+    Dim baSig()         As Byte
+    Dim baBuffer()      As Byte
+    Dim sFlags          As String
+    Dim sCurve          As String
+    Dim lCurveSize      As KeyCodeConstants
+    Dim lHashSize       As Long
+    Dim baTemp()        As Byte
+    
+    pvCryptoInit
+    For Each oGroup In JsonValue(oJson, "testGroups")
+        sCurve = JsonValue(oGroup, "key/curve")
+        If sCurve = "secp256r1" Or sCurve = "secp384r1" Then
+            baPublic = FromHex(JsonValue(oGroup, "key/uncompressed"))
+            lCurveSize = JsonValue(oGroup, "key/keySize") / 8
+            lHashSize = Replace(JsonValue(oGroup, "sha"), "SHA-", vbNullString) / 8
+            For Each oTest In JsonValue(oGroup, "tests")
+                baMsg = FromHex(JsonValue(oTest, "msg"))
+                baTemp = FromHex(JsonValue(oTest, "sig"))
+                If pvAsn1DecodeEcdsaSignature(baSig, baTemp, lCurveSize) Then
+                    sFlags = Join(JsonValue(oTest, "flags/*"), ", ")
+                    pvArrayHash lHashSize, baMsg, baBuffer
+                    If UBound(baBuffer) + 1 < lCurveSize Then
+                        baTemp = baBuffer
+                        pvArrayAllocate baBuffer, lCurveSize, FUNC_NAME & ".baBuffer"
+                        Call CopyMemory(baBuffer(lCurveSize - UBound(baTemp) - 1), baTemp(0), UBound(baTemp) + 1)
+                    End If
+                    If sCurve = "secp256r1" Then
+                        sResult = "valid"
+                        If Not pvCryptoEcdsaSecp256r1Verify(baPublic, baBuffer, baSig) Then
+                            sResult = "invalid"
+                        End If
+                        If JsonValue(oTest, "result") = "acceptable" And sResult = "valid" Then
+                            lPassed = lPassed + 1
+                        ElseIf JsonValue(oTest, "result") = sResult Then
+                            lPassed = lPassed + 1
+                        Else
+                            lFailed = lFailed + 1
+                            sComment = JsonValue(oTest, "comment")
+                            DebugLog MODULE_NAME, FUNC_NAME, "[-] " & sCurve & ", " & JsonValue(oTest, "tcId") & IIf(LenB(sComment) <> 0, " (" & sComment & ")", vbNullString) & _
+                                IIf(LenB(sFlags) <> 0, ", " & sFlags, vbNullString) & ", sResult=" & sResult & " vs " & JsonValue(oTest, "result")
+                        End If
+                    Else ' If sCurve = "secp384r1" Then
+                        sResult = "valid"
+                        If Not pvCryptoEcdsaSecp384r1Verify(baPublic, baBuffer, baSig) Then
+                            sResult = "invalid"
+                        End If
+                        If JsonValue(oTest, "result") = "acceptable" And sResult = "valid" Then
+                            lPassed = lPassed + 1
+                        ElseIf JsonValue(oTest, "result") = sResult Then
+                            lPassed = lPassed + 1
+                        Else
+                            lFailed = lFailed + 1
+                            sComment = JsonValue(oTest, "comment")
+                            DebugLog MODULE_NAME, FUNC_NAME, "[-] " & sCurve & ", " & JsonValue(oTest, "tcId") & IIf(LenB(sComment) <> 0, " (" & sComment & ")", vbNullString) & _
+                                IIf(LenB(sFlags) <> 0, ", " & sFlags, vbNullString) & ", sResult=" & sResult & " vs " & JsonValue(oTest, "result")
+                        End If
+                    End If
+                Else
+                    lSkipped = lSkipped + 1
+                End If
+            Next
+        End If
+    Next
+    DebugLog MODULE_NAME, FUNC_NAME, "[+] Passed=" & lPassed & ", Failed=" & lFailed & ", Skipped=" & lSkipped
+End Sub
+
+#End If ' ImplTestCrypto
 
 '= trampolines ===========================================================
 
