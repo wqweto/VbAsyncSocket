@@ -370,7 +370,7 @@ EH:
     PrintError FUNC_NAME
 End Sub
 
-Public Sub Connect(Optional RemoteHost As String, Optional ByVal RemotePort As Long)
+Public Sub Connect(Optional RemoteHost As String, Optional ByVal RemotePort As Long, Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum)
     Const FUNC_NAME     As String = "Connect"
     
     On Error GoTo EH
@@ -382,7 +382,7 @@ Public Sub Connect(Optional RemoteHost As String, Optional ByVal RemotePort As L
         m_lRemotePort = RemotePort
     End If
     pvState = sckResolvingHost
-    If Not pvSocket.Connect(m_sRemoteHost, m_lRemotePort, UseTls:=(m_eProtocol = sckTLSProtocol)) Then
+    If Not pvSocket.Connect(m_sRemoteHost, m_lRemotePort, UseTls:=(m_eProtocol = sckTLSProtocol), LocalFeatures:=LocalFeatures) Then
         On Error GoTo 0
         pvSetError LastError:=m_oSocket.LastError, RaiseError:=True
     End If
