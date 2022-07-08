@@ -8,6 +8,7 @@ Module=mdTlsNative; ..\..\src\mdTlsNative.bas
 IconForm="Form2"
 Startup="Form2"
 HelpFile=""
+ExeName32="Project2.exe"
 Command32=""
 Name="WinsockNative"
 HelpContextID="0"

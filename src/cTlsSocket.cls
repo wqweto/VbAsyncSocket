@@ -431,6 +431,13 @@ Private Sub PrintError(sFunction As String)
     #End If
 End Sub
 
+Private Sub ErrRaise(ByVal Number As Long, Optional Source As String, Optional Description As String)
+    If LenB(Description) = 0 And Not m_oSocket Is Nothing Then
+        Description = m_oSocket.GetErrorDescription(Number)
+    End If
+    Err.Raise Number, Source, Description
+End Sub
+
 '=========================================================================
 ' Properties
 '=========================================================================
@@ -1944,7 +1951,7 @@ QH:
         Call CertCloseStore(hCertStore, 0)
     End If
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 
@@ -1987,7 +1994,7 @@ QH:
         Call CertCloseStore(hPfxStore, 0)
     End If
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 
@@ -2028,7 +2035,7 @@ QH:
         Call CertCloseStore(hCertStore, 0)
     End If
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 
@@ -2102,7 +2109,7 @@ QH:
         Call CertCloseStore(hCertStore, 0)
     End If
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 
@@ -2150,6 +2157,8 @@ Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey 
     End With
     pCertContext = CertCreateSelfSignCertificate(hProv, uName, 0, ByVal 0, 0, ByVal 0, ByVal 0, 0)
     If pCertContext = 0 Then
+        hResult = Err.LastDllError
+        sApiSource = "CertCreateSelfSignCertificate"
         GoTo QH
     End If
     If pvPkiAppendCertContext(pCertContext, cCerts, cPrivKey) Then
@@ -2165,7 +2174,7 @@ QH:
         Call CryptAcquireContext(0, StrPtr(STR_CONTAINER), 0, PROV_RSA_FULL, CRYPT_DELETEKEYSET)
     End If
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 
@@ -2250,7 +2259,7 @@ QH:
         Call CertCloseStore(hCertStore, 0)
     End If
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 
@@ -2378,7 +2387,7 @@ QH:
         Call CertFreeCertificateChainEngine(hChainEngine)
     End If
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 
@@ -2457,7 +2466,7 @@ QH:
         Call CertFreeCertificateChain(pChainContext)
     End If
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 
@@ -2625,7 +2634,7 @@ QH:
         Call NCryptFreeObject(hNewKey)
     End If
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 
@@ -2670,7 +2679,7 @@ Private Function pvPkiExportRsaPrivateKey(baRetVal() As Byte, baPrivBlob() As By
     pvPkiExportRsaPrivateKey = True
 QH:
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 
@@ -2706,7 +2715,7 @@ Private Function pvPkiExportEccPrivateKey(baRetVal() As Byte, baPrivBlob() As By
     pvPkiExportEccPrivateKey = True
 QH:
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 
@@ -2817,7 +2826,7 @@ QH:
         Call NCryptFreeObject(hProv)
     End If
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 

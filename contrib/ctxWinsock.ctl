@@ -163,7 +163,15 @@ Private m_oRequestSocket        As cTlsSocket
 '=========================================================================
 
 Private Sub PrintError(sFunction As String)
-    Debug.Print "Critical error: " & Err.Description & " [" & MODULE_NAME & "." & sFunction & "]"
+    #If ImplUseDebugLog Then
+        DebugLog MODULE_NAME, sFunction & "(" & Erl & ")", Err.Description & " &H" & Hex$(Err.Number), vbLogEventTypeError
+    #Else
+        Debug.Print "Critical error: " & Err.Description & " [" & MODULE_NAME & "." & sFunction & "]"
+    #End If
+End Sub
+
+Private Sub ErrRaise(ByVal Number As Long, Optional Source As String, Optional Description As String)
+    Err.Raise Number, Source, Description
 End Sub
 
 '=========================================================================
@@ -306,7 +314,6 @@ End Property
 '=========================================================================
 
 Public Sub Accept(ByVal requestID As Long)
-    Const FUNC_NAME     As String = "Accept"
     Dim hDuplicate      As Long
     
     On Error GoTo EH
@@ -320,24 +327,19 @@ Public Sub Accept(ByVal requestID As Long)
         If DuplicateHandle(GetCurrentProcess(), requestID, GetCurrentProcess(), hDuplicate, 0, 0, DUPLICATE_SAME_ACCESS) = 0 Then
             On Error GoTo 0
             pvSetError LastDllError:=Err.LastDllError, RaiseError:=True
-            GoTo QH
         End If
         Set m_oSocket = New cTlsSocket
         If Not m_oSocket.Attach(hDuplicate) Then
             On Error GoTo 0
             pvSetError LastError:=m_oSocket.LastError, RaiseError:=True
-            GoTo QH
         End If
     End If
-QH:
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    pvSetError LastError:=Err, RaiseError:=True
 End Sub
 
 Public Sub Close_()
-    Const FUNC_NAME     As String = "Close_"
-    
     On Error GoTo EH
     If State <> sckClosed Then
         If Not m_oSocket Is Nothing Then
@@ -349,12 +351,10 @@ Public Sub Close_()
     End If
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    pvSetError LastError:=Err, RaiseError:=True
 End Sub
 
 Public Sub Bind(Optional ByVal LocalPort As Long, Optional LocalIP As String)
-    Const FUNC_NAME     As String = "Bind"
-    
     On Error GoTo EH
     Close_
     If LocalPort <> 0 Then
@@ -367,12 +367,10 @@ Public Sub Bind(Optional ByVal LocalPort As Long, Optional LocalIP As String)
     pvState = sckOpen
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    pvSetError LastError:=Err, RaiseError:=True
 End Sub
 
 Public Sub Connect(Optional RemoteHost As String, Optional ByVal RemotePort As Long, Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum)
-    Const FUNC_NAME     As String = "Connect"
-    
     On Error GoTo EH
     Close_
     If LenB(RemoteHost) <> 0 Then
@@ -389,7 +387,7 @@ Public Sub Connect(Optional RemoteHost As String, Optional ByVal RemotePort As L
     pvState = sckConnected
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    pvSetError LastError:=Err, RaiseError:=True
 End Sub
 
 Public Sub Listen( _
@@ -398,11 +396,12 @@ Public Sub Listen( _
             Optional Password As String, _
             Optional Certificates As Collection, _
             Optional PrivateKey As Collection)
-    Const FUNC_NAME     As String = "Listen"
-    
     On Error GoTo EH
     If m_eProtocol = sckTLSProtocol Then
-        pvSocket.InitServerTls PemFiles, PfxFile, Password, Certificates, PrivateKey
+        If Not pvSocket.InitServerTls(PemFiles, PfxFile, Password, Certificates, PrivateKey) Then
+            On Error GoTo 0
+            pvSetError LastError:=m_oSocket.LastError, RaiseError:=True
+        End If
     End If
     If Not pvSocket.Listen() Then
         On Error GoTo 0
@@ -411,11 +410,10 @@ Public Sub Listen( _
     pvState = sckListening
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    pvSetError LastError:=Err, RaiseError:=True
 End Sub
 
 Public Sub PeekData(data As Variant, Optional ByVal type_ As Long, Optional ByVal maxLen As Long = -1)
-    Const FUNC_NAME     As String = "PeekData"
     Dim baBuffer()      As Byte
     Dim lIdx            As Long
     
@@ -426,7 +424,7 @@ Public Sub PeekData(data As Variant, Optional ByVal type_ As Long, Optional ByVa
     Select Case type_
     Case vbString, vbByte + vbArray
     Case Else
-        Err.Raise vbObjectError, , "Unsupported data type: " & type_
+        ErrRaise vbObjectError, , "Unsupported data type: " & type_
     End Select
     If maxLen < 0 Then
         If pvSocket.AvailableBytes <= 0 Then
@@ -452,11 +450,10 @@ Public Sub PeekData(data As Variant, Optional ByVal type_ As Long, Optional ByVa
     End If
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    pvSetError LastError:=Err, RaiseError:=True
 End Sub
 
 Public Sub GetData(data As Variant, Optional ByVal type_ As Long, Optional ByVal maxLen As Long = -1)
-    Const FUNC_NAME     As String = "GetData"
     Dim lIdx            As Long
     Dim baBuffer()      As Byte
     
@@ -467,7 +464,7 @@ Public Sub GetData(data As Variant, Optional ByVal type_ As Long, Optional ByVal
     Select Case type_
     Case vbString, vbByte + vbArray
     Case Else
-        Err.Raise vbObjectError, , "Unsupported data type: " & type_
+        ErrRaise vbObjectError, , "Unsupported data type: " & type_
     End Select
     baBuffer = vbNullString
     If UBound(m_baRecvBuffer) >= 0 Then
@@ -506,11 +503,10 @@ Public Sub GetData(data As Variant, Optional ByVal type_ As Long, Optional ByVal
     End Select
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    pvSetError LastError:=Err, RaiseError:=True
 End Sub
 
 Public Sub SendData(data As Variant)
-    Const FUNC_NAME     As String = "SendData"
     Dim baAppend()      As Byte
     Dim lPos            As Long
     
@@ -522,7 +518,7 @@ Public Sub SendData(data As Variant)
         Case vbByte + vbArray
             m_baSendBuffer = data
         Case Else
-            Err.Raise vbObjectError, , "Unsupported data type: " & TypeName(data)
+            ErrRaise vbObjectError, , "Unsupported data type: " & TypeName(data)
         End Select
     Else
         Select Case VarType(data)
@@ -531,7 +527,7 @@ Public Sub SendData(data As Variant)
         Case vbByte + vbArray
             baAppend = data
         Case Else
-            Err.Raise vbObjectError, , "Unsupported data type: " & TypeName(data)
+            ErrRaise vbObjectError, , "Unsupported data type: " & TypeName(data)
         End Select
         If UBound(baAppend) >= 0 Then
             lPos = UBound(m_baSendBuffer) + 1
@@ -544,7 +540,7 @@ Public Sub SendData(data As Variant)
     End If
     Exit Sub
 EH:
-    PrintError FUNC_NAME
+    pvSetError LastError:=Err, RaiseError:=True
 End Sub
 
 Private Sub pvSetError(Optional ByVal LastDllError As Long, Optional LastError As VBA.ErrObject, Optional ByVal RaiseError As Boolean)
@@ -566,7 +562,7 @@ Private Sub pvSetError(Optional ByVal LastDllError As Long, Optional LastError A
     End If
     RaiseEvent Error(Number, Description, LastDllError, Source, App.HelpFile, 0, bCancel)
     If Not bCancel And RaiseError Then
-        Err.Raise Number, Source, Description, App.HelpFile, 0
+        ErrRaise Number, Source, Description
     End If
 End Sub
 
@@ -678,15 +674,10 @@ End Sub
 '=========================================================================
 
 Private Sub UserControl_Resize()
-    Const FUNC_NAME     As String = "UserControl_Resize"
-    
-    On Error GoTo EH
+    '--- note: skip error handler not to clear Err object
     Width = ScaleX(32, vbPixels)
     Height = ScaleX(32, vbPixels)
     labLogo.Move 0, (ScaleHeight - labLogo.Height) / 2, ScaleWidth
-    Exit Sub
-EH:
-    PrintError FUNC_NAME
 End Sub
 
 Private Sub UserControl_InitProperties()

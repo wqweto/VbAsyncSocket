@@ -88,6 +88,10 @@ Private Sub Command4_Click()
     Shell "cmd /c start https://localhost:8088/"
 End Sub
 
+Private Sub ctxServer_Error(Index As Integer, ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
+    MsgBox Description & " &H" & Hex$(Number), vbCritical, "ctxServer_Error"
+End Sub
+
 Private Sub ctxWinsock_Connect()
     Dim lIdx            As Long
     
@@ -148,5 +152,5 @@ Private Sub ctxServer_Close(Index As Integer)
 End Sub
 
 Private Sub ctxWinsock_Error(ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
-    Debug.Print "Error: " & Description
+    MsgBox Description & " &H" & Hex$(Number), vbCritical, "ctxWinsock_Error"
 End Sub

@@ -582,6 +582,14 @@ Private Type UcsCryptoData
 End Type
 
 '=========================================================================
+' Error handling
+'=========================================================================
+
+Private Sub ErrRaise(ByVal Number As Long, Optional Source As String, Optional Description As String)
+    Err.Raise Number, Source, Description
+End Sub
+
+'=========================================================================
 ' Properties
 '=========================================================================
 
@@ -646,7 +654,7 @@ Public Function TlsInitServer( _
             Optional AlpnProtocols As String, _
             Optional ByVal LocalFeatures As Long = ucsTlsSupportAll) As Boolean
 #If Not ImplTlsServer Then
-    Err.Raise vbObjectError, , ERR_NO_SERVER_COMPILED
+    ErrRaise vbObjectError, , ERR_NO_SERVER_COMPILED
 #Else
     Dim uEmpty          As UcsTlsContext
     
@@ -3484,20 +3492,20 @@ Private Sub pvTlsSetupExchGroup(uCtx As UcsTlsContext, ByVal lExchGroup As Long)
             Case TLS_GROUP_X25519
                 .ExchAlgo = ucsTlsAlgoExchX25519
                 If Not pvCryptoEcdhCurve25519MakeKey(.LocalExchPrivate, .LocalExchPublic) Then
-                    Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_GENER_KEYPAIR_FAILED, "%1", "Curve25519")
+                    ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_GENER_KEYPAIR_FAILED, "%1", "Curve25519")
                 End If
             Case TLS_GROUP_SECP256R1
                 .ExchAlgo = ucsTlsAlgoExchSecp256r1
                 If Not pvCryptoEcdhSecp256r1MakeKey(.LocalExchPrivate, .LocalExchPublic) Then
-                    Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_GENER_KEYPAIR_FAILED, "%1", "secp256r1")
+                    ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_GENER_KEYPAIR_FAILED, "%1", "secp256r1")
                 End If
             Case TLS_GROUP_SECP384R1
                 .ExchAlgo = ucsTlsAlgoExchSecp384r1
                 If Not pvCryptoEcdhSecp384r1MakeKey(.LocalExchPrivate, .LocalExchPublic) Then
-                    Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_GENER_KEYPAIR_FAILED, "%1", "secp384r1")
+                    ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_GENER_KEYPAIR_FAILED, "%1", "secp384r1")
                 End If
             Case Else
-                Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_EXCH_GROUP, "%1", pvTlsGetExchGroupName(.ExchGroup))
+                ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_EXCH_GROUP, "%1", pvTlsGetExchGroupName(.ExchGroup))
             End Select
         End If
     End With
@@ -3513,13 +3521,13 @@ Private Sub pvTlsSetupExchRsaCertificate(uCtx As UcsTlsContext, baCert() As Byte
         pvTlsGetRandom .LocalExchPrivate, TLS_LEGACY_SECRET_SIZE
         Call CopyMemory(.LocalExchPrivate(0), TLS_LOCAL_LEGACY_VERSION, 2)
         If Not pvAsn1DecodeCertificate(baCert, uCertInfo) Then
-            Err.Raise vbObjectError, FUNC_NAME, ERR_UNSUPPORTED_CERTIFICATE
+            ErrRaise vbObjectError, FUNC_NAME, ERR_UNSUPPORTED_CERTIFICATE
         End If
         If Not pvCryptoEmePkcs1Encode(baEnc, .LocalExchPrivate, uCertInfo.BitLen) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEmePkcs1Encode")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEmePkcs1Encode")
         End If
         If Not pvCryptoRsaModExp(baEnc, uCertInfo.PubExp, uCertInfo.Modulus, .LocalExchRsaEncrPriv) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoRsaModExp")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoRsaModExp")
         End If
     End With
 End Sub
@@ -3534,10 +3542,10 @@ Private Sub pvTlsSetupExchRsaPreMasterSecret(uCtx As UcsTlsContext, baEnc() As B
     With uCtx
         .ExchAlgo = ucsTlsAlgoExchCertificate
         If Not SearchCollection(.LocalPrivateKey, 1, RetVal:=baPrivKey) Then
-            Err.Raise vbObjectError, FUNC_NAME, ERR_NO_PRIVATE_KEY
+            ErrRaise vbObjectError, FUNC_NAME, ERR_NO_PRIVATE_KEY
         End If
         If Not pvAsn1DecodePrivateKey(baPrivKey, uKeyInfo) Then
-            Err.Raise vbObjectError, FUNC_NAME, ERR_UNSUPPORTED_PRIVATE_KEY
+            ErrRaise vbObjectError, FUNC_NAME, ERR_UNSUPPORTED_PRIVATE_KEY
         End If
         If Not pvCryptoRsaCrtModExp(baEnc, uKeyInfo.PrivExp, uKeyInfo.Modulus, uKeyInfo.Prime1, uKeyInfo.Prime2, uKeyInfo.Coefficient, baDec) Then
             GoTo UseRandom
@@ -3664,7 +3672,7 @@ Private Sub pvTlsSetupCipherSuite(uCtx As UcsTlsContext, ByVal lCipherSuite As L
                 .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13
             End Select
             If .BulkAlgo = 0 Or .DigestAlgo = 0 Then
-                Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_CIPHER_SUITE, "%1", pvTlsGetCipherSuiteName(.CipherSuite))
+                ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_CIPHER_SUITE, "%1", pvTlsGetCipherSuiteName(.CipherSuite))
             End If
         End If
     End With
@@ -3854,7 +3862,7 @@ Private Sub pvTlsDeriveHandshakeSecrets(uCtx As UcsTlsContext)
     
     With uCtx
         If .HandshakeMessages.Size = 0 Then
-            Err.Raise vbObjectError, FUNC_NAME, ERR_NO_HANDSHAKE_MESSAGES
+            ErrRaise vbObjectError, FUNC_NAME, ERR_NO_HANDSHAKE_MESSAGES
         End If
         pvTlsGetHandshakeHash uCtx, baHandshakeHash
         pvArrayAllocate baZeroes, .DigestSize, FUNC_NAME & ".baZeroes"
@@ -3885,7 +3893,7 @@ Private Sub pvTlsDeriveApplicationSecrets(uCtx As UcsTlsContext, baHandshakeHash
     
     With uCtx
         If .HandshakeMessages.Size = 0 Then
-            Err.Raise vbObjectError, FUNC_NAME, ERR_NO_HANDSHAKE_MESSAGES
+            ErrRaise vbObjectError, FUNC_NAME, ERR_NO_HANDSHAKE_MESSAGES
         End If
         pvTlsGetHash baEmptyHash, .DigestAlgo, baEmpty
         pvTlsHkdfExpandLabel baDerivedSecret, .DigestAlgo, .HandshakeSecret, "derived", baEmptyHash, .DigestSize
@@ -3910,7 +3918,7 @@ Private Sub pvTlsDeriveKeyUpdate(uCtx As UcsTlsContext, ByVal bLocalUpdate As Bo
     
     With uCtx
         If pvArraySize(.RemoteTrafficSecret) = 0 Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_NO_PREVIOUS_SECRET, "%1", "RemoteTrafficSecret")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_NO_PREVIOUS_SECRET, "%1", "RemoteTrafficSecret")
         End If
         pvTlsHkdfExpandLabel .RemoteTrafficSecret, .DigestAlgo, .RemoteTrafficSecret, "traffic upd", baEmpty, .DigestSize
         pvTlsHkdfExpandLabel .RemoteTrafficKey, .DigestAlgo, .RemoteTrafficSecret, "key", baEmpty, .KeySize
@@ -3919,7 +3927,7 @@ Private Sub pvTlsDeriveKeyUpdate(uCtx As UcsTlsContext, ByVal bLocalUpdate As Bo
         pvTlsLogSecret uCtx, IIf(.IsServer, "CLIENT", "SERVER") & "_TRAFFIC_SECRET_0", .RemoteTrafficSecret
         If bLocalUpdate Then
             If pvArraySize(.LocalTrafficSecret) = 0 Then
-                Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_NO_PREVIOUS_SECRET, "%1", "LocalTrafficSecret")
+                ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_NO_PREVIOUS_SECRET, "%1", "LocalTrafficSecret")
             End If
             pvTlsHkdfExpandLabel .LocalTrafficSecret, .DigestAlgo, .LocalTrafficSecret, "traffic upd", baEmpty, .DigestSize
             pvTlsHkdfExpandLabel .LocalTrafficKey, .DigestAlgo, .LocalTrafficSecret, "key", baEmpty, .KeySize
@@ -3977,7 +3985,7 @@ Private Sub pvTlsDeriveLegacySecrets(uCtx As UcsTlsContext)
     
     With uCtx
         If pvArraySize(.RemoteExchRandom) = 0 Then
-            Err.Raise vbObjectError, FUNC_NAME, ERR_NO_REMOTE_RANDOM
+            ErrRaise vbObjectError, FUNC_NAME, ERR_NO_REMOTE_RANDOM
         End If
         pvTlsGetSharedSecret baPreMasterSecret, .ExchAlgo, .LocalExchPrivate, .RemoteExchPublic
         #If (ImplCaptureTraffic And 2) <> 0 Then
@@ -4137,18 +4145,18 @@ Private Sub pvTlsGetHash(baRetVal() As Byte, ByVal eHash As UcsTlsCryptoAlgorith
     Select Case eHash
     Case ucsTlsAlgoDigestSha256
         If Not pvCryptoHashSha256(baRetVal, baInput, Pos, Size) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha256")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha256")
         End If
     Case ucsTlsAlgoDigestSha384
         If Not pvCryptoHashSha384(baRetVal, baInput, Pos, Size) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha384")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha384")
         End If
     Case ucsTlsAlgoDigestSha512
         If Not pvCryptoHashSha512(baRetVal, baInput, Pos, Size) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha512")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha512")
         End If
     Case Else
-        Err.Raise vbObjectError, FUNC_NAME, "Unsupported hash type " & eHash
+        ErrRaise vbObjectError, FUNC_NAME, "Unsupported hash type " & eHash
     End Select
 End Sub
 
@@ -4158,18 +4166,18 @@ Private Sub pvTlsGetHmac(baRetVal() As Byte, ByVal eHash As UcsTlsCryptoAlgorith
     Select Case eHash
     Case ucsTlsAlgoDigestSha1
         If Not pvCryptoHmacSha1(baRetVal, baKey, baInput, Pos, Size) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHmacSha1")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHmacSha1")
         End If
     Case ucsTlsAlgoDigestSha256
         If Not pvCryptoHmacSha256(baRetVal, baKey, baInput, Pos, Size) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHmacSha256")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHmacSha256")
         End If
     Case ucsTlsAlgoDigestSha384
         If Not pvCryptoHmacSha384(baRetVal, baKey, baInput, Pos, Size) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHmacSha384")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHmacSha384")
         End If
     Case Else
-        Err.Raise vbObjectError, FUNC_NAME, "Unsupported HMAC type " & eHash
+        ErrRaise vbObjectError, FUNC_NAME, "Unsupported HMAC type " & eHash
     End Select
 End Sub
 
@@ -4194,7 +4202,7 @@ Private Function pvTlsBulkDecrypt(ByVal eBulk As UcsTlsCryptoAlgorithmsEnum, baR
             GoTo QH
         End If
     Case Else
-        Err.Raise vbObjectError, FUNC_NAME, "Unsupported bulk type " & eBulk
+        ErrRaise vbObjectError, FUNC_NAME, "Unsupported bulk type " & eBulk
     End Select
     '--- success
     pvTlsBulkDecrypt = True
@@ -4207,18 +4215,18 @@ Private Sub pvTlsBulkEncrypt(ByVal eBulk As UcsTlsCryptoAlgorithmsEnum, baLocalI
     Select Case eBulk
     Case ucsTlsAlgoBulkChacha20Poly1305
         If Not pvCryptoBulkChacha20Poly1305Encrypt(baLocalIV, baLocalKey, baAad, lAadPos, lAadSize, baBuffer, lPos, lSize) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoBulkChacha20Poly1305Encrypt")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoBulkChacha20Poly1305Encrypt")
         End If
     Case ucsTlsAlgoBulkAesGcm128, ucsTlsAlgoBulkAesGcm256
         If Not pvCryptoBulkAesGcmEncrypt(baLocalIV, baLocalKey, baAad, lAadPos, lAadSize, baBuffer, lPos, lSize) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoBulkAesGcmEncrypt")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoBulkAesGcmEncrypt")
         End If
     Case ucsTlsAlgoBulkAesCbc128, ucsTlsAlgoBulkAesCbc256
         If Not pvCryptoBulkAesCbcEncrypt(baLocalIV, baLocalKey, baBuffer, lPos, lSize) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoBulkAesCbcEncrypt")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_ENCRYPTION_FAILED, "%1", "CryptoBulkAesCbcEncrypt")
         End If
     Case Else
-        Err.Raise vbObjectError, FUNC_NAME, "Unsupported bulk type " & eBulk
+        ErrRaise vbObjectError, FUNC_NAME, "Unsupported bulk type " & eBulk
     End Select
 End Sub
 
@@ -4228,20 +4236,20 @@ Private Sub pvTlsGetSharedSecret(baRetVal() As Byte, ByVal eKeyX As UcsTlsCrypto
     Select Case eKeyX
     Case ucsTlsAlgoExchX25519
         If Not pvCryptoEcdhCurve25519SharedSecret(baRetVal, baPriv, baPub) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEcdhCurve25519SharedSecret")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEcdhCurve25519SharedSecret")
         End If
     Case ucsTlsAlgoExchSecp256r1
         If Not pvCryptoEcdhSecp256r1SharedSecret(baRetVal, baPriv, baPub) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEcdhSecp256r1SharedSecret")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEcdhSecp256r1SharedSecret")
         End If
     Case ucsTlsAlgoExchSecp384r1
         If Not pvCryptoEcdhSecp384r1SharedSecret(baRetVal, baPriv, baPub) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEcdhSecp384r1SharedSecret")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEcdhSecp384r1SharedSecret")
         End If
     Case ucsTlsAlgoExchCertificate
         baRetVal = baPriv
     Case Else
-        Err.Raise vbObjectError, FUNC_NAME, "Unsupported exchange " & eKeyX
+        ErrRaise vbObjectError, FUNC_NAME, "Unsupported exchange " & eKeyX
     End Select
 End Sub
 
@@ -4364,57 +4372,57 @@ Private Sub pvTlsSignatureSign(baRetVal() As Byte, cPrivKey As Collection, ByVal
         DebugLog MODULE_NAME, FUNC_NAME, "Signing with " & pvTlsGetSignatureName(lSignatureScheme) & " signature"
     #End If
     If Not SearchCollection(cPrivKey, 1, RetVal:=baPrivKey) Then
-        Err.Raise vbObjectError, FUNC_NAME, ERR_NO_PRIVATE_KEY
+        ErrRaise vbObjectError, FUNC_NAME, ERR_NO_PRIVATE_KEY
     End If
     If Not pvAsn1DecodePrivateKey(baPrivKey, uKeyInfo) Then
-        Err.Raise vbObjectError, FUNC_NAME, ERR_UNSUPPORTED_PRIVATE_KEY
+        ErrRaise vbObjectError, FUNC_NAME, ERR_UNSUPPORTED_PRIVATE_KEY
     End If
     lHashSize = pvTlsSignatureHashSize(lSignatureScheme)
     Select Case lSignatureScheme
     Case TLS_SIGNATURE_RSA_PKCS1_SHA1, TLS_SIGNATURE_RSA_PKCS1_SHA224, TLS_SIGNATURE_RSA_PKCS1_SHA256, TLS_SIGNATURE_RSA_PKCS1_SHA384, TLS_SIGNATURE_RSA_PKCS1_SHA512
         Debug.Assert uKeyInfo.AlgoObjId = szOID_RSA_RSA
         If Not pvCryptoEmsaPkcs1Encode(baEnc, baVerifyData, uKeyInfo.BitLen, lHashSize) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEmsaPkcs1Encode")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEmsaPkcs1Encode")
         End If
         If Not pvCryptoRsaCrtModExp(baEnc, uKeyInfo.PrivExp, uKeyInfo.Modulus, uKeyInfo.Prime1, uKeyInfo.Prime2, uKeyInfo.Coefficient, baRetVal) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoRsaCrtModExp")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoRsaCrtModExp")
         End If
     Case TLS_SIGNATURE_RSA_PSS_RSAE_SHA256, TLS_SIGNATURE_RSA_PSS_RSAE_SHA384, TLS_SIGNATURE_RSA_PSS_RSAE_SHA512, _
             TLS_SIGNATURE_RSA_PSS_PSS_SHA256, TLS_SIGNATURE_RSA_PSS_PSS_SHA384, TLS_SIGNATURE_RSA_PSS_PSS_SHA512
         Debug.Assert uKeyInfo.AlgoObjId = szOID_RSA_RSA Or uKeyInfo.AlgoObjId = szOID_RSA_SSA_PSS
         If Not pvCryptoEmsaPssEncode(baEnc, baVerifyData, uKeyInfo.BitLen, lHashSize, lHashSize) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEmsaPssEncode")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEmsaPssEncode")
         End If
         If Not pvCryptoRsaCrtModExp(baEnc, uKeyInfo.PrivExp, uKeyInfo.Modulus, uKeyInfo.Prime1, uKeyInfo.Prime2, uKeyInfo.Coefficient, baRetVal) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoRsaCrtModExp")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoRsaCrtModExp")
         End If
     Case TLS_SIGNATURE_ECDSA_SECP256R1_SHA256
         Debug.Assert uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P256
         If Not pvCryptoHashSha256(baVerifyHash, baVerifyData) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha256")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha256")
         End If
         If Not pvCryptoEcdsaSecp256r1Sign(baPrivKey, uKeyInfo.KeyBlob, baVerifyHash) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEcdsaSecp256r1Sign")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEcdsaSecp256r1Sign")
         End If
         If Not pvAsn1EncodeEcdsaSignature(baRetVal, baPrivKey, LNG_SECP256R1_KEYSZ) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "Asn1EncodeEcdsaSignature")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "Asn1EncodeEcdsaSignature")
         End If
     Case TLS_SIGNATURE_ECDSA_SECP384R1_SHA384
         Debug.Assert uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P384
         If Not pvCryptoHashSha384(baVerifyHash, baVerifyData) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha384")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha384")
         End If
         If Not pvCryptoEcdsaSecp384r1Sign(baPrivKey, uKeyInfo.KeyBlob, baVerifyHash) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEcdsaSecp384r1Sign")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEcdsaSecp384r1Sign")
         End If
         If Not pvAsn1EncodeEcdsaSignature(baRetVal, baPrivKey, LNG_SECP384R1_KEYSZ) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "Asn1EncodeEcdsaSignature")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "Asn1EncodeEcdsaSignature")
         End If
     Case Else
-        Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_SIGNATURE_SCHEME, "%1", pvTlsGetSignatureName(lSignatureScheme))
+        ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_UNSUPPORTED_SIGNATURE_SCHEME, "%1", pvTlsGetSignatureName(lSignatureScheme))
     End Select
     If pvArraySize(baRetVal) = 0 Then
-        Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_SIGNATURE_FAILED, "%1", pvTlsGetSignatureName(lSignatureScheme))
+        ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_SIGNATURE_FAILED, "%1", pvTlsGetSignatureName(lSignatureScheme))
     End If
 End Sub
 
@@ -4930,26 +4938,26 @@ Private Sub pvArrayHash(ByVal lHashSize As Long, baInput() As Byte, baRetVal() A
     Select Case lHashSize
     Case LNG_SHA1_HASHSZ
         If Not pvCryptoHashSha1(baRetVal, baInput) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha1")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha1")
         End If
     Case LNG_SHA224_HASHSZ
         If Not pvCryptoHashSha224(baRetVal, baInput) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha224")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha224")
         End If
     Case LNG_SHA256_HASHSZ
         If Not pvCryptoHashSha256(baRetVal, baInput) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha256")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha256")
         End If
     Case LNG_SHA384_HASHSZ
         If Not pvCryptoHashSha384(baRetVal, baInput) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha384")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha384")
         End If
     Case LNG_SHA512_HASHSZ
         If Not pvCryptoHashSha512(baRetVal, baInput) Then
-            Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha512")
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha512")
         End If
     Case Else
-        Err.Raise vbObjectError, FUNC_NAME, Replace(ERR_INVALID_HASH_SIZE, "%1", lHashSize)
+        ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_INVALID_HASH_SIZE, "%1", lHashSize)
     End Select
 End Sub
 
@@ -5414,7 +5422,7 @@ QH:
         Call LocalFree(lPkiPtr)
     End If
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 
@@ -5484,7 +5492,7 @@ QH:
         Call CertFreeCertificateContext(pCertContext)
     End If
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 
@@ -5660,7 +5668,7 @@ Private Function pvCryptoInit() As Boolean
     pvCryptoInit = True
 QH:
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 

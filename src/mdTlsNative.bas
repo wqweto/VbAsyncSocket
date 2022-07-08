@@ -92,7 +92,6 @@ Private Const PROV_RSA_FULL                             As Long = 1
 Private Const MS_ENH_RSA_AES_PROV                       As String = "Microsoft Enhanced RSA and AES Cryptographic Provider"
 Private Const PROV_RSA_AES                              As Long = 24
 Private Const CRYPT_NEWKEYSET                           As Long = &H8
-Private Const CRYPT_MACHINE_KEYSET                      As Long = &H20
 Private Const AT_KEYEXCHANGE                            As Long = 1
 '--- for CertGetCertificateContextProperty
 Private Const CERT_KEY_PROV_INFO_PROP_ID                As Long = 2
@@ -434,6 +433,14 @@ Private Type UcsKeyInfo
 End Type
 
 Public g_oRequestSocket             As Object
+
+'=========================================================================
+' Error handling
+'=========================================================================
+
+Private Sub ErrRaise(ByVal Number As Long, Optional Source As String, Optional Description As String)
+    Err.Raise Number, Source, Description
+End Sub
 
 '=========================================================================
 ' Properties
@@ -1326,12 +1333,12 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
         Case szOID_RSA_RSA
             sProvName = MS_ENH_RSA_AES_PROV
             lProvType = PROV_RSA_AES
-            If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, CRYPT_MACHINE_KEYSET) = 0 Then
-                If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, CRYPT_NEWKEYSET Or CRYPT_MACHINE_KEYSET) = 0 Then
+            If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, uProvInfo.dwFlags) = 0 Then
+                If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, uProvInfo.dwFlags Or CRYPT_NEWKEYSET) = 0 Then
                     sProvName = MS_DEF_PROV
                     lProvType = PROV_RSA_FULL
-                    If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, CRYPT_MACHINE_KEYSET) = 0 Then
-                        If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, CRYPT_NEWKEYSET Or CRYPT_MACHINE_KEYSET) = 0 Then
+                    If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, uProvInfo.dwFlags) = 0 Then
+                        If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, uProvInfo.dwFlags Or CRYPT_NEWKEYSET) = 0 Then
                             hResult = Err.LastDllError
                             sApiSource = "CryptAcquireContext"
                             GoTo QH
@@ -1347,7 +1354,6 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
             uProvInfo.pwszContainerName = StrPtr(sKeyName)
             uProvInfo.pwszProvName = StrPtr(sProvName)
             uProvInfo.dwProvType = lProvType
-            uProvInfo.dwFlags = CRYPT_MACHINE_KEYSET
             uProvInfo.dwKeySpec = AT_KEYEXCHANGE
         Case szOID_ECC_PUBLIC_KEY
             Select Case uPrivKeyInfo.AlgoObjId
@@ -1358,7 +1364,7 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
             Case szOID_ECC_CURVE_P521
                 uEccBlob.dwMagic = BCRYPT_ECDSA_PRIVATE_P521_MAGIC
             Case Else
-                Err.Raise vbObjectError, , Replace(ERR_UNKNOWN_ECC_PRIVKEY, "%1", uPrivKeyInfo.AlgoObjId)
+                ErrRaise vbObjectError, , Replace(ERR_UNKNOWN_ECC_PRIVKEY, "%1", uPrivKeyInfo.AlgoObjId)
             End Select
             lBlobSize = uPublicKeyInfo.PublicKey.cbData - 1
             uEccBlob.cbKey = UBound(uPrivKeyInfo.KeyBlob) + 1
@@ -1382,7 +1388,7 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
             uProvInfo.pwszContainerName = StrPtr(sKeyName)
             uProvInfo.pwszProvName = StrPtr(sProvName)
         Case Else
-            Err.Raise vbObjectError, , Replace(ERR_UNKNOWN_PUBKEY, "%1", pvToString(uPublicKeyInfo.Algorithm.pszObjId))
+            ErrRaise vbObjectError, , Replace(ERR_UNKNOWN_PUBKEY, "%1", pvToString(uPublicKeyInfo.Algorithm.pszObjId))
         End Select
         If CertSetCertificateContextProperty(pCertContext, CERT_KEY_PROV_INFO_PROP_ID, 0, uProvInfo) = 0 Then
             hResult = Err.LastDllError
@@ -1414,7 +1420,7 @@ QH:
         Call CertCloseStore(hCertStore, 0)
     End If
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 
@@ -1455,7 +1461,7 @@ Private Function pvTlsExportFromCertStore(ByVal hCertStore As Long, cCerts As Co
     pvTlsExportFromCertStore = True
 QH:
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 
@@ -1518,7 +1524,7 @@ QH:
         Call LocalFree(lPkiPtr)
     End If
     If LenB(sApiSource) <> 0 Then
-        Err.Raise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
 End Function
 

@@ -8,6 +8,7 @@ Module=mdTlsThunks; ..\..\src\mdTlsThunks.bas
 IconForm="Form1"
 Startup="Form1"
 HelpFile=""
+ExeName32="Project1.exe"
 Command32=""
 Name="WinsockTest"
 HelpContextID="0"
