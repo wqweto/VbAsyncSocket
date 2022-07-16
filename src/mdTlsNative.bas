@@ -1,7 +1,7 @@
 Attribute VB_Name = "mdTlsNative"
 '=========================================================================
 '
-' VbAsyncSocket Project (c) 2018-2020 by wqweto@gmail.com
+' VbAsyncSocket Project (c) 2018-2022 by wqweto@gmail.com
 '
 ' Simple and thin WinSock API wrappers for VB6
 '
@@ -87,17 +87,18 @@ Private Const CERT_STORE_CREATE_NEW_FLAG                As Long = &H2000
 '--- for CertAddEncodedCertificateToStore
 Private Const CERT_STORE_ADD_USE_EXISTING               As Long = 2
 '--- for CryptAcquireContext
-Private Const MS_DEF_PROV                               As String = "Microsoft Base Cryptographic Provider v1.0"
 Private Const PROV_RSA_FULL                             As Long = 1
-Private Const MS_ENH_RSA_AES_PROV                       As String = "Microsoft Enhanced RSA and AES Cryptographic Provider"
-Private Const PROV_RSA_AES                              As Long = 24
-Private Const CRYPT_NEWKEYSET                           As Long = &H8
+Private Const CRYPT_VERIFYCONTEXT                       As Long = &HF0000000
 Private Const AT_KEYEXCHANGE                            As Long = 1
 '--- for CertGetCertificateContextProperty
+Private Const CERT_KEY_PROV_HANDLE_PROP_ID              As Long = 1
 Private Const CERT_KEY_PROV_INFO_PROP_ID                As Long = 2
 Private Const CERT_OCSP_RESPONSE_PROP_ID                As Long = 70
+Private Const CERT_NCRYPT_KEY_HANDLE_PROP_ID            As Long = 78
 '--- for CryptImportKey
 Private Const CRYPT_EXPORTABLE                          As Long = 1
+'--- for PFXExportCertStore
+Private Const EXPORT_PRIVATE_KEYS                       As Long = 4
 '--- for ALPN
 Private Const SecApplicationProtocolNegotiationExt_ALPN As Long = 2
 Private Const SecApplicationProtocolNegotiationStatus_Success As Long = 1
@@ -112,8 +113,13 @@ Private Const BCRYPT_ECDSA_PRIVATE_P256_MAGIC           As Long = &H32534345
 Private Const BCRYPT_ECDSA_PRIVATE_P384_MAGIC           As Long = &H34534345
 Private Const BCRYPT_ECDSA_PRIVATE_P521_MAGIC           As Long = &H36534345
 Private Const MS_KEY_STORAGE_PROVIDER                   As String = "Microsoft Software Key Storage Provider"
-Private Const NCRYPTBUFFER_PKCS_KEY_NAME                As Long = 45
 Private Const NCRYPT_OVERWRITE_KEY_FLAG                 As Long = &H80
+Private Const NCRYPT_DO_NOT_FINALIZE_FLAG               As Long = &H400
+Private Const NCRYPT_PERSIST_FLAG                       As Long = &H80000000
+'--- export policy flags
+Private Const NCRYPT_ALLOW_EXPORT_FLAG                  As Long = &H1
+Private Const NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG        As Long = &H2
+
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
@@ -149,6 +155,8 @@ Private Declare Function CertDuplicateCertificateContext Lib "crypt32" (ByVal pC
 Private Declare Function CertFreeCertificateContext Lib "crypt32" (ByVal pCertContext As Long) As Long
 Private Declare Function CertEnumCertificatesInStore Lib "crypt32" (ByVal hCertStore As Long, ByVal pPrevCertContext As Long) As Long
 Private Declare Function CertGetCertificateContextProperty Lib "crypt32" (ByVal pCertContext As Long, ByVal dwPropId As Long, pvData As Any, pcbData As Long) As Long
+Private Declare Function PFXExportCertStore Lib "crypt32" (ByVal hCertStore As Long, pPFX As Any, ByVal szPassword As Long, ByVal dwFlags As Long) As Long
+Private Declare Function PFXImportCertStore Lib "crypt32" (pPFX As Any, ByVal szPassword As Long, ByVal dwFlags As Long) As Long
 '--- advapi32
 Private Declare Function CryptAcquireContext Lib "advapi32" Alias "CryptAcquireContextW" (phProv As Long, ByVal pszContainer As Long, ByVal pszProvider As Long, ByVal dwProvType As Long, ByVal dwFlags As Long) As Long
 Private Declare Function CryptReleaseContext Lib "advapi32" (ByVal hProv As Long, ByVal dwFlags As Long) As Long
@@ -157,6 +165,8 @@ Private Declare Function CryptDestroyKey Lib "advapi32" (ByVal hKey As Long) As 
 '--- ncrypt
 Private Declare Function NCryptOpenStorageProvider Lib "ncrypt" (phProvider As Long, ByVal pszProviderName As Long, ByVal dwFlags As Long) As Long
 Private Declare Function NCryptImportKey Lib "ncrypt" (ByVal hProvider As Long, ByVal hImportKey As Long, ByVal pszBlobType As Long, pParameterList As Any, phKey As Long, pbData As Any, ByVal cbData As Long, ByVal dwFlags As Long) As Long
+Private Declare Function NCryptSetProperty Lib "ncrypt" (ByVal hObject As Long, ByVal pszProperty As Long, pbInput As Any, ByVal cbInput As Long, ByVal dwFlags As Long) As Long
+Private Declare Function NCryptFinalizeKey Lib "ncrypt" (ByVal hKey As Long, ByVal dwFlags As Long) As Long
 Private Declare Function NCryptFreeObject Lib "ncrypt" (ByVal hObject As Long) As Long
 
 Private Type SCHANNEL_CRED
@@ -438,7 +448,7 @@ Public g_oRequestSocket             As Object
 ' Error handling
 '=========================================================================
 
-Private Sub ErrRaise(ByVal Number As Long, Optional Source As String, Optional Description As String)
+Private Sub ErrRaise(ByVal Number As Long, Optional Source As Variant, Optional Description As Variant)
     Err.Raise Number, Source, Description
 End Sub
 
@@ -1282,7 +1292,7 @@ End Function
 
 Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collection, hMemStore As Long) As Boolean
     Const FUNC_NAME     As String = "pvTlsImportToCertStore"
-    Const DEF_KEY_NAME  As String = "VbAsyncSocketKey"
+    Const STR_PASSWORD  As String = "0000"
     Dim hCertStore      As Long
     Dim lIdx            As Long
     Dim baCert()        As Byte
@@ -1296,13 +1306,10 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
     Dim uProvInfo       As CRYPT_KEY_PROV_INFO
     Dim uEccBlob        As BCRYPT_ECCKEY_BLOB
     Dim lBlobSize       As Long
-    Dim sKeyName        As String
-    Dim sProvName       As String
-    Dim lProvType       As Long
     Dim hNProv          As Long
     Dim hNKey           As Long
-    Dim uDesc           As ApiSecBufferDesc
-    Dim uBuffers()      As ApiSecBuffer
+    Dim uPfxBlob        As CRYPT_DATA_BLOB
+    Dim baBuffer()      As Byte
     Dim hResult         As Long
     Dim sApiSource      As String
     
@@ -1313,7 +1320,7 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
         sApiSource = "CertOpenStore"
         GoTo QH
     End If
-    For lIdx = pvCollectionCount(cCerts) To 1 Step -1
+    For lIdx = 1 To pvCollectionCount(cCerts)
         baCert = cCerts.Item(lIdx)
         If CertAddEncodedCertificateToStore(hCertStore, X509_ASN_ENCODING, baCert(0), UBound(baCert) + 1, CERT_STORE_ADD_USE_EXISTING, IIf(lIdx = 1, VarPtr(pCertContext), 0)) = 0 Then
             hResult = Err.LastDllError
@@ -1322,7 +1329,6 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
         End If
     Next
     If pCertContext <> 0 And SearchCollection(cPrivKey, 1, RetVal:=baPrivKey) Then
-        sKeyName = DEF_KEY_NAME
         If Not pvAsn1DecodePrivateKey(baPrivKey, uPrivKeyInfo) Then
             GoTo QH
         End If
@@ -1331,30 +1337,31 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
         Call CopyMemory(uPublicKeyInfo, ByVal lPtr, Len(uPublicKeyInfo))
         Select Case pvToString(uPublicKeyInfo.Algorithm.pszObjId)
         Case szOID_RSA_RSA
-            sProvName = MS_ENH_RSA_AES_PROV
-            lProvType = PROV_RSA_AES
-            If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, uProvInfo.dwFlags) = 0 Then
-                If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, uProvInfo.dwFlags Or CRYPT_NEWKEYSET) = 0 Then
-                    sProvName = MS_DEF_PROV
-                    lProvType = PROV_RSA_FULL
-                    If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, uProvInfo.dwFlags) = 0 Then
-                        If CryptAcquireContext(hProv, StrPtr(sKeyName), StrPtr(sProvName), lProvType, uProvInfo.dwFlags Or CRYPT_NEWKEYSET) = 0 Then
-                            hResult = Err.LastDllError
-                            sApiSource = "CryptAcquireContext"
-                            GoTo QH
-                        End If
-                    End If
-                End If
+            With uProvInfo
+                .dwProvType = PROV_RSA_FULL
+                .dwFlags = CRYPT_VERIFYCONTEXT
+                .dwKeySpec = AT_KEYEXCHANGE
+            End With
+            If CryptAcquireContext(hProv, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags) = 0 Then
+                hResult = Err.LastDllError
+                sApiSource = "CryptAcquireContext"
+                GoTo QH
             End If
             If CryptImportKey(hProv, uPrivKeyInfo.KeyBlob(0), UBound(uPrivKeyInfo.KeyBlob) + 1, 0, CRYPT_EXPORTABLE, hKey) = 0 Then
                 hResult = Err.LastDllError
                 sApiSource = "CryptImportKey"
                 GoTo QH
             End If
-            uProvInfo.pwszContainerName = StrPtr(sKeyName)
-            uProvInfo.pwszProvName = StrPtr(sProvName)
-            uProvInfo.dwProvType = lProvType
-            uProvInfo.dwKeySpec = AT_KEYEXCHANGE
+            If CertSetCertificateContextProperty(pCertContext, CERT_KEY_PROV_INFO_PROP_ID, 0, uProvInfo) = 0 Then
+                hResult = Err.LastDllError
+                sApiSource = "CertSetCertificateContextProperty"
+                GoTo QH
+            End If
+            If CertSetCertificateContextProperty(pCertContext, CERT_KEY_PROV_HANDLE_PROP_ID, 0, ByVal hProv) = 0 Then
+                hResult = Err.LastDllError
+                sApiSource = "CertSetCertificateContextProperty"
+                GoTo QH
+            End If
         Case szOID_ECC_PUBLIC_KEY
             Select Case uPrivKeyInfo.AlgoObjId
             Case szOID_ECC_CURVE_P256
@@ -1372,32 +1379,59 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
             Call CopyMemory(uEccBlob.Buffer(lBlobSize), uPrivKeyInfo.KeyBlob(0), uEccBlob.cbKey)
             lBlobSize = 8 + lBlobSize + uEccBlob.cbKey
             '--- import key
-            sProvName = MS_KEY_STORAGE_PROVIDER
-            hResult = NCryptOpenStorageProvider(hNProv, StrPtr(sProvName), 0)
+            uProvInfo.pwszProvName = StrPtr(MS_KEY_STORAGE_PROVIDER)
+            hResult = NCryptOpenStorageProvider(hNProv, uProvInfo.pwszProvName, 0)
             If hResult < 0 Then
                 sApiSource = "NCryptOpenStorageProvider"
                 GoTo QH
             End If
-            pvInitSecDesc uDesc, 1, uBuffers
-            pvInitSecBuffer uBuffers(0), NCRYPTBUFFER_PKCS_KEY_NAME, StrPtr(sKeyName), LenB(sKeyName) + 2
-            hResult = NCryptImportKey(hNProv, 0, StrPtr("ECCPRIVATEBLOB"), uDesc, hNKey, uEccBlob, lBlobSize, NCRYPT_OVERWRITE_KEY_FLAG)
+            hResult = NCryptImportKey(hNProv, 0, StrPtr("ECCPRIVATEBLOB"), ByVal 0, hNKey, uEccBlob, lBlobSize, NCRYPT_OVERWRITE_KEY_FLAG Or NCRYPT_DO_NOT_FINALIZE_FLAG)
             If hResult < 0 Then
                 sApiSource = "NCryptImportKey"
                 GoTo QH
             End If
-            uProvInfo.pwszContainerName = StrPtr(sKeyName)
-            uProvInfo.pwszProvName = StrPtr(sProvName)
+            hResult = NCryptSetProperty(hNKey, StrPtr("Export Policy"), NCRYPT_ALLOW_EXPORT_FLAG Or NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG, 4, NCRYPT_PERSIST_FLAG)
+            If hResult < 0 Then
+                sApiSource = "NCryptSetProperty(Export Policy)"
+                GoTo QH
+            End If
+            hResult = NCryptFinalizeKey(hNKey, 0)
+            If hResult < 0 Then
+                sApiSource = "NCryptFinalizeKey"
+                GoTo QH
+            End If
+            If CertSetCertificateContextProperty(pCertContext, CERT_KEY_PROV_INFO_PROP_ID, 0, uProvInfo) = 0 Then
+                hResult = Err.LastDllError
+                sApiSource = "CertSetCertificateContextProperty"
+                GoTo QH
+            End If
+            If CertSetCertificateContextProperty(pCertContext, CERT_NCRYPT_KEY_HANDLE_PROP_ID, 0, ByVal hNKey) = 0 Then
+                hResult = Err.LastDllError
+                sApiSource = "CertSetCertificateContextProperty"
+                GoTo QH
+            End If
         Case Else
             ErrRaise vbObjectError, , Replace(ERR_UNKNOWN_PUBKEY, "%1", pvToString(uPublicKeyInfo.Algorithm.pszObjId))
         End Select
-        If CertSetCertificateContextProperty(pCertContext, CERT_KEY_PROV_INFO_PROP_ID, 0, uProvInfo) = 0 Then
+        If PFXExportCertStore(hCertStore, uPfxBlob, StrPtr(STR_PASSWORD), EXPORT_PRIVATE_KEYS) = 0 Then
             hResult = Err.LastDllError
-            sApiSource = "CertSetCertificateContextProperty"
+            sApiSource = "PFXExportCertStore"
+            GoTo QH
+        End If
+        ReDim baBuffer(0 To uPfxBlob.cbData) As Byte
+        uPfxBlob.pbData = VarPtr(baBuffer(0))
+        If PFXExportCertStore(hCertStore, uPfxBlob, StrPtr(STR_PASSWORD), EXPORT_PRIVATE_KEYS) = 0 Then
+            hResult = Err.LastDllError
+            sApiSource = "PFXExportCertStore#2"
+            GoTo QH
+        End If
+        hMemStore = PFXImportCertStore(uPfxBlob, StrPtr(STR_PASSWORD), CRYPT_EXPORTABLE)
+        If hMemStore = 0 Then
+            hResult = Err.LastDllError
+            sApiSource = "PFXImportCertStore"
             GoTo QH
         End If
     End If
-    hMemStore = hCertStore
-    hCertStore = 0
     '--- success
     pvTlsImportToCertStore = True
 QH:

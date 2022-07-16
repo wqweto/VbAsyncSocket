@@ -13,7 +13,7 @@ Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
 '
-' VbAsyncSocket Project (c) 2018-2021 by wqweto@gmail.com
+' VbAsyncSocket Project (c) 2018-2022 by wqweto@gmail.com
 '
 ' Simple and thin WinSock API wrappers for VB6
 '
@@ -61,8 +61,7 @@ End Enum
 
 '--- for CryptAcquireContext
 Private Const PROV_RSA_FULL                             As Long = 1
-Private Const CRYPT_NEWKEYSET                           As Long = &H8
-Private Const CRYPT_DELETEKEYSET                        As Long = &H10
+Private Const CRYPT_VERIFYCONTEXT                       As Long = &HF0000000
 '--- for CryptDecodeObjectEx
 Private Const X509_ASN_ENCODING                         As Long = 1
 Private Const PKCS_7_ASN_ENCODING                       As Long = &H10000
@@ -78,6 +77,7 @@ Private Const AT_SIGNATURE                              As Long = 2
 Private Const RSA1024BIT_KEY                            As Long = &H4000000
 Private Const NTE_BAD_ALGID                             As Long = &H80090008
 '--- for CertGetCertificateContextProperty
+Private Const CERT_KEY_PROV_HANDLE_PROP_ID              As Long = 1
 Private Const CERT_KEY_PROV_INFO_PROP_ID                As Long = 2
 '--- for PFXImportCertStore
 Private Const CRYPT_EXPORTABLE                          As Long = &H1
@@ -431,11 +431,8 @@ Private Sub PrintError(sFunction As String)
     #End If
 End Sub
 
-Private Sub ErrRaise(ByVal Number As Long, Optional Source As String, Optional Description As String)
-    If LenB(Description) = 0 And Not m_oSocket Is Nothing Then
-        Description = m_oSocket.GetErrorDescription(Number)
-    End If
-    Err.Raise Number, Source, Description
+Private Sub ErrRaise(ByVal Number As Long, Optional Source As Variant, Optional Description As Variant)
+    Err.Raise Number, Source, CStr(Description) & " &H" & Hex$(Number) & "[" & CStr(Source) & "]"
 End Sub
 
 '=========================================================================
@@ -2115,25 +2112,28 @@ End Function
 
 Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey As Collection, Optional ByVal Subject As String) As Boolean
     Const FUNC_NAME     As String = "pvPkiGenerSelfSignedCertificate"
-    Const STR_CONTAINER As String = "VbAsyncSocket"
     Dim hProv           As Long
     Dim hKey            As Long
     Dim sName           As String
     Dim baName()        As Byte
     Dim lSize           As Long
     Dim uName           As CRYPT_DATA_BLOB
+    Dim uProvInfo       As CRYPT_KEY_PROV_INFO
     Dim pCertContext    As Long
     Dim hResult         As Long
     Dim sApiSource      As String
     
-    If CryptAcquireContext(hProv, StrPtr(STR_CONTAINER), 0, PROV_RSA_FULL, 0) = 0 Then
-        If CryptAcquireContext(hProv, StrPtr(STR_CONTAINER), 0, PROV_RSA_FULL, CRYPT_NEWKEYSET) = 0 Then
-            hResult = Err.LastDllError
-            sApiSource = "CryptAcquireContext"
-            GoTo QH
-        End If
+    With uProvInfo
+        .dwProvType = PROV_RSA_FULL
+        .dwFlags = CRYPT_VERIFYCONTEXT
+        .dwKeySpec = AT_SIGNATURE
+    End With
+    If CryptAcquireContext(hProv, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags) = 0 Then
+        hResult = Err.LastDllError
+        sApiSource = "CryptAcquireContext"
+        GoTo QH
     End If
-    If CryptGenKey(hProv, AT_SIGNATURE, RSA1024BIT_KEY Or CRYPT_EXPORTABLE, hKey) = 0 Then
+    If CryptGenKey(hProv, uProvInfo.dwKeySpec, RSA1024BIT_KEY Or CRYPT_EXPORTABLE, hKey) = 0 Then
         GoTo QH
     End If
     If Left$(Subject, 3) <> "CN=" Then
@@ -2155,10 +2155,16 @@ Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey 
         .cbData = lSize
         .pbData = VarPtr(baName(0))
     End With
-    pCertContext = CertCreateSelfSignCertificate(hProv, uName, 0, ByVal 0, 0, ByVal 0, ByVal 0, 0)
+    pCertContext = CertCreateSelfSignCertificate(hProv, uName, 0, uProvInfo, 0, ByVal 0, ByVal 0, 0)
     If pCertContext = 0 Then
         hResult = Err.LastDllError
         sApiSource = "CertCreateSelfSignCertificate"
+        GoTo QH
+    End If
+    '--- note: store temp key container to be able to call CryptGetUserKey in pvPkiExportPrivateKey
+    If CertSetCertificateContextProperty(pCertContext, CERT_KEY_PROV_HANDLE_PROP_ID, 0, ByVal hProv) = 0 Then
+        hResult = Err.LastDllError
+        sApiSource = "CertSetCertificateContextProperty(CERT_KEY_PROV_HANDLE_PROP_ID)"
         GoTo QH
     End If
     If pvPkiAppendCertContext(pCertContext, cCerts, cPrivKey) Then
@@ -2171,7 +2177,6 @@ QH:
     End If
     If hProv <> 0 Then
         Call CryptReleaseContext(hProv, 0)
-        Call CryptAcquireContext(0, StrPtr(STR_CONTAINER), 0, PROV_RSA_FULL, CRYPT_DELETEKEYSET)
     End If
     If LenB(sApiSource) <> 0 Then
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
@@ -2509,7 +2514,8 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, baPrivKey() A
     Dim hNewKey         As Long
     Dim lSize           As Long
     Dim baBuffer()      As Byte
-    Dim uKeyInfo        As CRYPT_KEY_PROV_INFO
+    Dim uProvInfo       As CRYPT_KEY_PROV_INFO
+    Dim hProvGetUserKey As Long
     Dim hProv           As Long
     Dim hKey            As Long
     Dim lMagic          As Long
@@ -2577,13 +2583,16 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, baPrivKey() A
             sApiSource = "CertGetCertificateContextProperty(CERT_KEY_PROV_INFO_PROP_ID)#2"
             GoTo QH
         End If
-        Call CopyMemory(uKeyInfo, baBuffer(0), Len(uKeyInfo))
-        If CryptAcquireContext(hProv, uKeyInfo.pwszContainerName, uKeyInfo.pwszProvName, uKeyInfo.dwProvType, uKeyInfo.dwFlags) = 0 Then
-            hResult = Err.LastDllError
-            sApiSource = "CryptAcquireContext"
-            GoTo QH
+        Call CopyMemory(uProvInfo, baBuffer(0), Len(uProvInfo))
+        If CertGetCertificateContextProperty(pCertContext, CERT_KEY_PROV_HANDLE_PROP_ID, hProvGetUserKey, 4) = 0 Then
+            If CryptAcquireContext(hProv, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags) = 0 Then
+                hResult = Err.LastDllError
+                sApiSource = "CryptAcquireContext"
+                GoTo QH
+            End If
+            hProvGetUserKey = hProv
         End If
-        If CryptGetUserKey(hProv, uKeyInfo.dwKeySpec, hKey) = 0 Then
+        If CryptGetUserKey(hProvGetUserKey, uProvInfo.dwKeySpec, hKey) = 0 Then
             hResult = Err.LastDllError
             sApiSource = "CryptGetUserKey"
             GoTo QH
