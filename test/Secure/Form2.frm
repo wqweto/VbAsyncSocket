@@ -144,7 +144,7 @@ Private Sub Form_Load()
     If txtResult.Font.Name = "Arial" Then
         txtResult.Font.Name = "Courier New"
     End If
-    For Each vElem In Split("www.howsmyssl.com/a/check|cert-test.sandbox.google.com|tls13.1d.pw|localhost:44330/renegcert|websocket.org|www.mikestoolbox.org|swifttls.org|tls13.pinterjann.is|rsa8192.badssl.com|rsa4096.badssl.com|rsa2048.badssl.com|ecc384.badssl.com|ecc256.badssl.com|dir.bg|host.bg|bgdev.org|cnn.com|gmail.com|google.com|saas.bg|saas.bg:465|www.cloudflare.com|devblogs.microsoft.com|www.brentozar.com|ayende.com/blog|www.nerds2nerds.com|robert.ocallahan.org|distrowatch.com|server.cryptomix.com/secure/|www.integralblue.com/testhandshake/|tlshello.agwa.name", "|")
+    For Each vElem In Split("www.howsmyssl.com/a/check|cert-test.sandbox.google.com|tls13.1d.pw|localhost:44330/renegcert|websocket.org|www.mikestoolbox.org|swifttls.org|rsa8192.badssl.com|rsa4096.badssl.com|rsa2048.badssl.com|ecc384.badssl.com|ecc256.badssl.com|dir.bg|host.bg|bgdev.org|cnn.com|gmail.com|google.com|saas.bg|saas.bg:465|www.cloudflare.com|devblogs.microsoft.com|www.brentozar.com|ayende.com/blog|www.nerds2nerds.com|robert.ocallahan.org|distrowatch.com|server.cryptomix.com/secure/|www.integralblue.com/testhandshake/|tlshello.agwa.name", "|")
         cobUrl.AddItem vElem
     Next
     sAddr = GetSetting(App.Title, "Form1", "Url", cobUrl.Text)
@@ -171,7 +171,7 @@ Private Sub Form_Load()
 QH:
     Exit Sub
 EH:
-    MsgBox Err.Description, vbCritical
+    MsgBox Err.Description & " &H" & Hex$(Err.Number) & " [" & Err.Source & "]", vbCritical
     Resume QH
 End Sub
 
@@ -220,7 +220,7 @@ QH:
     Exit Sub
 EH:
     Screen.MousePointer = vbDefault
-    MsgBox Err.Description & " [" & Err.Source & "]", vbCritical
+    MsgBox Err.Description & " &H" & Hex$(Err.Number) & " [" & Err.Source & "]", vbCritical
     Set m_oSocket = Nothing
 End Sub
 
@@ -432,7 +432,7 @@ Private Sub m_oSocket_OnClientCertificate(CaDn As Object, Confirmed As Boolean)
         If SearchCollection(CaDn, 1, RetVal:=baDName) Then
             DebugLog MODULE_NAME, "m_oSocket_OnClientCertificate", "Certificate authority DN for client certificate:" & vbCrLf & DesignDumpArray(baDName)
         End If
-        Confirmed = m_oSocket.ImportPkcs12Certificates(App.Path & "\client1.full.pfx")
+        Confirmed = m_oSocket.ImportPkcs12Certificates(App.Path & "\client2.full.pfx")
     End If
 End Sub
 

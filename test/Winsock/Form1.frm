@@ -89,7 +89,10 @@ Private Sub Command4_Click()
 End Sub
 
 Private Sub ctxServer_Error(Index As Integer, ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
-    MsgBox Description & " &H" & Hex$(Number), vbCritical, "ctxServer_Error"
+    Const E_CONN_ABORTED As Long = &H80072745
+    If InStr(Description, "Certificate unknown") = 0 And Number <> E_CONN_ABORTED Then
+        MsgBox Description & " &H" & Hex$(Number), vbCritical, "ctxServer_Error"
+    End If
 End Sub
 
 Private Sub ctxWinsock_Connect()

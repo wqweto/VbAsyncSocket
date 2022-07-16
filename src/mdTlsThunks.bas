@@ -1,7 +1,7 @@
 Attribute VB_Name = "mdTlsThunks"
 '=========================================================================
 '
-' VbAsyncSocket Project (c) 2018-2021 by wqweto@gmail.com
+' VbAsyncSocket Project (c) 2018-2022 by wqweto@gmail.com
 '
 ' Simple and thin WinSock API wrappers for VB6
 '
@@ -585,7 +585,7 @@ End Type
 ' Error handling
 '=========================================================================
 
-Private Sub ErrRaise(ByVal Number As Long, Optional Source As String, Optional Description As String)
+Private Sub ErrRaise(ByVal Number As Long, Optional Source As Variant, Optional Description As Variant)
     Err.Raise Number, Source, Description
 End Sub
 

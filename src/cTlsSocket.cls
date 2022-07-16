@@ -432,7 +432,7 @@ Private Sub PrintError(sFunction As String)
 End Sub
 
 Private Sub ErrRaise(ByVal Number As Long, Optional Source As Variant, Optional Description As Variant)
-    Err.Raise Number, Source, CStr(Description) & " &H" & Hex$(Number) & "[" & CStr(Source) & "]"
+    Err.Raise Number, Source, Description
 End Sub
 
 '=========================================================================

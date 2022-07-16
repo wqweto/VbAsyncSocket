@@ -37,7 +37,7 @@ Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
 '
-' VbAsyncSocket Project (c) 2018-2020 by wqweto@gmail.com
+' VbAsyncSocket Project (c) 2018-2022 by wqweto@gmail.com
 '
 ' Simple and thin WinSock API wrappers for VB6
 '
@@ -170,7 +170,7 @@ Private Sub PrintError(sFunction As String)
     #End If
 End Sub
 
-Private Sub ErrRaise(ByVal Number As Long, Optional Source As String, Optional Description As String)
+Private Sub ErrRaise(ByVal Number As Long, Optional Source As Variant, Optional Description As Variant)
     Err.Raise Number, Source, Description
 End Sub
 

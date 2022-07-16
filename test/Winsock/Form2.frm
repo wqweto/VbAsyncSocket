@@ -88,11 +88,23 @@ Private Sub Command4_Click()
     Shell "cmd /c start https://localhost:8088/"
 End Sub
 
+Private Sub ctxServer_Error(Index As Integer, ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
+    Const E_CONN_ABORTED As Long = &H80072745
+    If InStr(Description, "Certificate unknown") = 0 And Number <> E_CONN_ABORTED Then
+        MsgBox Description & " &H" & Hex$(Number), vbCritical, "ctxServer_Error"
+    End If
+End Sub
+
 Private Sub ctxWinsock_Connect()
+    Dim lIdx            As Long
+    
     Debug.Print "Connected to " & ctxWinsock.RemoteHostIP, Timer
     ctxWinsock.SendData "GET / HTTP/1.0" & vbCrLf & _
         "Host: www.bgdev.org" & vbCrLf & _
         "Connection: close" & vbCrLf & vbCrLf
+    For lIdx = 1 To 5000
+        ctxWinsock.SendData String(1000, "a")
+    Next
 End Sub
 
 Private Sub ctxWinsock_DataArrival(ByVal bytesTotal As Long)
@@ -142,7 +154,6 @@ Private Sub ctxServer_Close(Index As Integer)
     ctxServer_CloseEvent Index
 End Sub
 
-
 Private Sub ctxWinsock_Error(ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
-    Debug.Print "Error: " & Description
+    MsgBox Description & " &H" & Hex$(Number), vbCritical, "ctxWinsock_Error"
 End Sub
