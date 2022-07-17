@@ -716,6 +716,10 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
             #End If
             If Not pvTlsParsePayload(uCtx, baInput, lSize, .LastError, .LastAlertCode) Then
                 pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, .LastError, .LastAlertCode
+                '--- treat as warnings
+                If .LastAlertCode = uscTlsAlertCertificateUnknown Or .LastAlertCode = uscTlsAlertBadCertificate Then
+                    TlsHandshake = True
+                End If
                 GoTo QH
             End If
         End If

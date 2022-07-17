@@ -62,7 +62,9 @@ Private Const SEC_I_CONTINUE_NEEDED                     As Long = &H90312
 Private Const SEC_I_CONTEXT_EXPIRED                     As Long = &H90317
 Private Const SEC_I_INCOMPLETE_CREDENTIALS              As Long = &H90320
 Private Const SEC_I_RENEGOTIATE                         As Long = &H90321
+Private Const SEC_E_INVALID_HANDLE                      As Long = &H80090301
 Private Const SEC_E_INCOMPLETE_MESSAGE                  As Long = &H80090318
+Private Const SEC_E_CERT_UNKNOWN                        As Long = &H80090327
 '--- for QueryContextAttributes
 Private Const SECPKG_ATTR_STREAM_SIZES                  As Long = 4
 Private Const SECPKG_ATTR_REMOTE_CERT_CONTEXT           As Long = &H53
@@ -598,6 +600,7 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
         If lSize > 0 Then
             .RecvPos = pvWriteBuffer(.RecvBuffer, .RecvPos, VarPtr(baInput(0)), lSize)
         End If
+        '--- note: doesn't work for encrypted alerts
         If lSize = 7 Then
             If baInput(0) = TLS_CONTENT_TYPE_ALERT Then
                 .LastAlertCode = baInput(6)
@@ -688,6 +691,10 @@ RetryCredentials:
                 Exit Do
             ElseIf hResult < 0 Then
                 pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & sApiSource, AlertCode:=.LastAlertCode
+                '--- treat as warnings TLS1_ALERT_BAD_CERTIFICATE, TLS1_ALERT_UNSUPPORTED_CERT and TLS1_ALERT_CERTIFICATE_UNKNOWN
+                If hResult = SEC_E_CERT_UNKNOWN Then
+                    TlsHandshake = True
+                End If
                 GoTo QH
             Else
                 .RecvPos = 0
@@ -860,6 +867,9 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
             hResult = DecryptMessage(.hTlsContext, .InDesc, 0, 0)
             If hResult = SEC_E_INCOMPLETE_MESSAGE Then
                 pvInitSecBuffer .InBuffers(1), SECBUFFER_EMPTY
+                Exit Do
+            ElseIf hResult = SEC_E_INVALID_HANDLE And .RecvPos = 0 Then
+                '--- session on hTlsContext already closed so don't call pvTlsSetLastError
                 Exit Do
             ElseIf hResult < 0 Then
                 pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "DecryptMessage"

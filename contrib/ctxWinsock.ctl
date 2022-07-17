@@ -552,7 +552,7 @@ Private Sub pvSetError(Optional ByVal LastDllError As Long, Optional LastError A
     
     pvState = sckError
     If LastDllError <> 0 Then
-        Number = LastDllError Or LNG_FACILITY_WIN32
+        Number = LastDllError Or IIf(LastDllError < 0, 0, LNG_FACILITY_WIN32)
         Description = pvSocket.GetErrorDescription(LastDllError)
     ElseIf Not LastError Is Nothing Then
         Number = LastError.Number

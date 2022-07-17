@@ -37,8 +37,8 @@ Begin VB.Form Form2
       Index           =   0
       Left            =   2604
       Top             =   840
-      _extentx        =   677
-      _extenty        =   677
+      _ExtentX        =   677
+      _ExtentY        =   677
    End
    Begin VB.CommandButton Command1 
       Caption         =   "HTTP request"
@@ -51,8 +51,8 @@ Begin VB.Form Form2
    Begin WinsockNative.ctxWinsock ctxWinsock 
       Left            =   2604
       Top             =   252
-      _extentx        =   677
-      _extenty        =   677
+      _ExtentX        =   677
+      _ExtentY        =   677
    End
 End
 Attribute VB_Name = "Form2"
@@ -89,10 +89,7 @@ Private Sub Command4_Click()
 End Sub
 
 Private Sub ctxServer_Error(Index As Integer, ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
-    Const E_CONN_ABORTED As Long = &H80072745
-    If InStr(Description, "Certificate unknown") = 0 And Number <> E_CONN_ABORTED Then
-        MsgBox Description & " &H" & Hex$(Number), vbCritical, "ctxServer_Error"
-    End If
+    MsgBox Description & " &H" & Hex$(Number) & "[" & Source & "]", vbCritical, "ctxServer(" & Index & ")_Error"
 End Sub
 
 Private Sub ctxWinsock_Connect()
@@ -117,7 +114,7 @@ Private Sub ctxWinsock_DataArrival(ByVal bytesTotal As Long)
 End Sub
 
 Private Sub ctxServer_ConnectionRequest(Index As Integer, ByVal requestID As Long)
-    Debug.Print "ctxServer_ConnectionRequest, requestID=" & requestID & ", RemoteHostIP=" & ctxServer(Index).RemoteHostIP & ", RemotePort=" & ctxServer(Index).RemotePort, Timer
+    Debug.Print "ctxServer(" & Index & ")_ConnectionRequest, requestID=" & requestID & ", RemoteHostIP=" & ctxServer(Index).RemoteHostIP & ", RemotePort=" & ctxServer(Index).RemotePort, Timer
     Load ctxServer(ctxServer.UBound + 1)
     ctxServer(ctxServer.UBound).Protocol = ctxServer(Index).Protocol
     ctxServer(ctxServer.UBound).Accept requestID
@@ -128,7 +125,7 @@ Private Sub ctxServer_DataArrival(Index As Integer, ByVal bytesTotal As Long)
     Dim vSplit              As Variant
     Dim sBody               As String
     
-    Debug.Print "ctxServer_DataArrival, bytesTotal=" & bytesTotal, Timer
+    Debug.Print "ctxServer(" & Index & ")_DataArrival, bytesTotal=" & bytesTotal, Timer
     ctxServer(Index).GetData sRequest
     vSplit = Split(sRequest, vbCrLf)
     If UBound(vSplit) >= 0 Then
@@ -143,7 +140,7 @@ Private Sub ctxServer_DataArrival(Index As Integer, ByVal bytesTotal As Long)
             "Content-Length: " & Len(sBody) & vbCrLf & vbCrLf & _
             sBody
     End If
-    Debug.Print "ctxServer_DataArrival, done", Timer
+    Debug.Print "ctxServer(" & Index & ")_DataArrival, done", Timer
 End Sub
 
 Private Sub ctxServer_CloseEvent(Index As Integer)
@@ -155,5 +152,5 @@ Private Sub ctxServer_Close(Index As Integer)
 End Sub
 
 Private Sub ctxWinsock_Error(ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
-    MsgBox Description & " &H" & Hex$(Number), vbCritical, "ctxWinsock_Error"
+    MsgBox Description & " &H" & Hex$(Number) & "[" & Source & "]", vbCritical, "ctxWinsock_Error"
 End Sub
