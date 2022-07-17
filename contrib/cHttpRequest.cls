@@ -13,7 +13,7 @@ Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
 '
-' VbAsyncSocket Project (c) 2018-2021 by wqweto@gmail.com
+' VbAsyncSocket Project (c) 2018-2022 by wqweto@gmail.com
 '
 ' Simple and thin WinSock API wrappers for VB6
 '
@@ -1953,18 +1953,6 @@ Private Function pvThunkAllocate(sText As String, Optional ByVal Size As Long) A
         lPtr = (lPtr Xor SIGN_BIT) + 3 Xor SIGN_BIT
     Next
 End Function
-
-Private Property Get pvThunkGlobalData(sKey As String) As Long
-    Dim sBuffer     As String
-    
-    sBuffer = String$(50, 0)
-    Call GetEnvironmentVariable("_MST_GLOBAL" & GetCurrentProcessId() & "_" & sKey, sBuffer, Len(sBuffer) - 1)
-    pvThunkGlobalData = Val(Left$(sBuffer, InStr(sBuffer, vbNullChar) - 1))
-End Property
-
-Private Property Let pvThunkGlobalData(sKey As String, ByVal lValue As Long)
-    Call SetEnvironmentVariable("_MST_GLOBAL" & GetCurrentProcessId() & "_" & sKey, lValue)
-End Property
 #End If
 
 '=========================================================================

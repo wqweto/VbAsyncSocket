@@ -2110,11 +2110,11 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
                         GoTo InvalidSize
                     End If
                     pvBufferReadLong uInput, lSignatureScheme, Size:=2
-                    pvBufferReadBlockStart uInput, Size:=2, BlockSize:=lCertSize
-                        If uInput.Pos + lCertSize <> lMessageEnd Then
+                    pvBufferReadBlockStart uInput, Size:=2, BlockSize:=lSignatureSize
+                        If uInput.Pos + lSignatureSize <> lMessageEnd Then
                             GoTo InvalidSize
                         End If
-                        pvBufferReadArray uInput, baSignature, lCertSize
+                        pvBufferReadArray uInput, baSignature, lSignatureSize
                     pvBufferReadBlockEnd uInput
                     If Not SearchCollection(.RemoteCertificates, 1, RetVal:=baCert) Then
                         GoTo NoServerCertificate
@@ -4472,7 +4472,7 @@ Private Function pvTlsSignatureVerify(baCert() As Byte, ByVal lSignatureScheme A
             '--- note: when hash size is less than curve size must left-pad w/ zeros (right-align hash) -> deprecated
             '---       incl. ECDSA_SECP384R1_SHA256 only
             baTemp = baVerifyHash
-            pvArrayAllocate baVerifyHash, lCurveSize, FUNC_NAME & ".baRetVal"
+            pvArrayAllocate baVerifyHash, lCurveSize, FUNC_NAME & ".baVerifyHash"
             Call CopyMemory(baVerifyHash(lCurveSize - UBound(baTemp) - 1), baTemp(0), UBound(baTemp) + 1)
             bDeprecated = True
         ElseIf UBound(baVerifyHash) + 1 > lCurveSize Then
@@ -5527,14 +5527,25 @@ Private Function pvAsn1DecodeEcdsaSignature(baRetVal() As Byte, baDerSig() As By
     Dim lSize           As Long
     Dim baTemp()        As Byte
     
-    pvBufferWriteBlob uOutput, 0, 64
     pvArraySwap uInput.Data, 0, baDerSig, 0
     '--- ECDSA-Sig-Value ::= SEQUENCE { r INTEGER, s INTEGER }
     pvBufferReadLong uInput, lType
     If lType <> LNG_ANS1_TYPE_SEQUENCE Then
         GoTo QH
     End If
-    pvBufferReadBlockStart uInput
+    If uInput.Pos <= UBound(uInput.Data) Then
+        lSize = uInput.Data(uInput.Pos)
+    End If
+    '--- check for long form encoding of length of sequence
+    If lSize > &H83 Then
+        GoTo QH
+    ElseIf lSize > &H80 Then
+        lSize = lSize - &H80 + 1
+        uInput.Data(uInput.Pos) = 0
+    Else
+        lSize = 1
+    End If
+    pvBufferReadBlockStart uInput, Size:=lSize
         pvBufferReadLong uInput, lType
         If lType <> LNG_ANS1_TYPE_INTEGER Then
             GoTo QH
@@ -5561,7 +5572,11 @@ Private Function pvAsn1DecodeEcdsaSignature(baRetVal() As Byte, baDerSig() As By
             uOutput.Size = lCurveSize
             pvBufferWriteBlob uOutput, VarPtr(baTemp(lSize - lCurveSize)), lCurveSize
         End If
+        If uInput.Stack(1) <> uInput.Pos Then
+            GoTo QH
+        End If
     pvBufferReadBlockEnd uInput
+    pvBufferWriteEOF uOutput
     '--- success
     pvAsn1DecodeEcdsaSignature = True
 QH:
@@ -6376,7 +6391,7 @@ Private Function pvSetTrue(bValue As Boolean) As Boolean
 End Function
 
 #If Not ImplUseShared Then
-Public Function RedimStats(sFuncName As String, ByVal lSize As Long) As Boolean
+Private Function RedimStats(sFuncName As String, ByVal lSize As Long) As Boolean
     #If sFuncName And lSize Then
     #End If
     RedimStats = True

@@ -2911,6 +2911,12 @@ End Function
 '= shared ================================================================
 
 #If Not ImplUseShared Then
+Private Function RedimStats(sFuncName As String, ByVal lSize As Long) As Boolean
+    #If sFuncName And lSize Then
+    #End If
+    RedimStats = True
+End Function
+
 Private Function UnsignedAdd(ByVal lUnsignedPtr As Long, ByVal lSignedOffset As Long) As Long
     '--- note: safely add *signed* offset to *unsigned* ptr for *unsigned* retval w/o overflow in LARGEADDRESSAWARE processes
     UnsignedAdd = ((lUnsignedPtr Xor &H80000000) + lSignedOffset) Xor &H80000000
