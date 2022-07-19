@@ -70,6 +70,7 @@ Private Const PKCS_PRIVATE_KEY_INFO                     As Long = 44
 Private Const X509_ECC_PRIVATE_KEY                      As Long = 82
 Private Const CNG_RSA_PRIVATE_KEY_BLOB                  As Long = 83
 Private Const CRYPT_DECODE_NOCOPY_FLAG                  As Long = &H1
+Private Const CRYPT_DECODE_SHARE_OID_STRING_FLAG        As Long = &H4
 Private Const CRYPT_DECODE_ALLOC_FLAG                   As Long = &H8000
 Private Const X509_NAME                                 As Long = 7
 '--- for CryptSignHash
@@ -117,7 +118,7 @@ Private Const CERT_TRUST_IS_PARTIAL_CHAIN               As Long = &H10000
 '--- for CertFindCertificateInStore
 Private Const CERT_FIND_ANY                             As Long = 0
 Private Const CERT_FIND_EXISTING                        As Long = &HD0000
-Private Const CERT_FIND_ISSUER_NAME                     As Long = &H20004
+Private Const CERT_FIND_ISSUER_ATTR                     As Long = &H30004
 Private Const CERT_FIND_SUBJECT_STR                     As Long = &H80007
 Private Const CERT_FIND_HASH_STR                        As Long = &H140000
 '--- for CERT_ALT_NAME_ENTRY
@@ -188,6 +189,9 @@ Private Declare Function CertFreeCertificateChain Lib "crypt32" (ByVal pChainCon
 Private Declare Function CertFindExtension Lib "crypt32" (ByVal pszObjId As String, ByVal cExtensions As Long, ByVal rgExtensions As Long) As Long
 Private Declare Function CertFindCertificateInStore Lib "crypt32" (ByVal hCertStore As Long, ByVal dwCertEncodingType As Long, ByVal dwFindFlags As Long, ByVal dwFindType As Long, pvFindPara As Any, ByVal pPrevCertContext As Long) As Long
 Private Declare Function CertSetCertificateContextProperty Lib "crypt32" (ByVal pCertContext As Long, ByVal dwPropId As Long, ByVal dwFlags As Long, pvData As Any) As Long
+Private Declare Function CertAddCertificateContextToStore Lib "crypt32" (ByVal hCertStore As Long, ByVal pCertContext As Long, ByVal dwAddDisposition As Long, ppStoreContext As Any) As Long
+'--- Cryptui
+Private Declare Function CryptUIDlgSelectCertificateFromStore Lib "cryptui" (ByVal hCertStore As Long, ByVal hWnd As Long, ByVal pwszTitle As Long, ByVal pwszDisplayString As Long, ByVal dwDontUseColumn As Long, ByVal dwFlags As Long, ByVal pvReserved As Long) As Long
 '--- NCrypt
 Private Declare Function NCryptImportKey Lib "ncrypt" (ByVal hProvider As Long, ByVal hImportKey As Long, ByVal pszBlobType As Long, pParameterList As Any, phKey As Long, pbData As Any, ByVal cbData As Long, ByVal dwFlags As Long) As Long
 Private Declare Function NCryptExportKey Lib "ncrypt" (ByVal hKey As Long, ByVal hExportKey As Long, ByVal pszBlobType As Long, pParameterList As Any, pbOutput As Any, ByVal cbOutput As Long, pcbResult As Any, ByVal dwFlags As Long) As Long
@@ -362,6 +366,20 @@ Private Type CERT_CHAIN_ELEMENT
     pIssuanceUsage      As Long
     pApplicationUsage   As Long
     pwszExtendedErrorInfo As Long
+End Type
+
+Private Type CERT_RDN_ATTR
+    pszObjId            As Long
+    dwValueType         As Long
+    cbData              As Long
+    pbData              As Long
+End Type
+Private Const sizeof_CERT_RDN_ATTR As Long = 16
+
+Private Type CERT_RDN
+    cRDNAttr            As Long
+    rgRDNAttr           As Long
+    Buffer()            As CERT_RDN_ATTR
 End Type
 
 '=========================================================================
@@ -1844,18 +1862,20 @@ Public Function ImportPkcs12Certificates(PfxFile As String, Optional Password As
     End If
 End Function
 
-Public Function ImportSystemStoreCertificates(SubjectOrRDN As Variant) As Boolean
-    Dim baRDN()         As Byte
+Public Function ImportSystemStoreCertificates(SubjectOrIssuers As Variant, Optional ByVal hWndOwner As Long) As Boolean
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
     
-    If IsArray(SubjectOrRDN) Then
-        baRDN = SubjectOrRDN
-        If Not pvPkiImportCertificateByRDN(baRDN, cCerts, cPrivKey) Then
+    If hWndOwner <> 0 Then
+        If Not pvPkiShowSelectCertificate(SubjectOrIssuers, hWndOwner, cCerts, cPrivKey) Then
             GoTo QH
         End If
-    ElseIf LenB(SubjectOrRDN) <> 0 Then
-        If Not pvPkiImportCertificateBySubject(SubjectOrRDN, cCerts, cPrivKey) Then
+    ElseIf IsObject(SubjectOrIssuers) Then
+        If Not pvPkiImportCertificateByIssuers(SubjectOrIssuers, cCerts, cPrivKey) Then
+            GoTo QH
+        End If
+    ElseIf LenB(SubjectOrIssuers) <> 0 Then
+        If Not pvPkiImportCertificateBySubject(SubjectOrIssuers, cCerts, cPrivKey) Then
             GoTo QH
         End If
     End If
@@ -1995,10 +2015,98 @@ QH:
     End If
 End Function
 
-Public Function pvPkiImportCertificateByRDN(baRDN() As Byte, cCerts As Collection, cPrivKey As Collection) As Boolean
-    Const FUNC_NAME     As String = "pvPkiImportCertificateByRDN"
+Public Function pvPkiShowSelectCertificate(ByVal SubjectOrIssuers As Variant, ByVal hWndOwner As Long, cCerts As Collection, cPrivKey As Collection) As Boolean
+    Const FUNC_NAME     As String = "pvPkiImportCertificateByIssuers"
+    Dim hMemStore       As Long
     Dim hCertStore      As Long
-    Dim lNamePtr        As Long
+    Dim vElem           As Variant
+    Dim uCertRdn        As CERT_RDN
+    Dim pCertContext    As Long
+    Dim lStoreFlags     As Long
+    Dim sStoreName      As String
+    Dim sCertName       As String
+    Dim dwFindType      As Long
+    Dim pvFindPara      As Long
+    Dim hResult         As Long
+    Dim sApiSource      As String
+    
+    hMemStore = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, CERT_STORE_CREATE_NEW_FLAG, 0)
+    If hMemStore = 0 Then
+        hResult = Err.LastDllError
+        sApiSource = "CertOpenStore"
+        GoTo QH
+    End If
+    If IsObject(SubjectOrIssuers) Then
+        hCertStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0, CERT_SYSTEM_STORE_CURRENT_USER, StrPtr("MY"))
+        If hCertStore = 0 Then
+            hResult = Err.LastDllError
+            sApiSource = "CertOpenStore(CERT_SYSTEM_STORE_CURRENT_USER, MY)"
+            GoTo QH
+        End If
+        For Each vElem In SubjectOrIssuers
+            If pvPkiIssuerToCertRdn(vElem, uCertRdn) Then
+                dwFindType = CERT_FIND_ISSUER_ATTR
+                pvFindPara = VarPtr(uCertRdn)
+                pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, 0)
+            End If
+        Next
+    Else
+        If Not pvPkiParseSelectorString(SubjectOrIssuers, lStoreFlags, sStoreName, sCertName) Then
+            GoTo QH
+        End If
+        hCertStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0, lStoreFlags, StrPtr(sStoreName))
+        If hCertStore = 0 Then
+            hResult = Err.LastDllError
+            sApiSource = "CertOpenStore(&H" & Hex$(lStoreFlags) & ", " & sStoreName & ")"
+            GoTo QH
+        End If
+        If LenB(sCertName) = 0 Then
+            dwFindType = CERT_FIND_ANY
+            pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, 0)
+        Else
+            pvFindPara = StrPtr(sCertName)
+            dwFindType = CERT_FIND_SUBJECT_STR
+            pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, 0)
+            If pCertContext = 0 Then
+                dwFindType = CERT_FIND_HASH_STR
+                pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, 0)
+            End If
+        End If
+    End If
+    Do While pCertContext <> 0
+        hResult = CertAddCertificateContextToStore(hMemStore, pCertContext, CERT_STORE_ADD_USE_EXISTING, ByVal 0)
+        If hResult < 0 Then
+            '--- continue
+        End If
+        pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, pCertContext)
+    Loop
+    pCertContext = CryptUIDlgSelectCertificateFromStore(hMemStore, hWndOwner, 0, 0, 0, 0, 0)
+    If pCertContext <> 0 Then
+        If pvPkiAppendCertContext(pCertContext, cCerts, cPrivKey) Then
+            '--- success
+            pvPkiShowSelectCertificate = True
+        End If
+    End If
+QH:
+    If pCertContext <> 0 Then
+        Call CertFreeCertificateContext(pCertContext)
+    End If
+    If hCertStore <> 0 Then
+        Call CertCloseStore(hCertStore, 0)
+    End If
+    If hMemStore <> 0 Then
+        Call CertCloseStore(hMemStore, 0)
+    End If
+    If LenB(sApiSource) <> 0 Then
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+    End If
+End Function
+
+Public Function pvPkiImportCertificateByIssuers(ByVal cIssuers As Object, cCerts As Collection, cPrivKey As Collection) As Boolean
+    Const FUNC_NAME     As String = "pvPkiImportCertificateByIssuers"
+    Dim hCertStore      As Long
+    Dim vElem           As Variant
+    Dim uIssuerRdn        As CERT_RDN
     Dim pCertContext    As Long
     Dim hResult         As Long
     Dim sApiSource      As String
@@ -2009,24 +2117,20 @@ Public Function pvPkiImportCertificateByRDN(baRDN() As Byte, cCerts As Collectio
         sApiSource = "CertOpenStore"
         GoTo QH
     End If
-    If CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, X509_NAME, baRDN(0), UBound(baRDN) + 1, _
-                CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lNamePtr, 0) = 0 Then
-        hResult = Err.LastDllError
-        sApiSource = "CryptDecodeObjectEx(X509_NAME)"
-    End If
-    pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, CERT_FIND_ISSUER_NAME, ByVal lNamePtr, 0)
-    If pCertContext <> 0 Then
-        If pvPkiAppendCertChain(pCertContext, hCertStore, cCerts, cPrivKey) Then
-            '--- success
-            pvPkiImportCertificateByRDN = True
+    For Each vElem In cIssuers
+        If pvPkiIssuerToCertRdn(vElem, uIssuerRdn) Then
+            pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, CERT_FIND_ISSUER_ATTR, uIssuerRdn, 0)
+            If pCertContext <> 0 Then
+                If pvPkiAppendCertChain(pCertContext, hCertStore, cCerts, cPrivKey) Then
+                    '--- success
+                    pvPkiImportCertificateByIssuers = True
+                End If
+            End If
         End If
-    End If
+    Next
 QH:
     If pCertContext <> 0 Then
         Call CertFreeCertificateContext(pCertContext)
-    End If
-    If lNamePtr <> 0 Then
-        Call LocalFree(lNamePtr)
     End If
     If hCertStore <> 0 Then
         Call CertCloseStore(hCertStore, 0)
@@ -2038,44 +2142,16 @@ End Function
 
 Public Function pvPkiImportCertificateBySubject(ByVal Subject As String, cCerts As Collection, cPrivKey As Collection) As Boolean
     Const FUNC_NAME     As String = "pvPkiImportCertificateBySubject"
-    Dim lStoreFlags     As String
+    Dim lStoreFlags     As Long
     Dim sStoreName      As String
     Dim sCertName       As String
-    Dim lPos            As Long
     Dim hCertStore      As Long
     Dim pCertContext    As Long
     Dim hResult         As Long
     Dim sApiSource      As String
     
-    lStoreFlags = CERT_SYSTEM_STORE_CURRENT_USER
-    sStoreName = "MY"
-    lPos = InStr(Subject, "\")
-    If lPos = 0 Then
-        lPos = Len(Subject) + 1
-    End If
-    Select Case Left$(Subject, lPos - 1)
-    Case "CURRENT_USER"
-        lStoreFlags = CERT_SYSTEM_STORE_CURRENT_USER
-    Case "LOCAL_MACHINE"
-        lStoreFlags = CERT_SYSTEM_STORE_LOCAL_MACHINE
-    Case "CURRENT_SERVICE"
-        lStoreFlags = CERT_SYSTEM_STORE_CURRENT_SERVICE
-    Case "SERVICES"
-        lStoreFlags = CERT_SYSTEM_STORE_SERVICES
-    Case "USERS"
-        lStoreFlags = CERT_SYSTEM_STORE_USERS
-    Case Else
-        lPos = 0
-    End Select
-    If lPos > 0 Then
-        Subject = Mid$(Subject, lPos + 1)
-    End If
-    lPos = InStrRev(Subject, "\")
-    If lPos > 0 Then
-        sStoreName = Left$(Subject, lPos - 1)
-        sCertName = Mid$(Subject, lPos + 1)
-    Else
-        sCertName = Subject
+    If Not pvPkiParseSelectorString(Subject, lStoreFlags, sStoreName, sCertName) Then
+        GoTo QH
     End If
     hCertStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0, lStoreFlags, StrPtr(sStoreName))
     If hCertStore = 0 Then
@@ -2286,8 +2362,8 @@ Private Function pvPkiCertGetSubjectAltName2(ByVal pCertContext As Long, ByVal l
         GoTo QH
     End If
     Call CopyMemory(uExtension, ByVal lPtr, Len(uExtension))
-    If CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, szOID_SUBJECT_ALT_NAME2, ByVal uExtension.Value.pbData, _
-                uExtension.Value.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lAltInfoPtr, 0) = 0 Then
+    If CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, szOID_SUBJECT_ALT_NAME2, ByVal uExtension.Value.pbData, uExtension.Value.cbData, _
+            CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG Or CRYPT_DECODE_SHARE_OID_STRING_FLAG, 0, lAltInfoPtr, 0) = 0 Then
         GoTo QH
     End If
     Call CopyMemory(uAltInfo, ByVal lAltInfoPtr, Len(uAltInfo))
@@ -2837,6 +2913,85 @@ QH:
     If LenB(sApiSource) <> 0 Then
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
+End Function
+
+Private Function pvPkiIssuerToCertRdn(vIssuer As Variant, uOutput As CERT_RDN) As Boolean
+    Dim baRDN()         As Byte
+    Dim lPtr            As Long
+    Dim uNameInfo       As CRYPT_DATA_BLOB
+    Dim uCertRdn()      As CRYPT_DATA_BLOB
+    Dim lIdx            As Long
+    Dim lPos            As Long
+    
+    If Not IsArray(vIssuer) Then
+        GoTo QH
+    End If
+    baRDN = vIssuer
+    If CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, X509_NAME, baRDN(0), UBound(baRDN) + 1, _
+            CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG Or CRYPT_DECODE_SHARE_OID_STRING_FLAG, 0, lPtr, 0) = 0 Then
+        GoTo QH
+    End If
+    Call CopyMemory(uNameInfo, ByVal lPtr, LenB(uNameInfo))
+    If uNameInfo.cbData > 0 Then
+        ReDim uCertRdn(0 To uNameInfo.cbData - 1) As CRYPT_DATA_BLOB
+        Call CopyMemory(uCertRdn(0), ByVal uNameInfo.pbData, LenB(uCertRdn(0)) * uNameInfo.cbData)
+        For lIdx = 0 To UBound(uCertRdn)
+            lPos = lPos + uCertRdn(lIdx).cbData
+        Next
+    End If
+    If lPos > 0 Then
+        ReDim uOutput.Buffer(0 To lPos - 1)
+        lPos = 0
+        For lIdx = 0 To UBound(uCertRdn)
+            Call CopyMemory(uOutput.Buffer(lPos), ByVal uCertRdn(lIdx).pbData, uCertRdn(lIdx).cbData * sizeof_CERT_RDN_ATTR)
+            lPos = lPos + uCertRdn(lIdx).cbData
+        Next
+        uOutput.cRDNAttr = lPos
+        uOutput.rgRDNAttr = VarPtr(uOutput.Buffer(0))
+        '--- success
+        pvPkiIssuerToCertRdn = True
+    End If
+QH:
+    If lPtr <> 0 Then
+        Call LocalFree(lPtr)
+    End If
+End Function
+
+Private Function pvPkiParseSelectorString(ByVal Subject As String, lStoreFlags As Long, sStoreName As String, sCertName As String) As Boolean
+    Dim lPos            As Long
+    
+    lStoreFlags = CERT_SYSTEM_STORE_CURRENT_USER
+    sStoreName = "MY"
+    lPos = InStr(Subject, "\")
+    If lPos = 0 Then
+        lPos = Len(Subject) + 1
+    End If
+    Select Case Left$(Subject, lPos - 1)
+    Case "CURRENT_USER"
+        lStoreFlags = CERT_SYSTEM_STORE_CURRENT_USER
+    Case "LOCAL_MACHINE"
+        lStoreFlags = CERT_SYSTEM_STORE_LOCAL_MACHINE
+    Case "CURRENT_SERVICE"
+        lStoreFlags = CERT_SYSTEM_STORE_CURRENT_SERVICE
+    Case "SERVICES"
+        lStoreFlags = CERT_SYSTEM_STORE_SERVICES
+    Case "USERS"
+        lStoreFlags = CERT_SYSTEM_STORE_USERS
+    Case Else
+        lPos = 0
+    End Select
+    If lPos > 0 Then
+        Subject = Mid$(Subject, lPos + 1)
+    End If
+    lPos = InStrRev(Subject, "\")
+    If lPos > 0 Then
+        sStoreName = Left$(Subject, lPos - 1)
+        sCertName = Mid$(Subject, lPos + 1)
+    Else
+        sCertName = Subject
+    End If
+    '--- success
+    pvPkiParseSelectorString = True
 End Function
 
 Private Function pvToStringW(ByVal lPtr As Long) As String
