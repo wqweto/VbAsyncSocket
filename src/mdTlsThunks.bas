@@ -231,8 +231,12 @@ Private Const TLS_GROUP_SECP384R1                       As Long = 24
 Private Const TLS_GROUP_SECP521R1                       As Long = 25
 Private Const TLS_GROUP_X25519                          As Long = 29
 Private Const TLS_GROUP_X448                            As Long = 30
-Private Const TLS_GROUP_FFDHE_FIRST                     As Long = 256
-Private Const TLS_GROUP_FFDHE_LAST                      As Long = 511
+Private Const TLS_GROUP_FFDHE_FIRST                     As Long = &H100
+Private Const TLS_GROUP_FFDHE_LAST                      As Long = &H104
+Private Const TLS_GROUP_FFDHE_PRIVATE_USE_FIRST         As Long = &H1FC
+Private Const TLS_GROUP_FFDHE_PRIVATE_USE_LAST          As Long = &H1FF
+Private Const TLS_GROUP_ECDHE_PRIVATE_USE_FIRST         As Long = &HFE00&
+Private Const TLS_GROUP_ECDHE_PRIVATE_USE_LAST          As Long = &HFEFF&
 '--- TLS Signature Scheme from https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-signaturescheme
 Private Const TLS_SIGNATURE_RSA_PKCS1_SHA1              As Long = &H201 '--- TLS 1.2
 Private Const TLS_SIGNATURE_ECDSA_SHA1                  As Long = &H203
@@ -2972,6 +2976,10 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                             eExchAlgo = 0
                                         Case TLS_GROUP_FFDHE_FIRST To TLS_GROUP_FFDHE_LAST
                                             eExchAlgo = 0
+                                        Case TLS_GROUP_FFDHE_PRIVATE_USE_FIRST To TLS_GROUP_FFDHE_PRIVATE_USE_LAST
+                                            eExchAlgo = 0
+                                        Case TLS_GROUP_ECDHE_PRIVATE_USE_FIRST To TLS_GROUP_ECDHE_PRIVATE_USE_LAST
+                                            eExchAlgo = 0
                                         Case Else
                                             If (lExchGroup And &HFF) = lExchGroup \ &H100 And (lExchGroup And &HF) = &HA Then
                                                 eExchAlgo = 0 '--- grease from RFC8701
@@ -3035,10 +3043,12 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                     pvBufferReadLong uInput, lExchGroup, Size:=2
                                     If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
                                         Select Case lExchGroup
-                                        Case TLS_GROUP_X25519 To TLS_GROUP_X448, TLS_GROUP_SECP256R1 To TLS_GROUP_SECP521R1
+                                        Case TLS_GROUP_SECP256R1 To TLS_GROUP_SECP521R1, TLS_GROUP_X25519 To TLS_GROUP_X448
                                             '--- ecc curves
                                         Case TLS_GROUP_FFDHE_FIRST To TLS_GROUP_FFDHE_LAST
                                             '--- ffdhe
+                                        Case TLS_GROUP_FFDHE_PRIVATE_USE_FIRST To TLS_GROUP_FFDHE_PRIVATE_USE_LAST, TLS_GROUP_ECDHE_PRIVATE_USE_FIRST To TLS_GROUP_ECDHE_PRIVATE_USE_LAST
+                                            '--- private use
                                         Case Else
                                             If (lExchGroup And &HFF) = lExchGroup \ &H100 And (lExchGroup And &HF) = &HA Then
                                                 '--- grease from RFC8701
@@ -3135,6 +3145,12 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                 GoTo NegotiateSignatureFailed
             End If
             .SignatureScheme = TLS_SIGNATURE_RSA_PKCS1_SHA1
+            For Each vElem In Array(TLS_SIGNATURE_RSA_PSS_RSAE_SHA256, TLS_SIGNATURE_ECDSA_SECP256R1_SHA256, TLS_SIGNATURE_ECDSA_SECP384R1_SHA384, TLS_SIGNATURE_ECDSA_SECP521R1_SHA512)
+                If pvTlsMatchSignatureScheme(uCtx, vElem, uKeyInfo) Then
+                    .SignatureScheme = vElem
+                    Exit For
+                End If
+            Next
         End If
         If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
             lExtType = TLS_EXTENSION_KEY_SHARE
