@@ -132,8 +132,8 @@ End Sub
 '=========================================================================
 
 Private Sub Form_Load()
-    Const PEM_FILES     As String = "eccert.pem|ecprivkey.pem|fullchain2.pem"
-    Const PFX_FILE      As String = "eccert.pfx"
+    Const PEM_FILES     As String = "" ' "eccert.pem|ecprivkey.pem|fullchain2.pem"
+    Const PFX_FILE      As String = "" ' "eccert.pfx"
     Const PFX_PASSWORD  As String = ""
     Dim vElem           As Variant
     Dim sAddr           As String
@@ -428,12 +428,23 @@ Private Function pvSetVisible(oCtl As Object, ByVal bValue As Boolean) As Boolea
     pvSetVisible = True
 End Function
 
-Private Sub m_oSocket_OnClientCertificate(CaDn As Object, Confirmed As Boolean)
-    DebugLog MODULE_NAME, "m_oSocket_OnClientCertificate", "Raised"
+Private Sub m_oServerSocket_OnCertificate(Issuers As Object, Confirmed As Boolean)
+    Const PFX_FILE      As String = "eccert.pfx"
+    Const PFX_PASSWORD  As String = ""
+    
+    Confirmed = m_oServerSocket.ImportPkcs12Certificates(PFX_FILE, PFX_PASSWORD)
+End Sub
+
+Private Sub m_oSocket_OnCertificate(Issuers As Object, Confirmed As Boolean)
+    DebugLog MODULE_NAME, "m_oSocket_OnCertificate", "Raised"
     If m_oSocket.LocalCertificates Is Nothing Then
-        If CaDn.Count > 0 Then
-            Confirmed = m_oSocket.ImportSystemStoreCertificates(CaDn, hWnd)
-        Else
+        If Issuers.Count > 0 Then
+            Confirmed = m_oSocket.ImportSystemStoreCertificates(Issuers, hWnd)
+            If Not Confirmed Then
+                Confirmed = m_oSocket.ImportSystemStoreCertificates(vbNullString)
+            End If
+        End If
+        If Not Confirmed Then
             Confirmed = m_oSocket.ImportPkcs12Certificates(App.Path & "\client2.full.pfx")
         End If
     End If

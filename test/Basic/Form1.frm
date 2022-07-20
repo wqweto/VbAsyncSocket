@@ -230,8 +230,8 @@ Private Sub Command2_Click()
     m_oRequest.Send
 '    m_oRequest.Open_ "GET", "http://localhost/ТоваПапка?Параметър1&Парам2#Анкор"
 '    m_oRequest.Send
-'    m_oRequest.Open_ "GET", IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://www.epay.bg/v3main/certreq?action=attach&get_cert=1&ident=1"
-'    m_oRequest.SetClientCertificate "7be211f9069aae6fa109fcd3c83007e2dc14b2f8"
+'    m_oRequest.Open_ "GET", IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://client.badssl.com"
+'    m_oRequest.SetClientCertificate "68b5220077de8bbeaed8e1c2540fec6c16b418a8"
 '    m_oRequest.Send
 '    m_oRequest.Open_ "GET", "https://dl.unicontsoft.com/upload/UCS/"
 '    m_oRequest.SetCredentials "test", "test", 0
@@ -292,12 +292,12 @@ End Sub
 
 Private Sub pvTestSeecaoCom()
 Dim req As New cHttpRequest
-Dim Body As String, URL As String
-URL = "https://auctions.seecao.com/api/DailyAuction/GetDailyAuctionList"
+Dim Body As String, Url As String
+Url = "https://auctions.seecao.com/api/DailyAuction/GetDailyAuctionList"
 Body = "{""parameters"":{""dayFrom"":""2021-05-12"",""dayTill"":""2021-05-12"",""auctionState"":[0,3,4,5,6,7,9]}}"
 
 With req
-    .Open_ "POST", URL, False
+    .Open_ "POST", Url, False
     .SetRequestHeader "Content-Type", "application/json"
     .Option_(WinHttpRequestOption_SslErrorIgnoreFlags) = 13056 '&H3300
     .Send Body
@@ -608,8 +608,8 @@ QH:
     End If
 End Function
 
-Private Sub m_oClientSocket_OnClientCertificate(CaDn As Object, Confirmed As Boolean)
-    DebugLog MODULE_NAME, "m_oClientSocket_OnClientCertificate", "TODO: Show choose certificate dialog"
+Private Sub m_oClientSocket_OnCertificate(Issuers As Object, Confirmed As Boolean)
+    Confirmed = m_oClientSocket.ImportSystemStoreCertificates(Issuers, hWnd)
 End Sub
 
 Private Sub m_oClientSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)

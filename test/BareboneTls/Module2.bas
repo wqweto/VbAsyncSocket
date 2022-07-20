@@ -29,7 +29,7 @@ Public Function TlsInitClient( _
             uCtx As UcsTlsContext, _
             Optional RemoteHostName As String, _
             Optional ByVal LocalFeatures As Long, _
-            Optional OnClientCertificate As Object, _
+            Optional ClientCertCallback As Object, _
             Optional AlpnProtocols As String) As Boolean
     
 End Function

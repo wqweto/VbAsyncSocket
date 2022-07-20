@@ -43,7 +43,7 @@ Event OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMas
 Event OnMessagePending(Handled As Boolean)
 Event BeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Cancel As Boolean)
 Event AfterNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum)
-Event OnClientCertificate(Issuers As Object, Confirmed As Boolean)
+Event OnCertificate(Issuers As Object, Confirmed As Boolean)
 
 Public Enum UcsTlsLocalFeaturesEnum '--- bitmask
     ucsTlsSupportTls10 = 2 ^ 0
@@ -621,9 +621,6 @@ Public Function InitServerTls( _
             GoTo StartTls
         End If
     End If
-    If Not pvPkiGenerSelfSignedCertificate(cCerts, cPrivKey) Then
-        GoTo QH
-    End If
 StartTls:
     m_bUseTls = True
     m_bIsServer = True
@@ -648,6 +645,8 @@ Public Function Accept( _
             Optional SocketPort As Long, _
             Optional ByVal UseTls As Boolean = True) As Boolean
     Const FUNC_NAME     As String = "Accept"
+    Dim cCerts          As Collection
+    Dim cPrivKey        As Collection
     
     On Error GoTo EH
     If ConnectedSocket Is Nothing Then
@@ -657,6 +656,14 @@ Public Function Accept( _
         GoTo QH
     End If
     If UseTls Then
+        If pvCollectionCount(LocalCertificates) = 0 Then
+            If Not FireOnCertificate(Nothing) Then
+                If pvPkiGenerSelfSignedCertificate(cCerts, cPrivKey) Then
+                    Set LocalCertificates = cCerts
+                    Set LocalPrivateKey = cPrivKey
+                End If
+            End If
+        End If
         If Not ConnectedSocket.InitServerTls(Certificates:=LocalCertificates, PrivateKey:=LocalPrivateKey, AlpnProtocols:=m_sAlpnProtocols, LocalFeatures:=m_eLocalFeatures) Then
             GoTo QH
         End If
@@ -1611,15 +1618,15 @@ Private Sub pvFireAfterNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum)
     End If
 End Sub
 
-Public Function FireOnClientCertificate(CertRequestCaDn As Collection) As Boolean
-Attribute FireOnClientCertificate.VB_MemberFlags = "40"
+Public Function FireOnCertificate(Issuers As Collection) As Boolean
+Attribute FireOnCertificate.VB_MemberFlags = "40"
     Dim oCallback       As Object
     
     Set oCallback = CallbackWeakRef
-    RaiseEvent OnClientCertificate(CertRequestCaDn, FireOnClientCertificate)
+    RaiseEvent OnCertificate(Issuers, FireOnCertificate)
     If Not oCallback Is Nothing Then
         On Error Resume Next
-        Call oCallback.NotifyOnClientCertificate(CertRequestCaDn, FireOnClientCertificate)
+        Call oCallback.NotifyOnCertificate(Issuers, FireOnCertificate)
         On Error GoTo 0
     End If
 End Function
@@ -1866,18 +1873,8 @@ Public Function ImportSystemStoreCertificates(SubjectOrIssuers As Variant, Optio
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
     
-    If hWndOwner <> 0 Then
-        If Not pvPkiShowSelectCertificate(SubjectOrIssuers, hWndOwner, cCerts, cPrivKey) Then
-            GoTo QH
-        End If
-    ElseIf IsObject(SubjectOrIssuers) Then
-        If Not pvPkiImportCertificateByIssuers(SubjectOrIssuers, cCerts, cPrivKey) Then
-            GoTo QH
-        End If
-    ElseIf LenB(SubjectOrIssuers) <> 0 Then
-        If Not pvPkiImportCertificateBySubject(SubjectOrIssuers, cCerts, cPrivKey) Then
-            GoTo QH
-        End If
+    If Not pvPkiSystemStoreImportCertificate(SubjectOrIssuers, hWndOwner, cCerts, cPrivKey) Then
+        GoTo QH
     End If
     Set LocalCertificates = cCerts
     Set LocalPrivateKey = cPrivKey
@@ -2015,8 +2012,8 @@ QH:
     End If
 End Function
 
-Public Function pvPkiShowSelectCertificate(ByVal SubjectOrIssuers As Variant, ByVal hWndOwner As Long, cCerts As Collection, cPrivKey As Collection) As Boolean
-    Const FUNC_NAME     As String = "pvPkiImportCertificateByIssuers"
+Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Variant, ByVal hWndOwner As Long, cCerts As Collection, cPrivKey As Collection) As Boolean
+    Const FUNC_NAME     As String = "pvPkiSystemStoreImportCertificate"
     Dim hMemStore       As Long
     Dim hCertStore      As Long
     Dim vElem           As Variant
@@ -2030,12 +2027,6 @@ Public Function pvPkiShowSelectCertificate(ByVal SubjectOrIssuers As Variant, By
     Dim hResult         As Long
     Dim sApiSource      As String
     
-    hMemStore = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, CERT_STORE_CREATE_NEW_FLAG, 0)
-    If hMemStore = 0 Then
-        hResult = Err.LastDllError
-        sApiSource = "CertOpenStore"
-        GoTo QH
-    End If
     If IsObject(SubjectOrIssuers) Then
         hCertStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0, CERT_SYSTEM_STORE_CURRENT_USER, StrPtr("MY"))
         If hCertStore = 0 Then
@@ -2073,18 +2064,33 @@ Public Function pvPkiShowSelectCertificate(ByVal SubjectOrIssuers As Variant, By
             End If
         End If
     End If
-    Do While pCertContext <> 0
-        hResult = CertAddCertificateContextToStore(hMemStore, pCertContext, CERT_STORE_ADD_USE_EXISTING, ByVal 0)
-        If hResult < 0 Then
-            '--- continue
-        End If
-        pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, pCertContext)
-    Loop
-    pCertContext = CryptUIDlgSelectCertificateFromStore(hMemStore, hWndOwner, 0, 0, 0, 0, 0)
     If pCertContext <> 0 Then
-        If pvPkiAppendCertContext(pCertContext, cCerts, cPrivKey) Then
-            '--- success
-            pvPkiShowSelectCertificate = True
+        If hWndOwner <> 0 Then
+            hMemStore = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, CERT_STORE_CREATE_NEW_FLAG, 0)
+            If hMemStore = 0 Then
+                hResult = Err.LastDllError
+                sApiSource = "CertOpenStore(CERT_STORE_PROV_MEMORY)"
+                GoTo QH
+            End If
+            Do While pCertContext <> 0
+                hResult = CertAddCertificateContextToStore(hMemStore, pCertContext, CERT_STORE_ADD_USE_EXISTING, ByVal 0)
+                If hResult < 0 Then
+                    '--- continue
+                End If
+                pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, pCertContext)
+            Loop
+            pCertContext = CryptUIDlgSelectCertificateFromStore(hMemStore, hWndOwner, 0, 0, 0, 0, 0)
+            If pCertContext <> 0 Then
+                If pvPkiAppendCertChain(pCertContext, hCertStore, cCerts, cPrivKey) Then
+                    '--- success
+                    pvPkiSystemStoreImportCertificate = True
+                End If
+            End If
+        Else
+            If pvPkiAppendCertChain(pCertContext, hCertStore, cCerts, cPrivKey) Then
+                '--- success
+                pvPkiSystemStoreImportCertificate = True
+            End If
         End If
     End If
 QH:
@@ -2096,90 +2102,6 @@ QH:
     End If
     If hMemStore <> 0 Then
         Call CertCloseStore(hMemStore, 0)
-    End If
-    If LenB(sApiSource) <> 0 Then
-        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
-    End If
-End Function
-
-Public Function pvPkiImportCertificateByIssuers(ByVal cIssuers As Object, cCerts As Collection, cPrivKey As Collection) As Boolean
-    Const FUNC_NAME     As String = "pvPkiImportCertificateByIssuers"
-    Dim hCertStore      As Long
-    Dim vElem           As Variant
-    Dim uIssuerRdn        As CERT_RDN
-    Dim pCertContext    As Long
-    Dim hResult         As Long
-    Dim sApiSource      As String
-    
-    hCertStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0, CERT_SYSTEM_STORE_CURRENT_USER, StrPtr("MY"))
-    If hCertStore = 0 Then
-        hResult = Err.LastDllError
-        sApiSource = "CertOpenStore"
-        GoTo QH
-    End If
-    For Each vElem In cIssuers
-        If pvPkiIssuerToCertRdn(vElem, uIssuerRdn) Then
-            pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, CERT_FIND_ISSUER_ATTR, uIssuerRdn, 0)
-            If pCertContext <> 0 Then
-                If pvPkiAppendCertChain(pCertContext, hCertStore, cCerts, cPrivKey) Then
-                    '--- success
-                    pvPkiImportCertificateByIssuers = True
-                End If
-            End If
-        End If
-    Next
-QH:
-    If pCertContext <> 0 Then
-        Call CertFreeCertificateContext(pCertContext)
-    End If
-    If hCertStore <> 0 Then
-        Call CertCloseStore(hCertStore, 0)
-    End If
-    If LenB(sApiSource) <> 0 Then
-        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
-    End If
-End Function
-
-Public Function pvPkiImportCertificateBySubject(ByVal Subject As String, cCerts As Collection, cPrivKey As Collection) As Boolean
-    Const FUNC_NAME     As String = "pvPkiImportCertificateBySubject"
-    Dim lStoreFlags     As Long
-    Dim sStoreName      As String
-    Dim sCertName       As String
-    Dim hCertStore      As Long
-    Dim pCertContext    As Long
-    Dim hResult         As Long
-    Dim sApiSource      As String
-    
-    If Not pvPkiParseSelectorString(Subject, lStoreFlags, sStoreName, sCertName) Then
-        GoTo QH
-    End If
-    hCertStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0, lStoreFlags, StrPtr(sStoreName))
-    If hCertStore = 0 Then
-        hResult = Err.LastDllError
-        sApiSource = "CertOpenStore(&H" & Hex$(lStoreFlags) & ", " & sStoreName & ")"
-        GoTo QH
-    End If
-    If LenB(sCertName) = 0 Then
-        pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, CERT_FIND_ANY, ByVal 0, 0)
-    End If
-    If pCertContext = 0 Then
-        pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, CERT_FIND_SUBJECT_STR, ByVal StrPtr(sCertName), 0)
-    End If
-    If pCertContext = 0 Then
-        pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, CERT_FIND_HASH_STR, ByVal StrPtr(sCertName), 0)
-    End If
-    If pCertContext <> 0 Then
-        If pvPkiAppendCertChain(pCertContext, hCertStore, cCerts, cPrivKey) Then
-            '--- success
-            pvPkiImportCertificateBySubject = True
-        End If
-    End If
-QH:
-    If pCertContext <> 0 Then
-        Call CertFreeCertificateContext(pCertContext)
-    End If
-    If hCertStore <> 0 Then
-        Call CertCloseStore(hCertStore, 0)
     End If
     If LenB(sApiSource) <> 0 Then
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
@@ -2515,7 +2437,7 @@ Private Function pvPkiPemGetTextPortions(sContents As String, sBoundary As Strin
 End Function
 
 Private Function pvPkiAppendCertChain(ByVal pCertContext As Long, ByVal hCertStore As Long, cCerts As Collection, cPrivKey As Collection) As Boolean
-    Const FUNC_NAME     As String = "pvPkiImportCertificateBySubject"
+    Const FUNC_NAME     As String = "pvPkiAppendCertChain"
     Dim pChainContext   As Long
     Dim uChain          As CERT_CHAIN_CONTEXT
     Dim uChainParams    As CERT_CHAIN_PARA
@@ -2524,7 +2446,7 @@ Private Function pvPkiAppendCertChain(ByVal pCertContext As Long, ByVal hCertSto
     Dim lIdx            As Long
     Dim hResult         As Long
     Dim sApiSource      As String
-    
+
     uChainParams.cbSize = Len(uChainParams)
     If CertGetCertificateChain(0, pCertContext, 0, hCertStore, uChainParams, 0, 0, pChainContext) = 0 Then
         hResult = Err.LastDllError

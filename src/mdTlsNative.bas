@@ -406,7 +406,7 @@ Public Type UcsTlsContext
     IsServer            As Boolean
     RemoteHostName      As String
     LocalFeatures       As UcsTlsLocalFeaturesEnum
-    OnClientCertificate As Long
+    ClientCertCallback  As Long
     AlpnProtocols       As String
     '--- state
     State               As UcsTlsStatesEnum
@@ -482,7 +482,7 @@ Public Function TlsInitClient( _
             uCtx As UcsTlsContext, _
             Optional RemoteHostName As String, _
             Optional ByVal LocalFeatures As Long = ucsTlsSupportAll, _
-            Optional OnClientCertificate As Object, _
+            Optional ClientCertCallback As Object, _
             Optional AlpnProtocols As String) As Boolean
     Dim uEmpty          As UcsTlsContext
     
@@ -492,7 +492,7 @@ Public Function TlsInitClient( _
         .State = ucsTlsStateHandshakeStart
         .RemoteHostName = RemoteHostName
         .LocalFeatures = LocalFeatures
-        .OnClientCertificate = ObjPtr(OnClientCertificate)
+        .ClientCertCallback = ObjPtr(ClientCertCallback)
         If RealOsVersion >= [ucsOsvWin8.1] Then
             .AlpnProtocols = AlpnProtocols
         End If
@@ -786,7 +786,7 @@ RetryCredentials:
                     .State = ucsTlsStatePostHandshake
                     Exit Do
                 Case SEC_I_INCOMPLETE_CREDENTIALS
-                    If .OnClientCertificate <> 0 Then
+                    If .ClientCertCallback <> 0 Then
                         hResult = QueryContextAttributes(.hTlsContext, SECPKG_ATTR_ISSUER_LIST_EX, uIssuerInfo)
                         If hResult < 0 Then
                             pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "QueryContextAttributes(SECPKG_ATTR_ISSUER_LIST_EX)", AlertCode:=.LastAlertCode
@@ -802,8 +802,8 @@ RetryCredentials:
                                 cIssuers.Add baCaDn
                             Next
                         End If
-                        Call vbaObjSetAddref(oCallback, .OnClientCertificate)
-                        If oCallback.FireOnClientCertificate(cIssuers) Then
+                        Call vbaObjSetAddref(oCallback, .ClientCertCallback)
+                        If oCallback.FireOnCertificate(cIssuers) Then
                             Call FreeCredentialsHandle(.hTlsCredentials)
                             .hTlsCredentials = 0
                         End If

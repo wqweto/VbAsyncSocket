@@ -439,7 +439,7 @@ Public Type UcsTlsContext
     IsServer            As Boolean
     RemoteHostName      As String
     LocalFeatures       As UcsTlsLocalFeaturesEnum
-    OnClientCertificate As Long
+    ClientCertCallback  As Long
     AlpnProtocols       As String
     '--- state
     State               As UcsTlsStatesEnum
@@ -621,7 +621,7 @@ Public Function TlsInitClient( _
             uCtx As UcsTlsContext, _
             Optional RemoteHostName As String, _
             Optional ByVal LocalFeatures As Long = ucsTlsSupportAll, _
-            Optional OnClientCertificate As Object, _
+            Optional ClientCertCallback As Object, _
             Optional AlpnProtocols As String) As Boolean
     Dim uEmpty          As UcsTlsContext
     
@@ -634,7 +634,7 @@ Public Function TlsInitClient( _
         .State = ucsTlsStateHandshakeStart
         .RemoteHostName = RemoteHostName
         .LocalFeatures = LocalFeatures
-        .OnClientCertificate = ObjPtr(OnClientCertificate)
+        .ClientCertCallback = ObjPtr(ClientCertCallback)
         .AlpnProtocols = AlpnProtocols
         #If ImplCaptureTraffic <> 0 Then
             Set .TrafficDump = New Collection
@@ -3374,9 +3374,9 @@ Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, uI
                 End If
             Loop
             bConfirmed = False
-            If .CertRequestSignatureScheme = -1 And .OnClientCertificate <> 0 Then
-                Call vbaObjSetAddref(oCallback, .OnClientCertificate)
-                bConfirmed = oCallback.FireOnClientCertificate(.CertRequestCaDn)
+            If .CertRequestSignatureScheme = -1 And .ClientCertCallback <> 0 Then
+                Call vbaObjSetAddref(oCallback, .ClientCertCallback)
+                bConfirmed = oCallback.FireOnCertificate(.CertRequestCaDn)
             End If
         Loop While bConfirmed
     End With
@@ -5789,7 +5789,7 @@ Private Function pvCryptoEcdhSecp256r1SharedSecret(baRetVal() As Byte, baPrivate
 QH:
 End Function
 
-Public Function pvCryptoEcdhSecp256r1UncompressKey(baRetVal() As Byte, baPublic() As Byte) As Boolean
+Private Function pvCryptoEcdhSecp256r1UncompressKey(baRetVal() As Byte, baPublic() As Byte) As Boolean
     Const FUNC_NAME     As String = "CryptoEcdhSecp256r1UncompressKey"
 
     pvArrayAllocate baRetVal, 1 + 2 * LNG_SECP256R1_KEYSZ, FUNC_NAME & ".baRetVal"
@@ -5867,7 +5867,7 @@ Private Function pvCryptoEcdhSecp384r1SharedSecret(baRetVal() As Byte, baPrivate
 QH:
 End Function
 
-Public Function pvCryptoEcdhSecp384r1UncompressKey(baRetVal() As Byte, baPublic() As Byte) As Boolean
+Private Function pvCryptoEcdhSecp384r1UncompressKey(baRetVal() As Byte, baPublic() As Byte) As Boolean
     Const FUNC_NAME     As String = "CryptoEcdhSecp384r1UncompressKey"
 
     pvArrayAllocate baRetVal, 1 + 2 * LNG_SECP384R1_KEYSZ, FUNC_NAME & ".baRetVal"

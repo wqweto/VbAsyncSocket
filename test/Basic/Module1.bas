@@ -31,7 +31,7 @@ Public Function DesignDumpMemory(ByVal lPtr As Long, ByVal lSize As Long) As Str
     Dim aResult()       As String
     
     ReDim aResult(0 To (lSize + 15) \ 16) As String
-    Debug.Assert RedimStats("DesignDumpMemory.aResult", UBound(aResult) + 1)
+'    Debug.Assert RedimStats("DesignDumpMemory.aResult", UBound(aResult) + 1)
     For lIdx = 0 To ((lSize + 15) \ 16) * 16
         If lIdx < lSize Then
             If IsBadReadPtr(lPtr, 1) = 0 Then

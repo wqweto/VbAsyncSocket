@@ -1,7 +1,7 @@
 Attribute VB_Name = "mdTlsSodium"
 '=========================================================================
 '
-' VbAsyncSocket Project (c) 2018-2020 by wqweto@gmail.com
+' VbAsyncSocket Project (c) 2018-2022 by wqweto@gmail.com
 '
 ' Simple and thin WinSock API wrappers for VB6
 '
@@ -78,8 +78,8 @@ Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As 
 #If ImplTlsServer Or Not ImplLibSodium Then
     Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
     '--- version
-    Private Declare Function GetFileVersionInfo Lib "version" Alias "GetFileVersionInfoA" (ByVal lptstrFilename As String, ByVal dwHandle As Long, ByVal dwLen As Long, lpData As Any) As Long
-    Private Declare Function VerQueryValue Lib "version" Alias "VerQueryValueA" (pBlock As Any, ByVal lpSubBlock As String, lplpBuffer As Any, puLen As Long) As Long
+    Private Declare Function GetFileVersionInfo Lib "Version" Alias "GetFileVersionInfoA" (ByVal lptstrFilename As String, ByVal dwHandle As Long, ByVal dwLen As Long, lpData As Any) As Long
+    Private Declare Function VerQueryValue Lib "Version" Alias "VerQueryValueA" (pBlock As Any, ByVal lpSubBlock As String, lplpBuffer As Any, puLen As Long) As Long
 #End If
 '--- advapi32
 Private Declare Function CryptAcquireContext Lib "advapi32" Alias "CryptAcquireContextW" (phProv As Long, ByVal pszContainer As Long, ByVal pszProvider As Long, ByVal dwProvType As Long, ByVal dwFlags As Long) As Long
@@ -449,7 +449,7 @@ Public Type UcsTlsContext
     IsServer            As Boolean
     RemoteHostName      As String
     LocalFeatures       As UcsTlsLocalFeaturesEnum
-    OnClientCertificate As Long
+    ClientCertCallback  As Long
     AlpnProtocols       As String
     '--- state
     State               As UcsTlsStatesEnum
@@ -564,7 +564,7 @@ Public Function TlsInitClient( _
             uCtx As UcsTlsContext, _
             Optional RemoteHostName As String, _
             Optional ByVal LocalFeatures As Long = ucsTlsSupportAll, _
-            Optional OnClientCertificate As Object, _
+            Optional ClientCertCallback As Object, _
             Optional AlpnProtocols As String) As Boolean
     Dim uEmpty          As UcsTlsContext
     
@@ -577,7 +577,7 @@ Public Function TlsInitClient( _
         .State = ucsTlsStateHandshakeStart
         .RemoteHostName = RemoteHostName
         .LocalFeatures = LocalFeatures
-        .OnClientCertificate = ObjPtr(OnClientCertificate)
+        .ClientCertCallback = ObjPtr(ClientCertCallback)
         .AlpnProtocols = AlpnProtocols
         pvTlsGetRandom .LocalExchRandom, TLS_HELLO_RANDOM_SIZE
         #If ImplCaptureTraffic <> 0 Then
@@ -2500,9 +2500,9 @@ Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, uI
                 End If
             Loop
             bConfirmed = False
-            If .CertRequestSignatureScheme = -1 And .OnClientCertificate <> 0 Then
-                Call vbaObjSetAddref(oCallback, .OnClientCertificate)
-                bConfirmed = oCallback.FireOnClientCertificate(.CertRequestCaDn)
+            If .CertRequestSignatureScheme = -1 And .ClientCertCallback <> 0 Then
+                Call vbaObjSetAddref(oCallback, .ClientCertCallback)
+                bConfirmed = oCallback.FireOnCertificate(.CertRequestCaDn)
             End If
         Loop While bConfirmed
     End With

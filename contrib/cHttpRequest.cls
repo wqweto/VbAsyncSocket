@@ -2066,18 +2066,18 @@ EH:
 End Sub
 
 #If ImplUseTls Then
-Private Sub m_oSocket_OnClientCertificate(Issuers As Object, Confirmed As Boolean)
-    Const FUNC_NAME     As String = "m_oSocket_OnClientCertificate"
+Private Sub m_oSocket_OnCertificate(Issuers As Object, Confirmed As Boolean)
+    Const FUNC_NAME     As String = "m_oSocket_OnCertificate"
     Dim vElem           As Variant
     
     On Error GoTo EH
     '--- try to match a client certificate in CURRENT_USER\MY certificate store by Issuer's RDN
-    For Each vElem In Issuers
-        If m_oSocket.ImportSystemStoreCertificates(vElem) Then
+    If Issuers.Count > 0 Then
+        If m_oSocket.ImportSystemStoreCertificates(Issuers) Then
             Confirmed = True
             GoTo QH
         End If
-    Next
+    End If
     If LenB(m_vOptions(WinHttpRequestOption_SelectCertificate)) <> 0 Then
         If m_oSocket.ImportSystemStoreCertificates(m_vOptions(WinHttpRequestOption_SelectCertificate)) Then
             Confirmed = True
