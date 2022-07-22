@@ -5428,8 +5428,7 @@ DecodeRsa:
             GoTo QH
         End If
     Else
-        hResult = Err.LastDllError
-        sApiSource = "CryptDecodeObjectEx(X509_ECC_PRIVATE_KEY)"
+        '--- unsupported private key
         GoTo QH
     End If
     '--- success

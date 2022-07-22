@@ -1332,65 +1332,69 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
         End If
     Next
     If pCertContext <> 0 And SearchCollection(cPrivKey, 1, RetVal:=baPrivKey) Then
-        sKeyName = "VbAsyncSocket" & pvGetRandomString()
-        If Not pvAsn1DecodePrivateKey(baPrivKey, uPrivKeyInfo) Then
-            GoTo QH
-        End If
-        Call CopyMemory(lPtr, ByVal UnsignedAdd(pCertContext, 12), 4)       '--- dereference pCertContext->pCertInfo
-        lPtr = UnsignedAdd(lPtr, 56)                                        '--- &pCertContext->pCertInfo->SubjectPublicKeyInfo
-        Call CopyMemory(uPublicKeyInfo, ByVal lPtr, Len(uPublicKeyInfo))
-        Select Case pvToString(uPublicKeyInfo.Algorithm.pszObjId)
-        Case szOID_RSA_RSA
-            uProvInfo.pwszContainerName = StrPtr(sKeyName)
-            uProvInfo.dwProvType = PROV_RSA_FULL
-            uProvInfo.dwKeySpec = AT_KEYEXCHANGE
-            If CryptAcquireContext(hProv, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags) = 0 Then
-                If CryptAcquireContext(hProv, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags Or CRYPT_NEWKEYSET) = 0 Then
+        If UBound(baPrivKey) + 1 = LenB(uProvInfo) Then
+            Call CopyMemory(uProvInfo, baPrivKey(0), LenB(uProvInfo))
+        Else
+            sKeyName = "VbAsyncSocket" & pvGetRandomString()
+            If Not pvAsn1DecodePrivateKey(baPrivKey, uPrivKeyInfo) Then
+                GoTo QH
+            End If
+            Call CopyMemory(lPtr, ByVal UnsignedAdd(pCertContext, 12), 4)       '--- dereference pCertContext->pCertInfo
+            lPtr = UnsignedAdd(lPtr, 56)                                        '--- &pCertContext->pCertInfo->SubjectPublicKeyInfo
+            Call CopyMemory(uPublicKeyInfo, ByVal lPtr, Len(uPublicKeyInfo))
+            Select Case pvToString(uPublicKeyInfo.Algorithm.pszObjId)
+            Case szOID_RSA_RSA
+                uProvInfo.pwszContainerName = StrPtr(sKeyName)
+                uProvInfo.dwProvType = PROV_RSA_FULL
+                uProvInfo.dwKeySpec = AT_KEYEXCHANGE
+                If CryptAcquireContext(hProv, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags) = 0 Then
+                    If CryptAcquireContext(hProv, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags Or CRYPT_NEWKEYSET) = 0 Then
+                        hResult = Err.LastDllError
+                        sApiSource = "CryptAcquireContext"
+                        GoTo QH
+                    End If
+                    sOutKeyName = sKeyName
+                End If
+                If CryptImportKey(hProv, uPrivKeyInfo.KeyBlob(0), UBound(uPrivKeyInfo.KeyBlob) + 1, 0, 0, hKey) = 0 Then
                     hResult = Err.LastDllError
-                    sApiSource = "CryptAcquireContext"
+                    sApiSource = "CryptImportKey"
                     GoTo QH
                 End If
-                sOutKeyName = sKeyName
-            End If
-            If CryptImportKey(hProv, uPrivKeyInfo.KeyBlob(0), UBound(uPrivKeyInfo.KeyBlob) + 1, 0, 0, hKey) = 0 Then
-                hResult = Err.LastDllError
-                sApiSource = "CryptImportKey"
-                GoTo QH
-            End If
-        Case szOID_ECC_PUBLIC_KEY
-            Select Case uPrivKeyInfo.AlgoObjId
-            Case szOID_ECC_CURVE_P256
-                uEccBlob.dwMagic = BCRYPT_ECDSA_PRIVATE_P256_MAGIC
-            Case szOID_ECC_CURVE_P384
-                uEccBlob.dwMagic = BCRYPT_ECDSA_PRIVATE_P384_MAGIC
-            Case szOID_ECC_CURVE_P521
-                uEccBlob.dwMagic = BCRYPT_ECDSA_PRIVATE_P521_MAGIC
+            Case szOID_ECC_PUBLIC_KEY
+                Select Case uPrivKeyInfo.AlgoObjId
+                Case szOID_ECC_CURVE_P256
+                    uEccBlob.dwMagic = BCRYPT_ECDSA_PRIVATE_P256_MAGIC
+                Case szOID_ECC_CURVE_P384
+                    uEccBlob.dwMagic = BCRYPT_ECDSA_PRIVATE_P384_MAGIC
+                Case szOID_ECC_CURVE_P521
+                    uEccBlob.dwMagic = BCRYPT_ECDSA_PRIVATE_P521_MAGIC
+                Case Else
+                    ErrRaise vbObjectError, , Replace(ERR_UNKNOWN_ECC_PRIVKEY, "%1", uPrivKeyInfo.AlgoObjId)
+                End Select
+                lBlobSize = uPublicKeyInfo.PublicKey.cbData - 1
+                uEccBlob.cbKey = UBound(uPrivKeyInfo.KeyBlob) + 1
+                Call CopyMemory(uEccBlob.Buffer(0), ByVal UnsignedAdd(uPublicKeyInfo.PublicKey.pbData, 1), lBlobSize)
+                Call CopyMemory(uEccBlob.Buffer(lBlobSize), uPrivKeyInfo.KeyBlob(0), uEccBlob.cbKey)
+                lBlobSize = 8 + lBlobSize + uEccBlob.cbKey
+                '--- import key
+                uProvInfo.pwszContainerName = StrPtr(sKeyName)
+                uProvInfo.pwszProvName = StrPtr(MS_KEY_STORAGE_PROVIDER)
+                hResult = NCryptOpenStorageProvider(hNProv, uProvInfo.pwszProvName, 0)
+                If hResult < 0 Then
+                    sApiSource = "NCryptOpenStorageProvider"
+                    GoTo QH
+                End If
+                pvInitSecDesc uDesc, 1, uBuffers
+                pvInitSecBuffer uBuffers(0), NCRYPTBUFFER_PKCS_KEY_NAME, StrPtr(sKeyName), LenB(sKeyName) + 2
+                hResult = NCryptImportKey(hNProv, 0, StrPtr("ECCPRIVATEBLOB"), uDesc, hNKey, uEccBlob, lBlobSize, NCRYPT_OVERWRITE_KEY_FLAG)
+                If hResult < 0 Then
+                    sApiSource = "NCryptImportKey"
+                    GoTo QH
+                End If
             Case Else
-                ErrRaise vbObjectError, , Replace(ERR_UNKNOWN_ECC_PRIVKEY, "%1", uPrivKeyInfo.AlgoObjId)
+                ErrRaise vbObjectError, , Replace(ERR_UNKNOWN_PUBKEY, "%1", pvToString(uPublicKeyInfo.Algorithm.pszObjId))
             End Select
-            lBlobSize = uPublicKeyInfo.PublicKey.cbData - 1
-            uEccBlob.cbKey = UBound(uPrivKeyInfo.KeyBlob) + 1
-            Call CopyMemory(uEccBlob.Buffer(0), ByVal UnsignedAdd(uPublicKeyInfo.PublicKey.pbData, 1), lBlobSize)
-            Call CopyMemory(uEccBlob.Buffer(lBlobSize), uPrivKeyInfo.KeyBlob(0), uEccBlob.cbKey)
-            lBlobSize = 8 + lBlobSize + uEccBlob.cbKey
-            '--- import key
-            uProvInfo.pwszContainerName = StrPtr(sKeyName)
-            uProvInfo.pwszProvName = StrPtr(MS_KEY_STORAGE_PROVIDER)
-            hResult = NCryptOpenStorageProvider(hNProv, uProvInfo.pwszProvName, 0)
-            If hResult < 0 Then
-                sApiSource = "NCryptOpenStorageProvider"
-                GoTo QH
-            End If
-            pvInitSecDesc uDesc, 1, uBuffers
-            pvInitSecBuffer uBuffers(0), NCRYPTBUFFER_PKCS_KEY_NAME, StrPtr(sKeyName), LenB(sKeyName) + 2
-            hResult = NCryptImportKey(hNProv, 0, StrPtr("ECCPRIVATEBLOB"), uDesc, hNKey, uEccBlob, lBlobSize, NCRYPT_OVERWRITE_KEY_FLAG)
-            If hResult < 0 Then
-                sApiSource = "NCryptImportKey"
-                GoTo QH
-            End If
-        Case Else
-            ErrRaise vbObjectError, , Replace(ERR_UNKNOWN_PUBKEY, "%1", pvToString(uPublicKeyInfo.Algorithm.pszObjId))
-        End Select
+        End If
         If CertSetCertificateContextProperty(pCertContext, CERT_KEY_PROV_INFO_PROP_ID, 0, uProvInfo) = 0 Then
             hResult = Err.LastDllError
             sApiSource = "CertSetCertificateContextProperty"
