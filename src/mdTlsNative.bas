@@ -1121,6 +1121,9 @@ Private Sub pvTlsSetLastError( _
         If Right$(.LastError, 1) = "." Then
             .LastError = Left$(.LastError, Len(.LastError) - 1)
         End If
+        If Left$(.LastError, 16) = "Automation error" Then
+            .LastError = Mid$(.LastError, 17)
+        End If
         If .LastErrNumber <> 0 Then
             .State = ucsTlsStateClosed
         End If
@@ -1451,16 +1454,15 @@ Private Function pvTlsExportFromCertStore(ByVal hCertStore As Long, cCerts As Co
         pvArrayReallocate baCert, uCertContext.cbCertEncoded, FUNC_NAME & ".baCert"
         cCerts.Add baCert
         '--- collect OCSP response
-        baCert = vbNullString
-        lSize = 0
         If CertGetCertificateContextProperty(pCertContext, CERT_OCSP_RESPONSE_PROP_ID, ByVal 0, lSize) <> 0 And lSize > 0 Then
             pvArrayReallocate baCert, lSize, FUNC_NAME & ".baCert"
             If CertGetCertificateContextProperty(pCertContext, CERT_OCSP_RESPONSE_PROP_ID, baCert(0), lSize) = 0 Then
                 hResult = Err.LastDllError
                 sApiSource = "CertGetCertificateContextProperty"
+                GoTo QH
             End If
+            cStatuses.Add baCert
         End If
-        cStatuses.Add baCert
     Loop
     '--- success
     pvTlsExportFromCertStore = True

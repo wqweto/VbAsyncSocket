@@ -2209,13 +2209,15 @@ Private Function pvPkiCertValidate(ByVal sHostName As String, cCerts As Collecti
             sApiSource = "CertAddEncodedCertificateToStore"
             GoTo QH
         End If
-        If SearchCollection(cStatuses, lIdx, RetVal:=baCert) And pvArraySize(baCert) > 0 Then
-            uProp.cbData = pvArraySize(baCert)
-            uProp.pbData = VarPtr(baCert(0))
-            If CertSetCertificateContextProperty(pCertContext, CERT_OCSP_RESPONSE_PROP_ID, CERT_SET_PROPERTY_IGNORE_PERSIST_ERROR_FLAG, uProp) = 0 Then
-                hResult = Err.LastDllError
-                sApiSource = "CertSetCertificateContextProperty(CERT_OCSP_RESPONSE_PROP_ID)"
-                GoTo QH
+        If SearchCollection(cStatuses, lIdx, RetVal:=baCert) Then
+            If pvArraySize(baCert) > 0 Then
+                uProp.cbData = pvArraySize(baCert)
+                uProp.pbData = VarPtr(baCert(0))
+                If CertSetCertificateContextProperty(pCertContext, CERT_OCSP_RESPONSE_PROP_ID, CERT_SET_PROPERTY_IGNORE_PERSIST_ERROR_FLAG, uProp) = 0 Then
+                    hResult = Err.LastDllError
+                    sApiSource = "CertSetCertificateContextProperty(CERT_OCSP_RESPONSE_PROP_ID)"
+                    GoTo QH
+                End If
             End If
         End If
         Call CertFreeCertificateContext(pCertContext)
