@@ -923,8 +923,10 @@ Public Function GetErrorDescription(ByVal ErrorCode As Long) As String
     If lSize = 0 Then
         lSize = FormatMessage(FORMAT_MESSAGE_FROM_HMODULE Or FORMAT_MESSAGE_IGNORE_INSERTS, LoadLibrary("winhttp"), ErrorCode And &HFFFF&, 0, GetErrorDescription, Len(GetErrorDescription), 0)
     End If
-    If Right$(GetErrorDescription, 2) = vbCrLf Then
-        lSize = lSize - 2
+    If lSize > 2 Then
+        If Mid$(GetErrorDescription, lSize - 1, 2) = vbCrLf Then
+            lSize = lSize - 2
+        End If
     End If
     GetErrorDescription = Left$(GetErrorDescription, lSize)
     Exit Function

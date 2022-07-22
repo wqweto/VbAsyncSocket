@@ -1834,9 +1834,6 @@ Private Function GetSystemMessage(ByVal lLastDllError As Long) As String
    
     GetSystemMessage = Space$(2000)
     lSize = FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM Or FORMAT_MESSAGE_IGNORE_INSERTS, 0, lLastDllError, 0, GetSystemMessage, Len(GetSystemMessage), 0)
-    If Right$(GetSystemMessage, 2) = vbCrLf Then
-        lSize = lSize - 2
-    End If
     GetSystemMessage = Left$(GetSystemMessage, lSize)
 End Function
 #End If ' Not ImplUseShared
