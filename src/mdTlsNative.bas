@@ -130,7 +130,7 @@ Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref
 Private Declare Function lstrlen Lib "kernel32" Alias "lstrlenA" (ByVal lpString As Long) As Long
 Private Declare Function lstrlenW Lib "kernel32" (ByVal lpString As Long) As Long
 Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
-Private Declare Function FormatMessage Lib "kernel32" Alias "FormatMessageA" (ByVal dwFlags As Long, ByVal lpSource As Long, ByVal dwMessageId As Long, ByVal dwLanguageId As Long, ByVal lpBuffer As String, ByVal nSize As Long, Args As Any) As Long
+Private Declare Function FormatMessage Lib "kernel32" Alias "FormatMessageA" (ByVal dwFlags As Long, ByVal lpSource As Long, ByVal dwMessageId As Long, ByVal dwLanguageId As Long, ByVal lpBuffer As String, ByVal nSize As Long, ByVal Args As Long) As Long
 '--- msvbvm60
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
 '--- version
@@ -1834,10 +1834,8 @@ Private Function GetSystemMessage(ByVal lLastDllError As Long) As String
    
     GetSystemMessage = Space$(2000)
     lSize = FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM Or FORMAT_MESSAGE_IGNORE_INSERTS, 0, lLastDllError, 0, GetSystemMessage, Len(GetSystemMessage), 0)
-    If lSize > 2 Then
-        If Mid$(GetSystemMessage, lSize - 1, 2) = vbCrLf Then
-            lSize = lSize - 2
-        End If
+    If Right$(GetSystemMessage, 2) = vbCrLf Then
+        lSize = lSize - 2
     End If
     GetSystemMessage = Left$(GetSystemMessage, lSize)
 End Function
