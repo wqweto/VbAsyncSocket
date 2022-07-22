@@ -3144,13 +3144,13 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
             ElseIf SearchCollection(.RemoteExtensions, "#" & TLS_EXTENSION_SIGNATURE_ALGORITHMS_CERT) Then
                 GoTo NegotiateSignatureFailed
             End If
-            .SignatureScheme = TLS_SIGNATURE_RSA_PKCS1_SHA1
-            For Each vElem In Array(TLS_SIGNATURE_RSA_PSS_RSAE_SHA256, TLS_SIGNATURE_ECDSA_SECP256R1_SHA256, TLS_SIGNATURE_ECDSA_SECP384R1_SHA384, TLS_SIGNATURE_ECDSA_SECP521R1_SHA512)
-                If pvTlsMatchSignatureScheme(uCtx, vElem, uKeyInfo) Then
-                    .SignatureScheme = vElem
-                    Exit For
-                End If
-            Next
+            If pvTlsMatchSignatureScheme(uCtx, TLS_SIGNATURE_RSA_PKCS1_SHA1, uKeyInfo) Then
+                .SignatureScheme = TLS_SIGNATURE_RSA_PKCS1_SHA1
+            ElseIf pvTlsMatchSignatureScheme(uCtx, TLS_SIGNATURE_ECDSA_SHA1, uKeyInfo) Then
+                .SignatureScheme = TLS_SIGNATURE_ECDSA_SHA1
+            Else
+                GoTo NegotiateSignatureFailed
+            End If
         End If
         If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
             lExtType = TLS_EXTENSION_KEY_SHARE
@@ -3422,6 +3422,16 @@ Private Function pvTlsMatchSignatureScheme(uCtx As UcsTlsContext, ByVal lSignatu
     Case TLS_SIGNATURE_RSA_PSS_PSS_SHA256, TLS_SIGNATURE_RSA_PSS_PSS_SHA384, TLS_SIGNATURE_RSA_PSS_PSS_SHA512
         If bHasEnoughBits And uKeyInfo.AlgoObjId = szOID_RSA_SSA_PSS Then
             pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoPaddingPss)
+        End If
+    Case TLS_SIGNATURE_ECDSA_SHA1
+        If (uCtx.LocalFeatures And ucsTlsSupportTls12) <> 0 And uCtx.ProtocolVersion <> TLS_PROTOCOL_VERSION_TLS13 Then
+            If uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P256 Then
+                pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1)
+            ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P384 Then
+                pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoExchSecp384r1)
+            ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P521 Then
+                pvTlsMatchSignatureScheme = pvCryptoIsSupported(ucsTlsAlgoExchSecp521r1)
+            End If
         End If
     Case TLS_SIGNATURE_ECDSA_SECP256R1_SHA256, TLS_SIGNATURE_ECDSA_SECP384R1_SHA384, TLS_SIGNATURE_ECDSA_SECP521R1_SHA512
         If uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P256 And lSignatureScheme = TLS_SIGNATURE_ECDSA_SECP256R1_SHA256 Then
@@ -4416,11 +4426,21 @@ Private Sub pvTlsSignatureSign(baRetVal() As Byte, cPrivKey As Collection, ByVal
         If Not pvCryptoRsaCrtModExp(baEnc, uKeyInfo.PrivExp, uKeyInfo.Modulus, uKeyInfo.Prime1, uKeyInfo.Prime2, uKeyInfo.Coefficient, baRetVal) Then
             ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoRsaCrtModExp")
         End If
+    Case TLS_SIGNATURE_ECDSA_SHA1
+        If Not pvCryptoHashSha1(baVerifyHash, baVerifyData) Then
+            ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha1")
+        End If
+        If uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P256 Then
+            GoTo Secp256r1Sign
+        ElseIf uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P384 Then
+            GoTo Secp384r1Sign
+        End If
     Case TLS_SIGNATURE_ECDSA_SECP256R1_SHA256
         Debug.Assert uKeyInfo.AlgoObjId = szOID_ECC_CURVE_P256
         If Not pvCryptoHashSha256(baVerifyHash, baVerifyData) Then
             ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha256")
         End If
+Secp256r1Sign:
         If Not pvCryptoEcdsaSecp256r1Sign(baPrivKey, uKeyInfo.KeyBlob, baVerifyHash) Then
             ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEcdsaSecp256r1Sign")
         End If
@@ -4432,6 +4452,7 @@ Private Sub pvTlsSignatureSign(baRetVal() As Byte, cPrivKey As Collection, ByVal
         If Not pvCryptoHashSha384(baVerifyHash, baVerifyData) Then
             ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoHashSha384")
         End If
+Secp384r1Sign:
         If Not pvCryptoEcdsaSecp384r1Sign(baPrivKey, uKeyInfo.KeyBlob, baVerifyHash) Then
             ErrRaise vbObjectError, FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptoEcdsaSecp384r1Sign")
         End If
