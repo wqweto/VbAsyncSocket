@@ -281,6 +281,8 @@ Private Sub pvTestHowsMySsl()
     ' Dim objhttp As New MSXML2.ServerXMLHTTP60
     
     Dim objhttp As cHttpRequest
+    
+    On Error GoTo EH
     Set objhttp = New cHttpRequest
     objhttp.Open_ "GET", "https://howsmyssl.com/a/check", False
     objhttp.SetRequestHeader "User-Agent", "Mozilla/5.0 (Windows NT 5.1; rv:31.0) Gecko/20100101 Firefox/31.0"
@@ -288,6 +290,14 @@ Private Sub pvTestHowsMySsl()
     objhttp.Send
     Debug.Print objhttp.GetAllResponseHeaders
     Debug.Print objhttp.ResponseText
+    Exit Sub
+EH:
+    If objhttp.Option_(WinHttpRequestOption_SecureProtocols) = SecureProtocol_ALL Then
+        objhttp.Option_(WinHttpRequestOption_SecureProtocols) = SecureProtocol_TLS1_2
+        Resume
+    Else
+        Err.Raise Err.Number, Err.Source, Err.Description
+    End If
 End Sub
 
 Private Sub pvTestSeecaoCom()

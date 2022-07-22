@@ -118,8 +118,8 @@ End Sub
 ' Properties
 '=========================================================================
 
-Property Get URL() As String
-    URL = m_uRemote.Protocol & "://" & m_uRemote.Host & m_uRemote.Path & m_uRemote.QueryString
+Property Get Url() As String
+    Url = m_uRemote.Protocol & "://" & m_uRemote.Host & m_uRemote.Path & m_uRemote.QueryString
 End Property
 
 Property Get LocalFileName() As String
@@ -164,12 +164,12 @@ End Property
 ' Methods
 '=========================================================================
 
-Public Sub DownloadFile(URL As String, LocalFileName As Variant)
-    pvInit URL, LocalFileName, STGM_WRITE Or STGM_CREATE, vbNullString
+Public Sub DownloadFile(Url As String, LocalFileName As Variant)
+    pvInit Url, LocalFileName, STGM_WRITE Or STGM_CREATE, vbNullString
 End Sub
 
-Public Sub UploadFile(URL As String, LocalFileName As Variant, Optional FileFormName As String)
-    pvInit URL, LocalFileName, STGM_READ, IIf(LenB(FileFormName) <> 0, FileFormName, "file")
+Public Sub UploadFile(Url As String, LocalFileName As Variant, Optional FileFormName As String)
+    pvInit Url, LocalFileName, STGM_READ, IIf(LenB(FileFormName) <> 0, FileFormName, "file")
 End Sub
 
 Public Sub CancelOperation()
@@ -188,12 +188,12 @@ End Sub
 
 '= private ===============================================================
 
-Private Sub pvInit(URL As String, LocalFileName As Variant, ByVal StreamFlags As Long, FileFormName As String)
+Private Sub pvInit(Url As String, LocalFileName As Variant, ByVal StreamFlags As Long, FileFormName As String)
     Const FUNC_NAME     As String = "pvInit"
     Dim hResult     As Long
     
     On Error GoTo EH
-    If Not pvParseUrl(URL, m_uRemote, "http") Then
+    If Not pvParseUrl(Url, m_uRemote, "http") Then
         On Error GoTo 0
         Err.Raise vbObjectError, , ERR_INVALID_URL
     End If
@@ -524,15 +524,15 @@ Private Function pvIsProtocolSecure(sProtocol As String) As Boolean
     pvIsProtocolSecure = (LCase$(sProtocol) = "https")
 End Function
 
-Private Function IStream_Read(pstm As IUnknown, baBuffer() As Byte, Optional BytesRead As Long) As Long
-    If Not pstm Is Nothing And UBound(baBuffer) >= 0 Then
-        IStream_Read = DispCallByVtbl(pstm, 3, VarPtr(baBuffer(0)), UBound(baBuffer) + 1, VarPtr(BytesRead))
+Private Function IStream_Read(pStm As IUnknown, baBuffer() As Byte, Optional BytesRead As Long) As Long
+    If Not pStm Is Nothing And UBound(baBuffer) >= 0 Then
+        IStream_Read = DispCallByVtbl(pStm, 3, VarPtr(baBuffer(0)), UBound(baBuffer) + 1, VarPtr(BytesRead))
     End If
 End Function
 
-Private Function IStream_Write(pstm As IUnknown, baBuffer() As Byte, Optional BytesWritten As Long) As Long
-    If Not pstm Is Nothing And UBound(baBuffer) >= 0 Then
-        IStream_Write = DispCallByVtbl(pstm, 4, VarPtr(baBuffer(0)), UBound(baBuffer) + 1, VarPtr(BytesWritten))
+Private Function IStream_Write(pStm As IUnknown, baBuffer() As Byte, Optional BytesWritten As Long) As Long
+    If Not pStm Is Nothing And UBound(baBuffer) >= 0 Then
+        IStream_Write = DispCallByVtbl(pStm, 4, VarPtr(baBuffer(0)), UBound(baBuffer) + 1, VarPtr(BytesWritten))
     End If
 End Function
 

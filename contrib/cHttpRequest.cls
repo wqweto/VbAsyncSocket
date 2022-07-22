@@ -141,9 +141,6 @@ Private Declare Function archive_read_data Lib "archiveint" Alias "_archive_read
     Private Declare Function CallWindowProc Lib "user32" Alias "CallWindowProcA" (ByVal lpPrevWndFunc As Long, ByVal hWnd As Long, ByVal Msg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
     Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleA" (ByVal lpModuleName As String) As Long
     Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
-    Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableA" (ByVal lpName As String, ByVal lpBuffer As String, ByVal nSize As Long) As Long
-    Private Declare Function SetEnvironmentVariable Lib "kernel32" Alias "SetEnvironmentVariableA" (ByVal lpName As String, ByVal lpValue As String) As Long
-    Private Declare Function GetCurrentProcessId Lib "kernel32" () As Long
     '--- end MST
 #End If
 
@@ -2068,7 +2065,6 @@ End Sub
 #If ImplUseTls Then
 Private Sub m_oSocket_OnCertificate(Issuers As Object, Confirmed As Boolean)
     Const FUNC_NAME     As String = "m_oSocket_OnCertificate"
-    Dim vElem           As Variant
     
     On Error GoTo EH
     '--- try to match a client certificate in CURRENT_USER\MY certificate store by Issuer's RDN
