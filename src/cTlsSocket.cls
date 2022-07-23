@@ -61,6 +61,7 @@ End Enum
 
 '--- for CryptAcquireContext
 Private Const PROV_RSA_FULL                             As Long = 1
+Private Const CRYPT_DELETEKEYSET                        As Long = &H10
 Private Const CRYPT_VERIFYCONTEXT                       As Long = &HF0000000
 '--- for CryptDecodeObjectEx
 Private Const X509_ASN_ENCODING                         As Long = 1
@@ -74,7 +75,6 @@ Private Const CRYPT_DECODE_SHARE_OID_STRING_FLAG        As Long = &H4
 Private Const CRYPT_DECODE_ALLOC_FLAG                   As Long = &H8000
 Private Const X509_NAME                                 As Long = 7
 '--- for CryptSignHash
-Private Const AT_KEYEXCHANGE                            As Long = 1
 Private Const AT_SIGNATURE                              As Long = 2
 Private Const RSA1024BIT_KEY                            As Long = &H4000000
 Private Const NTE_BAD_ALGID                             As Long = &H80090008
@@ -191,8 +191,8 @@ Private Declare Function CertFindExtension Lib "crypt32" (ByVal pszObjId As Stri
 Private Declare Function CertFindCertificateInStore Lib "crypt32" (ByVal hCertStore As Long, ByVal dwCertEncodingType As Long, ByVal dwFindFlags As Long, ByVal dwFindType As Long, pvFindPara As Any, ByVal pPrevCertContext As Long) As Long
 Private Declare Function CertSetCertificateContextProperty Lib "crypt32" (ByVal pCertContext As Long, ByVal dwPropId As Long, ByVal dwFlags As Long, pvData As Any) As Long
 Private Declare Function CertAddCertificateContextToStore Lib "crypt32" (ByVal hCertStore As Long, ByVal pCertContext As Long, ByVal dwAddDisposition As Long, ppStoreContext As Any) As Long
-'--- Cryptui
-Private Declare Function CryptUIDlgSelectCertificateFromStore Lib "cryptui" (ByVal hCertStore As Long, ByVal hWnd As Long, ByVal pwszTitle As Long, ByVal pwszDisplayString As Long, ByVal dwDontUseColumn As Long, ByVal dwFlags As Long, ByVal pvReserved As Long) As Long
+'--- cryptdlg
+Private Declare Function CertSelectCertificate Lib "cryptdlg" Alias "CertSelectCertificateW" (pCertSelectInfo As Any) As Long
 '--- NCrypt
 Private Declare Function NCryptImportKey Lib "ncrypt" (ByVal hProvider As Long, ByVal hImportKey As Long, ByVal pszBlobType As Long, pParameterList As Any, phKey As Long, pbData As Any, ByVal cbData As Long, ByVal dwFlags As Long) As Long
 Private Declare Function NCryptExportKey Lib "ncrypt" (ByVal hKey As Long, ByVal hExportKey As Long, ByVal pszBlobType As Long, pParameterList As Any, pbOutput As Any, ByVal cbOutput As Long, pcbResult As Any, ByVal dwFlags As Long) As Long
@@ -381,6 +381,26 @@ Private Type CERT_RDN
     cRDNAttr            As Long
     rgRDNAttr           As Long
     Buffer()            As CERT_RDN_ATTR
+End Type
+
+Private Type CERT_SELECT_STRUCT_W
+    dwSize              As Long
+    hWndParent          As Long
+    hInstance           As Long
+    pTemplateName       As Long
+    dwFlags             As Long
+    szTitle             As Long
+    cCertStore          As Long
+    arrayCertStore      As Long
+    szPurposeOid        As Long
+    cCertContext        As Long
+    arrayCertContext    As Long
+    lCustData           As Long
+    pfnHook             As Long
+    pfnFilter           As Long
+    szHelpFileName      As Long
+    dwHelpId            As Long
+    hProv               As Long
 End Type
 
 '=========================================================================
@@ -1974,6 +1994,7 @@ Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As 
     Const FUNC_NAME     As String = "pvPkiPkcs12ImportCertificates"
     Dim baPfx()         As Byte
     Dim uBlob           As CRYPT_DATA_BLOB
+    Dim dwFlags         As Long
     Dim hPfxStore       As Long
     Dim pCertContext    As Long
     Dim hResult         As Long
@@ -1985,9 +2006,10 @@ Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As 
     End If
     uBlob.cbData = UBound(baPfx) + 1
     uBlob.pbData = VarPtr(baPfx(0))
-    hPfxStore = PFXImportCertStore(uBlob, StrPtr(sPassword), CRYPT_EXPORTABLE Or PKCS12_NO_PERSIST_KEY)
+    dwFlags = CRYPT_EXPORTABLE Or IIf(OsVersion < ucsOsvXp, 0, PKCS12_NO_PERSIST_KEY)
+    hPfxStore = PFXImportCertStore(uBlob, StrPtr(sPassword), dwFlags)
     If hPfxStore = 0 And Err.LastDllError <> NTE_BAD_ALGID Then
-        hPfxStore = PFXImportCertStore(baPfx(0), 0, CRYPT_EXPORTABLE Or PKCS12_NO_PERSIST_KEY)
+        hPfxStore = PFXImportCertStore(baPfx(0), 0, dwFlags)
     End If
     If hPfxStore = 0 Then
         sApiSource = "PFXImportCertStore"
@@ -1999,7 +2021,7 @@ Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As 
         If pCertContext = 0 Then
             Exit Do
         End If
-        If pvPkiAppendCertContext(pCertContext, cCerts, cPrivKey) Then
+        If pvPkiAppendCertContext(pCertContext, cCerts, cPrivKey, DeleteKeyset:=True) Then
             '--- success
             pvPkiPkcs12ImportCertificates = True
         End If
@@ -2013,7 +2035,7 @@ QH:
     End If
 End Function
 
-Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Variant, ByVal hWndOwner As Long, cCerts As Collection, cPrivKey As Collection) As Boolean
+Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Variant, ByVal hWndParent As Long, cCerts As Collection, cPrivKey As Collection) As Boolean
     Const FUNC_NAME     As String = "pvPkiSystemStoreImportCertificate"
     Dim hMemStore       As Long
     Dim hCertStore      As Long
@@ -2025,6 +2047,7 @@ Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Var
     Dim sCertName       As String
     Dim dwFindType      As Long
     Dim pvFindPara      As Long
+    Dim uSelect         As CERT_SELECT_STRUCT_W
     Dim hResult         As Long
     Dim sApiSource      As String
     
@@ -2066,7 +2089,7 @@ Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Var
         End If
     End If
     If pCertContext <> 0 Then
-        If hWndOwner <> 0 Then
+        If hWndParent <> 0 Then
             hMemStore = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, CERT_STORE_CREATE_NEW_FLAG, 0)
             If hMemStore = 0 Then
                 hResult = Err.LastDllError
@@ -2074,24 +2097,29 @@ Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Var
                 GoTo QH
             End If
             Do While pCertContext <> 0
-                hResult = CertAddCertificateContextToStore(hMemStore, pCertContext, CERT_STORE_ADD_USE_EXISTING, ByVal 0)
-                If hResult < 0 Then
-                    '--- continue
-                End If
+                Call CertAddCertificateContextToStore(hMemStore, pCertContext, CERT_STORE_ADD_USE_EXISTING, ByVal 0)
                 pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, pCertContext)
             Loop
-            pCertContext = CryptUIDlgSelectCertificateFromStore(hMemStore, hWndOwner, 0, 0, 0, 0, 0)
-            If pCertContext <> 0 Then
-                If pvPkiAppendCertChain(pCertContext, hCertStore, cCerts, cPrivKey) Then
-                    '--- success
-                    pvPkiSystemStoreImportCertificate = True
+            With uSelect
+                .dwSize = LenB(uSelect)
+                .hWndParent = hWndParent
+                .cCertStore = 1
+                .arrayCertStore = VarPtr(hMemStore)
+                .cCertContext = 1
+                pCertContext = CertEnumCertificatesInStore(hMemStore, 0)
+                .arrayCertContext = VarPtr(pCertContext)
+            End With
+            If CertSelectCertificate(uSelect) = 0 Or pCertContext = 0 Then
+                hResult = Err.LastDllError
+                If hResult < 0 Then
+                    sApiSource = "CertSelectCertificate"
                 End If
+                GoTo QH
             End If
-        Else
-            If pvPkiAppendCertChain(pCertContext, hCertStore, cCerts, cPrivKey) Then
-                '--- success
-                pvPkiSystemStoreImportCertificate = True
-            End If
+        End If
+        If pvPkiAppendCertChain(pCertContext, hCertStore, cCerts, cPrivKey) Then
+            '--- success
+            pvPkiSystemStoreImportCertificate = True
         End If
     End If
 QH:
@@ -2481,7 +2509,7 @@ QH:
     End If
 End Function
 
-Private Function pvPkiAppendCertContext(ByVal pCertContext As Long, cCerts As Collection, cPrivKey As Collection) As Boolean
+Private Function pvPkiAppendCertContext(ByVal pCertContext As Long, cCerts As Collection, cPrivKey As Collection, Optional ByVal DeleteKeyset As Boolean) As Boolean
     Const FUNC_NAME     As String = "pvPkiAppendCertContext"
     Dim uCertContext    As CERT_CONTEXT
     Dim baBuffer()      As Byte
@@ -2498,7 +2526,7 @@ Private Function pvPkiAppendCertContext(ByVal pCertContext As Long, cCerts As Co
         End If
         cCerts.Add baBuffer
     End If
-    If pvPkiExportPrivateKey(pCertContext, baPrivKey) Then
+    If pvPkiExportPrivateKey(pCertContext, DeleteKeyset, baPrivKey) Then
         If cCerts.Count > 1 Then
             '--- move certificate w/ private key to the beginning of the collection
             baBuffer = cCerts.Item(cCerts.Count)
@@ -2512,7 +2540,7 @@ Private Function pvPkiAppendCertContext(ByVal pCertContext As Long, cCerts As Co
     End If
 End Function
 
-Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, baPrivKey() As Byte) As Boolean
+Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDeleteKeyset As Boolean, baPrivKey() As Byte) As Boolean
     Const FUNC_NAME     As String = "pvPkiExportPrivateKey"
     Dim dwFlags         As Long
     Dim hProvOrKey      As Long
@@ -2587,7 +2615,7 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, baPrivKey() A
             With uProvInfo
                 .dwProvType = PROV_RSA_FULL
                 .dwFlags = CRYPT_VERIFYCONTEXT
-                .dwKeySpec = AT_KEYEXCHANGE
+                .dwKeySpec = lKeySpec
             End With
         Else
             pvArrayAllocate baBuffer, lSize, FUNC_NAME & ".baBuffer"
@@ -2658,6 +2686,9 @@ QH:
     End If
     If hNewKey <> 0 Then
         Call NCryptFreeObject(hNewKey)
+    End If
+    If bDeleteKeyset And uProvInfo.pwszContainerName <> 0 Then
+        Call CryptAcquireContext(0, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags Or CRYPT_DELETEKEYSET)
     End If
     If LenB(sApiSource) <> 0 Then
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
