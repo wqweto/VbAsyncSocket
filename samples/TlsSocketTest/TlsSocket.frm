@@ -2,14 +2,14 @@ VERSION 5.00
 Begin VB.Form TlsSocket 
    BorderStyle     =   1  'Fixed Single
    Caption         =   "Test SvTLS"
-   ClientHeight    =   645
-   ClientLeft      =   45
-   ClientTop       =   390
-   ClientWidth     =   3270
+   ClientHeight    =   636
+   ClientLeft      =   48
+   ClientTop       =   396
+   ClientWidth     =   3264
    LinkTopic       =   "Form1"
    MaxButton       =   0   'False
-   ScaleHeight     =   645
-   ScaleWidth      =   3270
+   ScaleHeight     =   636
+   ScaleWidth      =   3264
    StartUpPosition =   2  'CenterScreen
    Begin VB.CommandButton Command1 
       Caption         =   "Listen"
@@ -42,6 +42,9 @@ Private Sub Form_Unload(Cancel As Integer)
 End Sub
 
 Private Sub Command1_Click()
+    Dim sAddr As String
+    Dim lPort As Long
+    Dim sClipText As String
     Set Serversck = New cTlsSocket
     If Not Serversck.InitServerTls() Then
         GoTo QH
@@ -51,6 +54,13 @@ Private Sub Command1_Click()
     End If
     If Not Serversck.Listen() Then
         GoTo QH
+    End If
+    If Serversck.GetSockName(sAddr, lPort) Then
+        sClipText = "curl https://" & sAddr & ":" & lPort & " -k -v"
+        Clipboard.Clear
+        Clipboard.SetText sClipText
+        MsgBox "Server succesfully listening on " & sAddr & ":" & lPort & " for incomming connections" & vbCrLf & vbCrLf & _
+               "Command """ & sClipText & """ copied to clipboard", vbExclamation
     End If
 QH:
 End Sub

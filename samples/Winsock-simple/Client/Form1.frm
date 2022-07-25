@@ -211,7 +211,7 @@ Sub SendConnect()
     g_iPort = CLng(txtPort.Text)
     
     ctxWinsock.Protocol = IIf(optHTTP.Value, sckTCPProtocol, sckTLSProtocol)
-    ctxWinsock.Connect g_sHost, g_iPort
+    ctxWinsock.Connect g_sHost, g_iPort, ucsTlsIgnoreServerCertificateErrors
 End Sub
 
 Private Sub ctxWinsock_Connect()
@@ -282,14 +282,24 @@ Private Sub cmbTemplate_Click()
     sItem = cmbTemplate.List(cmbTemplate.ListIndex)
     Select Case sItem
         Case "localhost":
+            optHTTPS.Value = True
             txtKey.Text = "testKey"
             txtValue.Text = "testValue"
             txtAddress.Text = "localhost"
             txtPort.Text = "8088"
         Case "GET":
+            optHTTP.Value = True
             txtKey.Text = "ip"
             txtValue.Text = ""
             txtAddress.Text = "ifconfig.co"
             txtPort.Text = "80"
     End Select
+End Sub
+
+Private Sub optHTTP_Click()
+    txtPort.Text = 80
+End Sub
+
+Private Sub optHTTPS_Click()
+    txtPort.Text = 443
 End Sub
