@@ -75,7 +75,7 @@ Private Const CRYPT_DECODE_SHARE_OID_STRING_FLAG        As Long = &H4
 Private Const CRYPT_DECODE_ALLOC_FLAG                   As Long = &H8000
 Private Const X509_NAME                                 As Long = 7
 '--- for CryptSignHash
-Private Const AT_SIGNATURE                              As Long = 2
+Private Const AT_KEYEXCHANGE                            As Long = 1
 Private Const RSA1024BIT_KEY                            As Long = &H4000000
 Private Const NTE_BAD_ALGID                             As Long = &H80090008
 '--- for CertGetCertificateContextProperty
@@ -89,6 +89,7 @@ Private Const PRIVATEKEYBLOB                            As Long = 7
 '--- for CryptAcquireCertificatePrivateKey
 Private Const CRYPT_ACQUIRE_CACHE_FLAG                  As Long = &H1
 Private Const CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG       As Long = &H10000
+Private Const CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG      As Long = &H20000
 '--- for NCryptImportKey
 Private Const NCRYPT_OVERWRITE_KEY_FLAG                 As Long = &H80
 Private Const NCRYPT_DO_NOT_FINALIZE_FLAG               As Long = &H400
@@ -2153,7 +2154,7 @@ Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey 
     With uProvInfo
         .dwProvType = PROV_RSA_FULL
         .dwFlags = CRYPT_VERIFYCONTEXT
-        .dwKeySpec = AT_SIGNATURE
+        .dwKeySpec = AT_KEYEXCHANGE
     End With
     If CryptAcquireContext(hProv, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags) = 0 Then
         hResult = Err.LastDllError
@@ -2513,7 +2514,6 @@ Private Function pvPkiAppendCertContext(ByVal pCertContext As Long, cCerts As Co
     Const FUNC_NAME     As String = "pvPkiAppendCertContext"
     Dim uCertContext    As CERT_CONTEXT
     Dim baBuffer()      As Byte
-    Dim baPrivKey()     As Byte
     
     Debug.Assert pCertContext <> 0
     Call CopyMemory(uCertContext, ByVal pCertContext, Len(uCertContext))
@@ -2526,92 +2526,101 @@ Private Function pvPkiAppendCertContext(ByVal pCertContext As Long, cCerts As Co
         End If
         cCerts.Add baBuffer
     End If
-    If pvPkiExportPrivateKey(pCertContext, DeleteKeyset, baPrivKey) Then
+    If pvPkiExportPrivateKey(pCertContext, DeleteKeyset, cPrivKey) Then
         If cCerts.Count > 1 Then
             '--- move certificate w/ private key to the beginning of the collection
             baBuffer = cCerts.Item(cCerts.Count)
             cCerts.Remove cCerts.Count
             cCerts.Add baBuffer, Before:=1
         End If
-        Set cPrivKey = New Collection
-        cPrivKey.Add baPrivKey
         '--- success
         pvPkiAppendCertContext = True
     End If
 End Function
 
-Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDeleteKeyset As Boolean, baPrivKey() As Byte) As Boolean
+Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDeleteKeyset As Boolean, cPrivKey As Collection) As Boolean
     Const FUNC_NAME     As String = "pvPkiExportPrivateKey"
+    Dim baPrivKey()     As Byte
     Dim dwFlags         As Long
-    Dim hProvOrKey      As Long
+    Dim hProv           As Long
     Dim lKeySpec        As Long
     Dim lFree           As Long
-    Dim hCngKey         As Long
-    Dim hNewKey         As Long
+    Dim hNProv          As Long
+    Dim hNKey           As Long
     Dim lSize           As Long
     Dim baBuffer()      As Byte
     Dim uProvInfo       As CRYPT_KEY_PROV_INFO
     Dim hProvGetUserKey As Long
-    Dim hProv           As Long
     Dim hKey            As Long
     Dim lMagic          As Long
     Dim hResult         As Long
     Dim sApiSource      As String
-    
-    '--- note: this function allows using CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG too for key export w/ all CNG API calls
-    dwFlags = CRYPT_ACQUIRE_CACHE_FLAG Or CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG
-    If CryptAcquireCertificatePrivateKey(pCertContext, dwFlags, 0, hProvOrKey, lKeySpec, lFree) = 0 Then
-        GoTo QH
+
+    dwFlags = CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG Or CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG
+    If CryptAcquireCertificatePrivateKey(pCertContext, dwFlags, 0, hProv, lKeySpec, lFree) = 0 Then
+        dwFlags = dwFlags Or CRYPT_ACQUIRE_CACHE_FLAG
+        If CryptAcquireCertificatePrivateKey(pCertContext, dwFlags, 0, hProv, lKeySpec, lFree) = 0 Then
+            GoTo QH
+        End If
     End If
+    Set cPrivKey = New Collection
     If lKeySpec < 0 Then
-        hCngKey = hProvOrKey: hProvOrKey = 0
-        hNewKey = pvPkiCloneKeyWithExportPolicy(hCngKey, NCRYPT_ALLOW_EXPORT_FLAG Or NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG)
-        hResult = NCryptExportKey(hNewKey, 0, StrPtr("PRIVATEBLOB"), ByVal 0, ByVal 0, 0, lSize, 0)
-        If hResult < 0 Then
-            sApiSource = "NCryptExportKey(PRIVATEBLOB)"
-            GoTo QH
-        End If
-        pvArrayAllocate baBuffer, lSize, FUNC_NAME & ".baBuffer"
-        hResult = NCryptExportKey(hNewKey, 0, StrPtr("PRIVATEBLOB"), ByVal 0, baBuffer(0), UBound(baBuffer) + 1, lSize, 0)
-        If hResult < 0 Then
-            sApiSource = "NCryptExportKey(PRIVATEBLOB)#2"
-            GoTo QH
-        End If
-        Debug.Assert UBound(baBuffer) + 1 >= 4
-        Call CopyMemory(lMagic, baBuffer(0), 4)
-        Select Case lMagic
-        Case BCRYPT_RSAPRIVATE_MAGIC
-            hResult = NCryptExportKey(hNewKey, 0, StrPtr("RSAFULLPRIVATEBLOB"), ByVal 0, ByVal 0, 0, lSize, 0)
+        hNKey = pvPkiCloneKeyWithExportPolicy(hProv, NCRYPT_ALLOW_EXPORT_FLAG Or NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG)
+        If hNKey = 0 Then
+            Debug.Assert (dwFlags And CRYPT_ACQUIRE_CACHE_FLAG) = 0
+            cPrivKey.Add pvNCryptGetStringProperty(hProv, "Name")
+            hResult = NCryptGetProperty(hProv, StrPtr("Provider Handle"), hNProv, 4, 0, 0)
+            Debug.Assert Not hResult < 0
+            cPrivKey.Add pvNCryptGetStringProperty(hNProv, "Name")
+        Else
+            hResult = NCryptExportKey(hNKey, 0, StrPtr("PRIVATEBLOB"), ByVal 0, ByVal 0, 0, lSize, 0)
             If hResult < 0 Then
-                sApiSource = "NCryptExportKey(RSAFULLPRIVATEBLOB)"
+                sApiSource = "NCryptExportKey(PRIVATEBLOB)"
                 GoTo QH
             End If
             pvArrayAllocate baBuffer, lSize, FUNC_NAME & ".baBuffer"
-            hResult = NCryptExportKey(hNewKey, 0, StrPtr("RSAFULLPRIVATEBLOB"), ByVal 0, baBuffer(0), UBound(baBuffer) + 1, lSize, 0)
+            hResult = NCryptExportKey(hNKey, 0, StrPtr("PRIVATEBLOB"), ByVal 0, baBuffer(0), UBound(baBuffer) + 1, lSize, 0)
             If hResult < 0 Then
-                sApiSource = "NCryptExportKey(RSAFULLPRIVATEBLOB)#2"
+                sApiSource = "NCryptExportKey(PRIVATEBLOB)#2"
                 GoTo QH
             End If
-            If Not pvPkiExportRsaPrivateKey(baPrivKey, baBuffer, CNG_RSA_PRIVATE_KEY_BLOB) Then
-                GoTo QH
-            End If
-        Case BCRYPT_ECDH_PRIVATE_P256_MAGIC, BCRYPT_ECDH_PRIVATE_P384_MAGIC, BCRYPT_ECDH_PRIVATE_P521_MAGIC
-            Debug.Assert UBound(baBuffer) + 1 >= 8
-            Call CopyMemory(lSize, baBuffer(4), 4)
-            Debug.Assert UBound(baBuffer) + 1 >= 8 + 3 * lSize
-            Call CopyMemory(baBuffer(0), baBuffer(8 + 2 * lSize), lSize)
-            pvArrayReallocate baBuffer, lSize, FUNC_NAME & ".baBuffer"
-            If Not pvPkiExportEccPrivateKey(baPrivKey, baBuffer, lMagic) Then
-                GoTo QH
-            End If
-        Case Else
-            #If ImplUseDebugLog Then
-                DebugLog MODULE_NAME, FUNC_NAME, Replace(ERR_UNKNOWN_CNG_MAGIC, "%1", "&H" & Hex$(lMagic)), vbLogEventTypeWarning
-            #End If
-        End Select
-    Else
+            Debug.Assert UBound(baBuffer) + 1 >= 4
+            Call CopyMemory(lMagic, baBuffer(0), 4)
+            Select Case lMagic
+            Case BCRYPT_RSAPRIVATE_MAGIC
+                hResult = NCryptExportKey(hNKey, 0, StrPtr("RSAFULLPRIVATEBLOB"), ByVal 0, ByVal 0, 0, lSize, 0)
+                If hResult < 0 Then
+                    sApiSource = "NCryptExportKey(RSAFULLPRIVATEBLOB)"
+                    GoTo QH
+                End If
+                pvArrayAllocate baBuffer, lSize, FUNC_NAME & ".baBuffer"
+                hResult = NCryptExportKey(hNKey, 0, StrPtr("RSAFULLPRIVATEBLOB"), ByVal 0, baBuffer(0), UBound(baBuffer) + 1, lSize, 0)
+                If hResult < 0 Then
+                    sApiSource = "NCryptExportKey(RSAFULLPRIVATEBLOB)#2"
+                    GoTo QH
+                End If
+                If Not pvPkiExportRsaPrivateKey(baPrivKey, baBuffer, CNG_RSA_PRIVATE_KEY_BLOB) Then
+                    GoTo QH
+                End If
+            Case BCRYPT_ECDH_PRIVATE_P256_MAGIC, BCRYPT_ECDH_PRIVATE_P384_MAGIC, BCRYPT_ECDH_PRIVATE_P521_MAGIC
+                Debug.Assert UBound(baBuffer) + 1 >= 8
+                Call CopyMemory(lSize, baBuffer(4), 4)
+                Debug.Assert UBound(baBuffer) + 1 >= 8 + 3 * lSize
+                Call CopyMemory(baBuffer(0), baBuffer(8 + 2 * lSize), lSize)
+                pvArrayReallocate baBuffer, lSize, FUNC_NAME & ".baBuffer"
+                If Not pvPkiExportEccPrivateKey(baPrivKey, baBuffer, lMagic) Then
+                    GoTo QH
+                End If
+            Case Else
+                #If ImplUseDebugLog Then
+                    DebugLog MODULE_NAME, FUNC_NAME, Replace(ERR_UNKNOWN_CNG_MAGIC, "%1", "&H" & Hex$(lMagic)), vbLogEventTypeWarning
+                #End If
+            End Select
+            cPrivKey.Add baPrivKey
+        End If
+   Else
         If CertGetCertificateContextProperty(pCertContext, CERT_KEY_PROV_INFO_PROP_ID, ByVal 0, lSize) = 0 Then
-            '--- can assume there is an ephemeral key in CERT_KEY_PROV_HANDLE_PROP_ID context property
+            '--- assume there is an ephemeral key in CERT_KEY_PROV_HANDLE_PROP_ID context property
             With uProvInfo
                 .dwProvType = PROV_RSA_FULL
                 .dwFlags = CRYPT_VERIFYCONTEXT
@@ -2628,28 +2637,25 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
             Call CopyMemory(uProvInfo, baBuffer(0), LenB(uProvInfo))
         End If
         If CertGetCertificateContextProperty(pCertContext, CERT_KEY_PROV_HANDLE_PROP_ID, hProvGetUserKey, 4) = 0 Then
-            If CryptAcquireContext(hProv, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags) = 0 Then
-                hResult = Err.LastDllError
-                sApiSource = "CryptAcquireContext"
-                GoTo QH
-            End If
             hProvGetUserKey = hProv
+            lKeySpec = uProvInfo.dwKeySpec
         End If
-        If CryptGetUserKey(hProvGetUserKey, uProvInfo.dwKeySpec, hKey) = 0 Then
+        If CryptGetUserKey(hProvGetUserKey, lKeySpec, hKey) = 0 Then
             hResult = Err.LastDllError
             sApiSource = "CryptGetUserKey"
             GoTo QH
         End If
         If CryptExportKey(hKey, 0, PRIVATEKEYBLOB, 0, ByVal 0, lSize) = 0 Then
-            lSize = LenB(uProvInfo)
-            pvArrayAllocate baPrivKey, lSize, FUNC_NAME & ".baPrivKey"
-            Call CopyMemory(baPrivKey(0), uProvInfo, lSize)
+ExportFailed:
+            cPrivKey.Add pvToStringW(uProvInfo.pwszContainerName)
+            cPrivKey.Add pvToStringW(uProvInfo.pwszProvName)
+            cPrivKey.Add uProvInfo.dwProvType
+            cPrivKey.Add lKeySpec
         Else
             pvArrayAllocate baBuffer, lSize, FUNC_NAME & ".baBuffer"
             If CryptExportKey(hKey, 0, PRIVATEKEYBLOB, 0, baBuffer(0), lSize) = 0 Then
-                hResult = Err.LastDllError
-                sApiSource = "CryptExportKey(PRIVATEKEYBLOB)#2"
-                GoTo QH
+                '--- NT4 fails late on non-exportable keys
+                GoTo ExportFailed
             End If
             Debug.Assert UBound(baBuffer) + 1 >= 12
             Call CopyMemory(lMagic, baBuffer(8), 4)
@@ -2667,6 +2673,7 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
                     DebugLog MODULE_NAME, FUNC_NAME, Replace(ERR_UNKNOWN_CAPI_MAGIC, "%1", "&H" & Hex$(lMagic)), vbLogEventTypeWarning
                 #End If
             End Select
+            cPrivKey.Add baPrivKey
         End If
     End If
     '--- success
@@ -2675,17 +2682,18 @@ QH:
     If hKey <> 0 Then
         Call CryptDestroyKey(hKey)
     End If
-    If hProv <> 0 Then
-        Call CryptReleaseContext(hProv, 0)
+    If hProv <> 0 And lFree <> 0 Then
+        If lKeySpec < 0 Then
+            Call NCryptFreeObject(hProv)
+        Else
+            Call CryptReleaseContext(hProv, 0)
+        End If
     End If
-    If hProvOrKey <> 0 And lFree <> 0 Then
-        Call CryptReleaseContext(hProvOrKey, 0)
+    If hNProv <> 0 Then
+        Call NCryptFreeObject(hNProv)
     End If
-    If hCngKey <> 0 And lFree <> 0 Then
-        Call NCryptFreeObject(hCngKey)
-    End If
-    If hNewKey <> 0 Then
-        Call NCryptFreeObject(hNewKey)
+    If hNKey <> 0 Then
+        Call NCryptFreeObject(hNKey)
     End If
     If bDeleteKeyset And uProvInfo.pwszContainerName <> 0 Then
         Call CryptAcquireContext(0, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags Or CRYPT_DELETEKEYSET)
@@ -2818,17 +2826,16 @@ Private Function pvPkiCloneKeyWithExportPolicy(ByVal hKey As Long, ByVal lPolicy
     End With
     hResult = NCryptExportKey(hKey, 0, StrPtr("PKCS8_PRIVATEKEY"), uParams, ByVal 0, 0, lSize, 0)
     If hResult < 0 Then
-        sApiSource = "NCryptExportKey(PKCS8_PRIVATEKEY)"
         GoTo QH
     End If
     pvArrayAllocate baPkcs8, lSize, FUNC_NAME & ".baPkcs8"
     hResult = NCryptExportKey(hKey, 0, StrPtr("PKCS8_PRIVATEKEY"), uParams, baPkcs8(0), UBound(baPkcs8) + 1, lSize, 0)
     If hResult < 0 Then
-        sApiSource = "NCryptExportKey(PKCS8_PRIVATEKEY)#2"
+        sApiSource = "NCryptExportKey(PKCS8_PRIVATEKEY)"
         GoTo QH
     End If
     '--- retrieve more key props
-    hResult = NCryptGetProperty(hKey, StrPtr("Provider Handle"), hProv, 4, lSize, 0)
+    hResult = NCryptGetProperty(hKey, StrPtr("Provider Handle"), hProv, 4, 0, 0)
     If hResult < 0 Then
         sApiSource = "NCryptGetProperty(Provider Handle)"
         GoTo QH
@@ -2971,6 +2978,26 @@ Private Function pvPkiParseSelectorString(ByVal Subject As String, lStoreFlags A
     End If
     '--- success
     pvPkiParseSelectorString = True
+End Function
+
+Private Function pvNCryptGetStringProperty(ByVal hNKey As String, sPropName As String) As String
+    Const FUNC_NAME     As String = "pvNCryptGetStringProperty"
+    Dim lSize           As Long
+    Dim baBuffer()      As Byte
+    Dim hResult         As Long
+    
+    hResult = NCryptGetProperty(hNKey, StrPtr(sPropName), ByVal 0, 0, lSize, 0)
+    If hResult < 0 Then
+        GoTo QH
+    End If
+    pvArrayAllocate baBuffer, lSize, FUNC_NAME & ".baBuffer"
+    hResult = NCryptGetProperty(hNKey, StrPtr(sPropName), baBuffer(0), UBound(baBuffer) + 1, lSize, 0)
+    If hResult < 0 Then
+        GoTo QH
+    End If
+    '--- remove trailing terminating zero too
+    pvNCryptGetStringProperty = Replace(CStr(baBuffer), vbNullChar, vbNullString)
+QH:
 End Function
 
 Private Function pvToStringW(ByVal lPtr As Long) As String

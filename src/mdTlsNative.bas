@@ -1298,11 +1298,16 @@ End Function
 
 Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collection, sOutKeyName As String, pOutCertContext As Long) As Boolean
     Const FUNC_NAME     As String = "pvTlsImportToCertStore"
+    Const IDX_KEYNAME   As Long = 1
+    Const IDX_PROVNAME  As Long = 2
+    Const IDX_PROVTYPE  As Long = 3
+    Const IDX_KEYSPEC   As Long = 4
     Dim hCertStore      As Long
     Dim lIdx            As Long
     Dim baCert()        As Byte
     Dim pCertContext    As Long
     Dim baPrivKey()     As Byte
+    Dim sProvName       As String
     Dim sKeyName        As String
     Dim hProv           As Long
     Dim hKey            As Long
@@ -1334,10 +1339,19 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
             GoTo QH
         End If
     Next
-    If pCertContext <> 0 And SearchCollection(cPrivKey, 1, RetVal:=baPrivKey) Then
-        If UBound(baPrivKey) + 1 = LenB(uProvInfo) Then
-            Call CopyMemory(uProvInfo, baPrivKey(0), LenB(uProvInfo))
-        Else
+    If pCertContext <> 0 Then
+        If cPrivKey.Count > 1 Then
+            With cPrivKey
+                sKeyName = .Item(IDX_KEYNAME)
+                sProvName = .Item(IDX_PROVNAME)
+                uProvInfo.pwszContainerName = StrPtr(sKeyName)
+                uProvInfo.pwszProvName = StrPtr(sProvName)
+                If .Count > IDX_PROVNAME Then
+                    uProvInfo.dwProvType = .Item(IDX_PROVTYPE)
+                    uProvInfo.dwKeySpec = .Item(IDX_KEYSPEC)
+                End If
+            End With
+        ElseIf SearchCollection(cPrivKey, 1, RetVal:=baPrivKey) Then
             sKeyName = "VbAsyncSocket" & pvGetRandomString()
             If Not pvAsn1DecodePrivateKey(baPrivKey, uPrivKeyInfo) Then
                 GoTo QH
