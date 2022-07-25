@@ -132,9 +132,8 @@ End Sub
 '=========================================================================
 
 Private Sub Form_Load()
-    Const PEM_FILES     As String = "" ' "eccert.pem|ecprivkey.pem|fullchain2.pem"
-    Const PFX_FILE      As String = "" ' "eccert.pfx"
-    Const PFX_PASSWORD  As String = ""
+    Const STR_CERTFILE  As String = "" ' "eccert.pfx" ' "eccert.pem|ecprivkey.pem|fullchain2.pem"
+    Const STR_PASSWORD  As String = ""
     Dim vElem           As Variant
     Dim sAddr           As String
     Dim lPort           As Long
@@ -155,7 +154,7 @@ Private Sub Form_Load()
     m_oRootCa.ImportPemRootCaCertStore App.Path & "\ca-bundle.pem"
     Set m_oServerSocket = New cTlsSocket
     ChDir App.Path
-    If Not m_oServerSocket.InitServerTls(PemFiles:=PEM_FILES, PfxFile:=PFX_FILE, Password:=PFX_PASSWORD) Then
+    If Not m_oServerSocket.InitServerTls(STR_CERTFILE, STR_PASSWORD) Then
         MsgBox "Error starting TLS server on localhost:10443" & vbCrLf & vbCrLf & "No private key found!", vbExclamation
         GoTo QH
     End If
@@ -429,10 +428,12 @@ Private Function pvSetVisible(oCtl As Object, ByVal bValue As Boolean) As Boolea
 End Function
 
 Private Sub m_oServerSocket_OnCertificate(Issuers As Object, Confirmed As Boolean)
-    Const PFX_FILE      As String = "eccert.pfx"
-    Const PFX_PASSWORD  As String = ""
+    Const STR_CERTFILE  As String = "eccert.pfx"
+    Const STR_PASSWORD  As String = ""
     
-    Confirmed = m_oServerSocket.ImportPkcs12Certificates(PFX_FILE, PFX_PASSWORD)
+    Confirmed = m_oServerSocket.ImportPkcs12Certificates(STR_CERTFILE, STR_PASSWORD)
+'    Confirmed = m_oServerSocket.ImportSystemStoreCertificates("cd18a3874e7ce0b3ef30c6914b8f618979fcf577")
+'    Confirmed = m_oServerSocket.ImportSystemStoreCertificates("68b5220077de8bbeaed8e1c2540fec6c16b418a8")
 End Sub
 
 Private Sub m_oSocket_OnCertificate(Issuers As Object, Confirmed As Boolean)

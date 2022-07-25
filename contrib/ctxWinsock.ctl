@@ -391,14 +391,14 @@ EH:
 End Sub
 
 Public Sub Listen( _
-            Optional PemFiles As String, _
-            Optional PfxFile As String, _
+            Optional CertFile As String, _
             Optional Password As String, _
+            Optional CertSubject As String, _
             Optional Certificates As Collection, _
             Optional PrivateKey As Collection)
     On Error GoTo EH
     If m_eProtocol = sckTLSProtocol Then
-        If Not pvSocket.InitServerTls(PemFiles, PfxFile, Password, Certificates, PrivateKey) Then
+        If Not pvSocket.InitServerTls(CertFile, Password, CertSubject, Certificates, PrivateKey) Then
             On Error GoTo 0
             pvSetError LastError:=m_oSocket.LastError, RaiseError:=True
         End If

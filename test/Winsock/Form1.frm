@@ -84,12 +84,12 @@ Private Sub Command4_Click()
     ctxServer(0).Close_
     ctxServer(0).Protocol = sckTLSProtocol
     ctxServer(0).Bind 8088, "127.0.0.1"
-    ctxServer(0).Listen
+    ctxServer(0).Listen ' CertSubject:="68b5220077de8bbeaed8e1c2540fec6c16b418a8"
     Shell "cmd /c start https://localhost:8088/"
 End Sub
 
 Private Sub ctxServer_Error(Index As Integer, ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
-    MsgBox Description & " &H" & Hex$(Number) & "[" & Source & "]", vbCritical, "ctxServer(" & Index & ")_Error"
+    MsgBox Description & " &H" & Hex$(Number) & " [" & Source & "]", vbCritical, "ctxServer(" & Index & ")_Error"
 End Sub
 
 Private Sub ctxWinsock_Connect()
@@ -152,5 +152,5 @@ Private Sub ctxServer_Close(Index As Integer)
 End Sub
 
 Private Sub ctxWinsock_Error(ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
-    MsgBox Description & " &H" & Hex$(Number) & "[" & Source & "]", vbCritical, "ctxWinsock_Error"
+    MsgBox Description & " &H" & Hex$(Number) & " [" & Source & "]", vbCritical, "ctxWinsock_Error"
 End Sub

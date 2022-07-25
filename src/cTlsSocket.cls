@@ -615,13 +615,14 @@ End Property
 '=========================================================================
 
 Public Function InitServerTls( _
-            Optional PemFiles As String, _
-            Optional PfxFile As String, _
+            Optional CertFile As String, _
             Optional Password As String, _
+            Optional CertSubject As String, _
             Optional Certificates As Collection, _
             Optional PrivateKey As Collection, _
             Optional AlpnProtocols As String, _
             Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum) As Boolean
+    Const FUNC_NAME     As String = "InitServerTls"
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
     
@@ -633,15 +634,22 @@ Public Function InitServerTls( _
         Set cPrivKey = PrivateKey
         GoTo StartTls
     End If
-    If LenB(PemFiles) <> 0 Then
-        If pvPkiPemImportCertificates(Split(PemFiles, "|"), cCerts, cPrivKey) Then
+    If LenB(CertFile) <> 0 Then
+        If pvPkiPkcs12ImportCertificates(CertFile, Password, cCerts, cPrivKey) Then
             GoTo StartTls
         End If
+        If pvPkiPemImportCertificates(Split(CertFile, "|"), cCerts, cPrivKey) Then
+            GoTo StartTls
+        End If
+        pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
+        GoTo QH
     End If
-    If LenB(PfxFile) <> 0 Then
-        If pvPkiPkcs12ImportCertificates(PfxFile, Password, cCerts, cPrivKey) Then
+    If LenB(CertSubject) <> 0 Then
+        If pvPkiSystemStoreImportCertificate(CertSubject, 0, cCerts, cPrivKey) Then
             GoTo StartTls
         End If
+        pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
+        GoTo QH
     End If
 StartTls:
     m_bUseTls = True
@@ -1867,11 +1875,11 @@ End Sub
 ' PKI
 '=========================================================================
 
-Public Function ImportPemCertificates(PemFiles As String) As Boolean
+Public Function ImportPemCertificates(CertFile As String, Optional Password As String) As Boolean
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
 
-    If pvPkiPemImportCertificates(Split(PemFiles, "|"), cCerts, cPrivKey) Then
+    If pvPkiPemImportCertificates(Split(CertFile, "|"), cCerts, cPrivKey) Then
         Set LocalCertificates = cCerts
         Set LocalPrivateKey = cPrivKey
         '--- success
@@ -1879,11 +1887,11 @@ Public Function ImportPemCertificates(PemFiles As String) As Boolean
     End If
 End Function
 
-Public Function ImportPkcs12Certificates(PfxFile As String, Optional Password As String) As Boolean
+Public Function ImportPkcs12Certificates(CertFile As String, Optional Password As String) As Boolean
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
 
-    If pvPkiPkcs12ImportCertificates(PfxFile, Password & "", cCerts, cPrivKey) Then
+    If pvPkiPkcs12ImportCertificates(CertFile, Password & "", cCerts, cPrivKey) Then
         Set LocalCertificates = cCerts
         Set LocalPrivateKey = cPrivKey
         '--- success
@@ -1891,11 +1899,11 @@ Public Function ImportPkcs12Certificates(PfxFile As String, Optional Password As
     End If
 End Function
 
-Public Function ImportSystemStoreCertificates(SubjectOrIssuers As Variant, Optional ByVal hWndOwner As Long) As Boolean
+Public Function ImportSystemStoreCertificates(CertSubject As Variant, Optional ByVal hWndOwner As Long) As Boolean
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
     
-    If Not pvPkiSystemStoreImportCertificate(SubjectOrIssuers, hWndOwner, cCerts, cPrivKey) Then
+    If Not pvPkiSystemStoreImportCertificate(CertSubject, hWndOwner, cCerts, cPrivKey) Then
         GoTo QH
     End If
     Set LocalCertificates = cCerts
@@ -1905,11 +1913,11 @@ Public Function ImportSystemStoreCertificates(SubjectOrIssuers As Variant, Optio
 QH:
 End Function
 
-Public Function ImportPemRootCaCertStore(Optional CaBundlePemFile As String, Optional RootCa As cTlsSocket) As Boolean
+Public Function ImportPemRootCaCertStore(Optional CaBundleFile As String, Optional RootCa As cTlsSocket) As Boolean
     Dim hCertStore      As Long
     
-    If LenB(CaBundlePemFile) <> 0 Then
-        hCertStore = pvPkiPemImportRootCaCertStore(CaBundlePemFile)
+    If LenB(CaBundleFile) <> 0 Then
+        hCertStore = pvPkiPemImportRootCaCertStore(CaBundleFile)
         If hCertStore = 0 Then
             GoTo QH
         End If
@@ -1952,7 +1960,7 @@ Private Function pvPkiPemImportCertificates(ByVal vPemFiles As Variant, cCerts A
     End If
 End Function
 
-Private Function pvPkiPemImportRootCaCertStore(sCaBundlePemFile As String) As Long
+Private Function pvPkiPemImportRootCaCertStore(sPemFile As String) As Long
     Const FUNC_NAME     As String = "pvPkiPemImportRootCaCertStore"
     Dim hCertStore      As Long
     Dim cCerts          As Collection
@@ -1961,7 +1969,7 @@ Private Function pvPkiPemImportRootCaCertStore(sCaBundlePemFile As String) As Lo
     Dim hResult         As Long
     Dim sApiSource      As String
     
-    Set cCerts = pvPkiPemGetTextPortions(StrConv(CStr(ReadBinaryFile(CStr(sCaBundlePemFile))), vbUnicode), "CERTIFICATE")
+    Set cCerts = pvPkiPemGetTextPortions(StrConv(CStr(ReadBinaryFile(sPemFile)), vbUnicode), "CERTIFICATE")
     If pvCollectionCount(cCerts) = 0 Then
         GoTo QH
     End If
@@ -2022,7 +2030,7 @@ Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As 
         If pCertContext = 0 Then
             Exit Do
         End If
-        If pvPkiAppendCertContext(pCertContext, cCerts, cPrivKey, DeleteKeyset:=True) Then
+        If pvPkiAppendCertContext(pCertContext, cCerts, cPrivKey, DeleteKeyset:=(dwFlags And PKCS12_NO_PERSIST_KEY) = 0) Then
             '--- success
             pvPkiPkcs12ImportCertificates = True
         End If
