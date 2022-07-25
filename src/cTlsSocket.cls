@@ -28,6 +28,7 @@ Private Const MODULE_NAME As String = "cTlsSocket"
 #Const ImplUseShared = (ASYNCSOCKET_USE_SHARED <> 0)
 #Const ImplSync = Not (ASYNCSOCKET_NO_SYNC <> 0)
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
+#Const ImplEncryptedPrivateKey = True
 
 '=========================================================================
 ' Public events
@@ -66,8 +67,13 @@ Private Const CRYPT_VERIFYCONTEXT                       As Long = &HF0000000
 '--- for CryptDecodeObjectEx
 Private Const X509_ASN_ENCODING                         As Long = 1
 Private Const PKCS_7_ASN_ENCODING                       As Long = &H10000
+Private Const X509_OCTET_STRING                         As Long = 25
+Private Const X509_INTEGER                              As Long = 27
+Private Const X509_SEQUENCE_OF_ANY                      As Long = 34
 Private Const PKCS_RSA_PRIVATE_KEY                      As Long = 43
 Private Const PKCS_PRIVATE_KEY_INFO                     As Long = 44
+Private Const PKCS_ENCRYPTED_PRIVATE_KEY_INFO           As Long = 45
+Private Const X509_OBJECT_IDENTIFIER                    As Long = 73
 Private Const X509_ECC_PRIVATE_KEY                      As Long = 82
 Private Const CNG_RSA_PRIVATE_KEY_BLOB                  As Long = 83
 Private Const CRYPT_DECODE_NOCOPY_FLAG                  As Long = &H1
@@ -159,6 +165,7 @@ Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
 Private Declare Function GetFileAttributes Lib "kernel32" Alias "GetFileAttributesA" (ByVal lpFileName As String) As Long
 Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
+Private Declare Function lstrlen Lib "kernel32" Alias "lstrlenA" (ByVal lpString As Long) As Long
 Private Declare Function lstrlenW Lib "kernel32" (ByVal lpString As Long) As Long
 Private Declare Function GetVersionEx Lib "kernel32" Alias "GetVersionExA" (lpVersionInformation As Any) As Long
 '--- msvbvm60
@@ -201,6 +208,17 @@ Private Declare Function NCryptFreeObject Lib "ncrypt" (ByVal hKey As Long) As L
 Private Declare Function NCryptGetProperty Lib "ncrypt" (ByVal hObject As Long, ByVal pszProperty As Long, pbOutput As Any, ByVal cbOutput As Long, pcbResult As Long, ByVal dwFlags As Long) As Long
 Private Declare Function NCryptSetProperty Lib "ncrypt" (ByVal hObject As Long, ByVal pszProperty As Long, pbInput As Any, ByVal cbInput As Long, ByVal dwFlags As Long) As Long
 Private Declare Function NCryptFinalizeKey Lib "ncrypt" (ByVal hKey As Long, ByVal dwFlags As Long) As Long
+'--- BCrypt
+#If ImplEncryptedPrivateKey Then
+    Private Declare Function BCryptOpenAlgorithmProvider Lib "bcrypt" (ByRef hAlgorithm As Long, ByVal pszAlgId As Long, ByVal pszImplementation As Long, ByVal dwFlags As Long) As Long
+    Private Declare Function BCryptCloseAlgorithmProvider Lib "bcrypt" (ByVal hAlgorithm As Long, ByVal dwFlags As Long) As Long
+    Private Declare Function BCryptGetProperty Lib "bcrypt" (ByVal hObject As Long, ByVal pszProperty As Long, pbOutput As Any, ByVal cbOutput As Long, cbResult As Long, ByVal dwFlags As Long) As Long
+    Private Declare Function BCryptSetProperty Lib "bcrypt" (ByVal hObject As Long, ByVal pszProperty As Long, ByVal pbInput As Long, ByVal cbInput As Long, ByVal dwFlags As Long) As Long
+    Private Declare Function BCryptGenerateSymmetricKey Lib "bcrypt" (ByVal hAlgorithm As Long, phKey As Long, pbKeyObject As Any, ByVal cbKeyObject As Long, pbSecret As Any, ByVal cbSecret As Long, ByVal dwFlags As Long) As Long
+    Private Declare Function BCryptDestroyKey Lib "bcrypt" (ByVal hKey As Long) As Long
+    Private Declare Function BCryptDeriveKeyPBKDF2 Lib "bcrypt" (ByVal hPrf As Long, pbPassword As Any, ByVal cbPassword As Long, pbSalt As Any, ByVal cbSalt As Long, ByVal cIterations As Currency, pbDerivedKey As Any, ByVal cbDerivedKey As Long, ByVal dwFlags As Long) As Long
+    Private Declare Function BCryptDecrypt Lib "bcrypt" (ByVal hKey As Long, pbInput As Any, ByVal cbInput As Long, ByVal pPaddingInfo As Long, pbIV As Any, ByVal cbIV As Long, pbOutput As Any, ByVal cbOutput As Long, cbResult As Long, ByVal dwFlags As Long) As Long
+#End If
 #If Not ImplUseShared Then
     Private Declare Function QueryPerformanceCounter Lib "kernel32" (lpPerformanceCount As Currency) As Long
     Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
@@ -210,6 +228,7 @@ Private Type CRYPT_DATA_BLOB
     cbData              As Long
     pbData              As Long
 End Type
+Private Const sizeof_CRYPT_DATA_BLOB As Long = 8
 
 Private Type CRYPT_BIT_BLOB
     cbData              As Long
@@ -404,6 +423,11 @@ Private Type CERT_SELECT_STRUCT_W
     hProv               As Long
 End Type
 
+Private Type CRYPT_ENCRYPTED_PRIVATE_KEY_INFO
+    EncryptionAlgorithm As CRYPT_ALGORITHM_IDENTIFIER
+    EncryptedPrivateKey As CRYPT_DATA_BLOB
+End Type
+
 '=========================================================================
 ' Constants and member variables
 '=========================================================================
@@ -411,6 +435,7 @@ End Type
 Private Const STR_CHR1                                  As String = "" '--- CHAR(1)
 Private Const DEF_TIMEOUT                               As Long = 5000
 Private Const LNG_FACILITY_WIN32                        As Long = &H80070000
+Private Const LNG_STATUS_DATA_ERROR                     As Long = &HC000003E
 '--- errors
 Private Const ERR_NO_MATCHING_ALT_NAME                  As String = "No certificate subject name matches target host name"
 Private Const ERR_NO_CERTIFICATE                        As String = "No server certificate found"
@@ -423,6 +448,8 @@ Private Const ERR_TRUST_REVOCATION_STATUS_UNKNOWN       As String = "The revocat
 Private Const ERR_UNKNOWN_CNG_MAGIC                     As String = "Unknown CNG private key magic (%1)"
 Private Const ERR_UNKNOWN_CAPI_MAGIC                    As String = "Unknown CAPI private key magic (%1)"
 Private Const ERR_UNKNOWN_CERTIFICATECHAIN_ERROR_MASK   As String = "Unknown CertGetCertificateChain error mask (%1)"
+Private Const ERR_UNKNOWN_OID                           As String = "Unknown %1 OID (%2)"
+Private Const ERR_INCORRECT_PASSWORD                    As String = "Incorrect password"
 
 Private WithEvents m_oAsyncSocket As cAsyncSocket
 Attribute m_oAsyncSocket.VB_VarHelpID = -1
@@ -638,7 +665,7 @@ Public Function InitServerTls( _
         If pvPkiPkcs12ImportCertificates(CertFile, Password, cCerts, cPrivKey) Then
             GoTo StartTls
         End If
-        If pvPkiPemImportCertificates(Split(CertFile, "|"), cCerts, cPrivKey) Then
+        If pvPkiPemImportCertificates(Split(CertFile, "|"), Password, cCerts, cPrivKey) Then
             GoTo StartTls
         End If
         pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
@@ -1413,12 +1440,10 @@ Private Function pvHandleReceive(Optional ByVal Flush As Boolean) As Boolean
                         DebugLog MODULE_NAME, FUNC_NAME, "Will skip server certificate checks for " & RemoteHostName
                     #End If
                 ElseIf RemoteCertificates Is Nothing Then
-                    pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
-                    pvFireOnError LastError.Number, ucsSfdRead
+                    pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME, ucsSfdRead
                     GoTo QH
                 ElseIf Not pvPkiCertValidate(RemoteHostName, RemoteCertificates, RemoteCertStatuses, frRootStore, sError) Then
-                    pvSetLastError sError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & MODULE_NAME & ".pvPkiCertValidate"
-                    pvFireOnError LastError.Number, ucsSfdRead
+                    pvSetLastError sError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & MODULE_NAME & ".pvPkiCertValidate", ucsSfdRead
                     GoTo QH
                 End If
             End If
@@ -1516,10 +1541,11 @@ EH:
     Resume QH
 End Function
 
-Private Function pvSetLastError(sError As String, sErrSource As String)
+Private Function pvSetLastError(sError As String, sErrSource As String, Optional ByVal EventMask As UcsAsyncSocketEventMaskEnum)
     m_uCtx.LastErrNumber = vbObjectError
     m_uCtx.LastError = sError
     m_uCtx.LastErrSource = sErrSource
+    pvFireOnError vbObjectError, EventMask
 End Function
 
 Private Sub pvFireOnResolve(IpAddress As String)
@@ -1876,18 +1902,22 @@ End Sub
 '=========================================================================
 
 Public Function ImportPemCertificates(CertFile As String, Optional Password As String) As Boolean
+    Const FUNC_NAME     As String = "ImportPemCertificates"
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
 
-    If pvPkiPemImportCertificates(Split(CertFile, "|"), cCerts, cPrivKey) Then
+    If pvPkiPemImportCertificates(Split(CertFile, "|"), Password, cCerts, cPrivKey) Then
         Set LocalCertificates = cCerts
         Set LocalPrivateKey = cPrivKey
         '--- success
         ImportPemCertificates = True
+    Else
+        pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
     End If
 End Function
 
 Public Function ImportPkcs12Certificates(CertFile As String, Optional Password As String) As Boolean
+    Const FUNC_NAME     As String = "ImportPkcs12Certificates"
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
 
@@ -1896,21 +1926,24 @@ Public Function ImportPkcs12Certificates(CertFile As String, Optional Password A
         Set LocalPrivateKey = cPrivKey
         '--- success
         ImportPkcs12Certificates = True
+    Else
+        pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
     End If
 End Function
 
 Public Function ImportSystemStoreCertificates(CertSubject As Variant, Optional ByVal hWndOwner As Long) As Boolean
+    Const FUNC_NAME     As String = "ImportSystemStoreCertificates"
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
     
-    If Not pvPkiSystemStoreImportCertificate(CertSubject, hWndOwner, cCerts, cPrivKey) Then
-        GoTo QH
+    If pvPkiSystemStoreImportCertificate(CertSubject, hWndOwner, cCerts, cPrivKey) Then
+        Set LocalCertificates = cCerts
+        Set LocalPrivateKey = cPrivKey
+        '--- success
+        ImportSystemStoreCertificates = True
+    Else
+        pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
     End If
-    Set LocalCertificates = cCerts
-    Set LocalPrivateKey = cPrivKey
-    '--- success
-    ImportSystemStoreCertificates = True
-QH:
 End Function
 
 Public Function ImportPemRootCaCertStore(Optional CaBundleFile As String, Optional RootCa As cTlsSocket) As Boolean
@@ -1940,16 +1973,31 @@ End Function
 
 '= private ===============================================================
 
-Private Function pvPkiPemImportCertificates(ByVal vPemFiles As Variant, cCerts As Collection, cPrivKey As Collection) As Boolean
+Private Function pvPkiPemImportCertificates(ByVal vPemFiles As Variant, sPassword As String, cCerts As Collection, cPrivKey As Collection) As Boolean
+    Const FUNC_NAME     As String = "pvPkiPemImportCertificates"
     Dim vElem           As Variant
     Dim sPemText        As String
+    Dim vKey            As Variant
+    Dim baPrivKey()     As Byte
+    Dim baEncrKey()     As Byte
+    Dim vErr            As Variant
     
+    On Error GoTo EH
     If VarType(vPemFiles) = vbString Then
         vPemFiles = Array(vPemFiles)
     End If
     For Each vElem In vPemFiles
         sPemText = StrConv(CStr(ReadBinaryFile(CStr(vElem))), vbUnicode)
         pvPkiPemGetTextPortions sPemText, "PRIVATE KEY", cPrivKey
+#If ImplEncryptedPrivateKey Then
+        For Each vKey In pvPkiPemGetTextPortions(sPemText, "ENCRYPTED PRIVATE KEY")
+            baEncrKey = vKey
+            If Not pvPkiPemDecryptPrivateKey(baPrivKey, baEncrKey, sPassword) Then
+                GoTo QH
+            End If
+            cPrivKey.Add baPrivKey
+        Next
+#End If
         pvPkiPemGetTextPortions sPemText, "RSA PRIVATE KEY", cPrivKey
         pvPkiPemGetTextPortions sPemText, "EC PRIVATE KEY", cPrivKey
         pvPkiPemGetTextPortions sPemText, "CERTIFICATE", cCerts
@@ -1958,7 +2006,179 @@ Private Function pvPkiPemImportCertificates(ByVal vPemFiles As Variant, cCerts A
         '--- success
         pvPkiPemImportCertificates = True
     End If
+QH:
+    If IsArray(vErr) Then
+        On Error GoTo 0
+        ErrRaise vErr(0), vErr(1), vErr(2)
+    End If
+    Exit Function
+EH:
+    vErr = Array(Err.Number, Err.Source, Err.Description)
+    PrintError FUNC_NAME
+    Resume QH
 End Function
+
+#If ImplEncryptedPrivateKey Then
+Private Function pvPkiPemDecryptPrivateKey(baRetVal() As Byte, baEncrKey() As Byte, sPassword As String) As Boolean
+    Const FUNC_NAME     As String = "pvPkiPemDecryptPrivateKey"
+    Const szOID_PKCS_5_PBES2        As String = "1.2.840.113549.1.5.13"
+    Const szOID_PKCS_5_PBKDF2       As String = "1.2.840.113549.1.5.12"
+    Const szOID_RSA_HMAC_SHA1       As String = "1.2.840.113549.2"
+    Const szOID_RSA_HMAC_SHA256     As String = "1.2.840.113549.2.9"
+    Const szOID_RSA_HMAC_SHA512     As String = "1.2.840.113549.2.11"
+    Const szOID_RSA_DES_EDE3_CBC    As String = "1.2.840.113549.3.7"
+    Const szOID_NIST_AES128_CBC     As String = "2.16.840.1.101.3.4.1.2"
+    Const szOID_NIST_AES256_CBC     As String = "2.16.840.1.101.3.4.1.42"
+    Const BCRYPT_ALG_HANDLE_HMAC_FLAG As Long = 8
+    Const BCRYPT_BLOCK_PADDING        As Long = 1
+    Dim lEncrPtr        As Long
+    Dim uEncrInfo       As CRYPT_ENCRYPTED_PRIVATE_KEY_INFO
+    Dim sOID            As String
+    Dim cParams         As Collection
+    Dim sHashAlg        As String
+    Dim baPass()        As Byte
+    Dim lPassPtr        As Long
+    Dim baSalt()        As Byte
+    Dim lSaltPtr        As Long
+    Dim lIterations     As Long
+    Dim sEncrAlg        As String
+    Dim lKeySize        As Long
+    Dim baIV()          As Byte
+    Dim baKey()         As Byte
+    Dim hAlg            As Long
+    Dim lSize           As Long
+    Dim baObj()         As Byte
+    Dim hKey            As Long
+    Dim hResult         As Long
+    Dim sApiSource      As String
+    Dim vErr            As Variant
+    
+    On Error GoTo EH
+    If CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, PKCS_ENCRYPTED_PRIVATE_KEY_INFO, baEncrKey(0), UBound(baEncrKey) + 1, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lEncrPtr, 0) = 0 Then
+        pvSetLastError GetErrorDescription(Err.LastDllError), MODULE_NAME & "." & FUNC_NAME
+        GoTo QH
+    End If
+    Call CopyMemory(uEncrInfo, ByVal lEncrPtr, LenB(uEncrInfo))
+    sOID = pvToString(uEncrInfo.EncryptionAlgorithm.pszObjId)
+    If sOID <> szOID_PKCS_5_PBES2 Then
+        pvSetLastError Replace(Replace(ERR_UNKNOWN_OID, "%1", "encryption scheme"), "%2", sOID), MODULE_NAME & "." & FUNC_NAME
+        GoTo QH
+    End If
+    Set cParams = pvPkiAsn1Scanf(uEncrInfo.EncryptionAlgorithm.Parameters.pbData, uEncrInfo.EncryptionAlgorithm.Parameters.cbData, "((o(xi(o)))(ox))")
+    sOID = cParams.Item(1)
+    If sOID <> szOID_PKCS_5_PBKDF2 Then
+        pvSetLastError Replace(Replace(ERR_UNKNOWN_OID, "%1", "key derivation function"), "%2", sOID), MODULE_NAME & "." & FUNC_NAME
+        GoTo QH
+    End If
+    sOID = cParams.Item(4)
+    Select Case sOID
+    Case szOID_RSA_HMAC_SHA1
+        sHashAlg = "SHA1"
+    Case szOID_RSA_HMAC_SHA256
+        sHashAlg = "SHA256"
+    Case szOID_RSA_HMAC_SHA512
+        sHashAlg = "SHA512"
+    Case Else
+        pvSetLastError Replace(Replace(ERR_UNKNOWN_OID, "%1", "hash"), "%2", sOID), MODULE_NAME & "." & FUNC_NAME
+        GoTo QH
+    End Select
+    sOID = cParams.Item(5)
+    Select Case sOID
+    Case szOID_RSA_DES_EDE3_CBC
+        sEncrAlg = "3DES"
+        lKeySize = 3 * 8
+    Case szOID_NIST_AES128_CBC
+        sEncrAlg = "AES"
+        lKeySize = 16
+    Case szOID_NIST_AES256_CBC
+        sEncrAlg = "AES"
+        lKeySize = 32
+    Case Else
+        pvSetLastError Replace(Replace(ERR_UNKNOWN_OID, "%1", "encryption"), "%2", sOID), MODULE_NAME & "." & FUNC_NAME
+        GoTo QH
+    End Select
+    baPass = ToUtf8Array(sPassword)
+    baSalt = cParams.Item(2)
+    lIterations = cParams.Item(3)
+    baIV = cParams.Item(6)
+    hResult = BCryptOpenAlgorithmProvider(hAlg, StrPtr(sHashAlg), 0, BCRYPT_ALG_HANDLE_HMAC_FLAG)
+    If hResult < 0 Then
+        sApiSource = "BCryptOpenAlgorithmProvider(" & sHashAlg & ")"
+        GoTo QH
+    End If
+    If UBound(baPass) >= 0 Then
+        lPassPtr = VarPtr(baPass(0))
+    End If
+    If UBound(baSalt) >= 0 Then
+        lSaltPtr = VarPtr(baSalt(0))
+    End If
+    pvArrayAllocate baKey, lKeySize, FUNC_NAME & ".baKey"
+    hResult = BCryptDeriveKeyPBKDF2(hAlg, ByVal lPassPtr, UBound(baPass) + 1, ByVal lSaltPtr, UBound(baSalt) + 1, lIterations / 10000@, baKey(0), lKeySize, 0)
+    If hResult < 0 Then
+        sApiSource = "BCryptDeriveKeyPBKDF2"
+        GoTo QH
+    End If
+    Call BCryptCloseAlgorithmProvider(hAlg, 0)
+    hAlg = 0
+    hResult = BCryptOpenAlgorithmProvider(hAlg, StrPtr(sEncrAlg), 0, 0)
+    If hResult < 0 Then
+        sApiSource = "BCryptOpenAlgorithmProvider(" & sEncrAlg & ")"
+        GoTo QH
+    End If
+    hResult = BCryptSetProperty(hAlg, StrPtr("ChainingMode"), StrPtr("ChainingModeCBC"), LenB("ChainingModeCBC"), 0)
+    If hResult < 0 Then
+        sApiSource = "BCryptSetProperty(ChainingMode)"
+        GoTo QH
+    End If
+    hResult = BCryptGetProperty(hAlg, StrPtr("ObjectLength"), lSize, 4, 0, 0)
+    If hResult < 0 Or lSize = 0 Then
+        sApiSource = "BCryptGetProperty(ObjectLength)"
+        GoTo QH
+    End If
+    pvArrayAllocate baObj, lSize, FUNC_NAME & ".baObj"
+    hResult = BCryptGenerateSymmetricKey(hAlg, hKey, baObj(0), UBound(baObj) + 1, baKey(0), UBound(baKey) + 1, 0)
+    If hResult < 0 Then
+        sApiSource = "BCryptGenerateSymmetricKey"
+        GoTo QH
+    End If
+    pvArrayAllocate baRetVal, uEncrInfo.EncryptedPrivateKey.cbData, FUNC_NAME & ".baRetVal"
+    hResult = BCryptDecrypt(hKey, ByVal uEncrInfo.EncryptedPrivateKey.pbData, uEncrInfo.EncryptedPrivateKey.cbData, 0, baIV(0), UBound(baIV) + 1, baRetVal(0), UBound(baRetVal) + 1, lSize, BCRYPT_BLOCK_PADDING)
+    If hResult < 0 Then
+        If hResult = LNG_STATUS_DATA_ERROR Then
+            pvSetLastError ERR_INCORRECT_PASSWORD, MODULE_NAME & "." & FUNC_NAME
+            GoTo QH
+        End If
+        sApiSource = "BCryptDecrypt"
+        GoTo QH
+    End If
+    pvArrayReallocate baRetVal, lSize, FUNC_NAME & ".baRetVal"
+    '--- success
+    pvPkiPemDecryptPrivateKey = True
+QH:
+    If hKey <> 0 Then
+        Call BCryptDestroyKey(hKey)
+    End If
+    If hAlg <> 0 Then
+        Call BCryptCloseAlgorithmProvider(hAlg, 0)
+    End If
+    If lEncrPtr <> 0 Then
+        Call LocalFree(lEncrPtr)
+    End If
+    If LenB(sApiSource) <> 0 Then
+        On Error GoTo 0
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+    End If
+    If IsArray(vErr) Then
+        On Error GoTo 0
+        ErrRaise vErr(0), vErr(1), vErr(2)
+    End If
+    Exit Function
+EH:
+    vErr = Array(Err.Number, Err.Source, Err.Description)
+    PrintError FUNC_NAME
+    Resume QH
+End Function
+#End If
 
 Private Function pvPkiPemImportRootCaCertStore(sPemFile As String) As Long
     Const FUNC_NAME     As String = "pvPkiPemImportRootCaCertStore"
@@ -1968,7 +2188,9 @@ Private Function pvPkiPemImportRootCaCertStore(sPemFile As String) As Long
     Dim baCert()        As Byte
     Dim hResult         As Long
     Dim sApiSource      As String
+    Dim vErr            As Variant
     
+    On Error GoTo EH
     Set cCerts = pvPkiPemGetTextPortions(StrConv(CStr(ReadBinaryFile(sPemFile)), vbUnicode), "CERTIFICATE")
     If pvCollectionCount(cCerts) = 0 Then
         GoTo QH
@@ -1995,8 +2217,18 @@ QH:
         Call CertCloseStore(hCertStore, 0)
     End If
     If LenB(sApiSource) <> 0 Then
+        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
+    If IsArray(vErr) Then
+        On Error GoTo 0
+        ErrRaise vErr(0), vErr(1), vErr(2)
+    End If
+    Exit Function
+EH:
+    vErr = Array(Err.Number, Err.Source, Err.Description)
+    PrintError FUNC_NAME
+    Resume QH
 End Function
 
 Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As String, cCerts As Collection, cPrivKey As Collection) As Boolean
@@ -2006,9 +2238,9 @@ Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As 
     Dim dwFlags         As Long
     Dim hPfxStore       As Long
     Dim pCertContext    As Long
-    Dim hResult         As Long
-    Dim sApiSource      As String
+    Dim vErr            As Variant
     
+    On Error GoTo EH
     baPfx = ReadBinaryFile(sPfxFile)
     If UBound(baPfx) < 0 Then
         GoTo QH
@@ -2021,8 +2253,6 @@ Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As 
         hPfxStore = PFXImportCertStore(baPfx(0), 0, dwFlags)
     End If
     If hPfxStore = 0 Then
-        sApiSource = "PFXImportCertStore"
-        hResult = Err.LastDllError
         GoTo QH
     End If
     Do
@@ -2039,9 +2269,15 @@ QH:
     If hPfxStore <> 0 Then
         Call CertCloseStore(hPfxStore, 0)
     End If
-    If LenB(sApiSource) <> 0 Then
-        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
+    If IsArray(vErr) Then
+        On Error GoTo 0
+        ErrRaise vErr(0), vErr(1), vErr(2)
     End If
+    Exit Function
+EH:
+    vErr = Array(Err.Number, Err.Source, Err.Description)
+    PrintError FUNC_NAME
+    Resume QH
 End Function
 
 Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Variant, ByVal hWndParent As Long, cCerts As Collection, cPrivKey As Collection) As Boolean
@@ -2059,7 +2295,9 @@ Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Var
     Dim uSelect         As CERT_SELECT_STRUCT_W
     Dim hResult         As Long
     Dim sApiSource      As String
+    Dim vErr            As Variant
     
+    On Error GoTo EH
     If IsObject(SubjectOrIssuers) Then
         hCertStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0, CERT_SYSTEM_STORE_CURRENT_USER, StrPtr("MY"))
         If hCertStore = 0 Then
@@ -2142,8 +2380,18 @@ QH:
         Call CertCloseStore(hMemStore, 0)
     End If
     If LenB(sApiSource) <> 0 Then
+        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
+    If IsArray(vErr) Then
+        On Error GoTo 0
+        ErrRaise vErr(0), vErr(1), vErr(2)
+    End If
+    Exit Function
+EH:
+    vErr = Array(Err.Number, Err.Source, Err.Description)
+    PrintError FUNC_NAME
+    Resume QH
 End Function
 
 Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey As Collection, Optional ByVal Subject As String) As Boolean
@@ -2158,7 +2406,9 @@ Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey 
     Dim pCertContext    As Long
     Dim hResult         As Long
     Dim sApiSource      As String
+    Dim vErr            As Variant
     
+    On Error GoTo EH
     With uProvInfo
         .dwProvType = PROV_RSA_FULL
         .dwFlags = CRYPT_VERIFYCONTEXT
@@ -2215,8 +2465,18 @@ QH:
         Call CryptReleaseContext(hProv, 0)
     End If
     If LenB(sApiSource) <> 0 Then
+        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
+    If IsArray(vErr) Then
+        On Error GoTo 0
+        ErrRaise vErr(0), vErr(1), vErr(2)
+    End If
+    Exit Function
+EH:
+    vErr = Array(Err.Number, Err.Source, Err.Description)
+    PrintError FUNC_NAME
+    Resume QH
 End Function
 
 Private Function pvPkiCertValidate(ByVal sHostName As String, cCerts As Collection, cStatuses As Collection, ByVal hRootStore As Long, sError As String) As Boolean
@@ -2231,7 +2491,9 @@ Private Function pvPkiCertValidate(ByVal sHostName As String, cCerts As Collecti
     Dim uProp           As CRYPT_DATA_BLOB
     Dim hResult         As Long
     Dim sApiSource      As String
+    Dim vErr            As Variant
     
+    On Error GoTo EH
     '--- load server X.509 certificates to an in-memory certificate store
     hCertStore = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, CERT_STORE_CREATE_NEW_FLAG, 0)
     If hCertStore = 0 Then
@@ -2302,8 +2564,18 @@ QH:
         Call CertCloseStore(hCertStore, 0)
     End If
     If LenB(sApiSource) <> 0 Then
+        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
+    If IsArray(vErr) Then
+        On Error GoTo 0
+        ErrRaise vErr(0), vErr(1), vErr(2)
+    End If
+    Exit Function
+EH:
+    vErr = Array(Err.Number, Err.Source, Err.Description)
+    PrintError FUNC_NAME
+    Resume QH
 End Function
 
 Private Function pvPkiCertGetSubjectAltName2(ByVal pCertContext As Long, ByVal lNameForm As Long) As Variant
@@ -2360,7 +2632,9 @@ Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hRootStor
     Dim lIdx            As Long
     Dim hResult         As Long
     Dim sApiSource      As String
+    Dim vErr            As Variant
     
+    On Error GoTo EH
     '--- build custom chain engine that trusts the additional root CA certificates if provided
     If hRootStore <> 0 Then
         If OsVersion <= ucsOsvWin7 Then
@@ -2433,8 +2707,18 @@ QH:
         Call CertFreeCertificateChainEngine(hChainEngine)
     End If
     If LenB(sApiSource) <> 0 Then
+        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
+    If IsArray(vErr) Then
+        On Error GoTo 0
+        ErrRaise vErr(0), vErr(1), vErr(2)
+    End If
+    Exit Function
+EH:
+    vErr = Array(Err.Number, Err.Source, Err.Description)
+    PrintError FUNC_NAME
+    Resume QH
 End Function
 
 Private Function pvPkiPemGetTextPortions(sContents As String, sBoundary As String, Optional RetVal As Collection) As Collection
@@ -2489,7 +2773,9 @@ Private Function pvPkiAppendCertChain(ByVal pCertContext As Long, ByVal hCertSto
     Dim lIdx            As Long
     Dim hResult         As Long
     Dim sApiSource      As String
+    Dim vErr            As Variant
 
+    On Error GoTo EH
     uChainParams.cbSize = Len(uChainParams)
     If CertGetCertificateChain(0, pCertContext, 0, hCertStore, uChainParams, 0, 0, pChainContext) = 0 Then
         hResult = Err.LastDllError
@@ -2514,8 +2800,18 @@ QH:
         Call CertFreeCertificateChain(pChainContext)
     End If
     If LenB(sApiSource) <> 0 Then
+        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
+    If IsArray(vErr) Then
+        On Error GoTo 0
+        ErrRaise vErr(0), vErr(1), vErr(2)
+    End If
+    Exit Function
+EH:
+    vErr = Array(Err.Number, Err.Source, Err.Description)
+    PrintError FUNC_NAME
+    Resume QH
 End Function
 
 Private Function pvPkiAppendCertContext(ByVal pCertContext As Long, cCerts As Collection, cPrivKey As Collection, Optional ByVal DeleteKeyset As Boolean) As Boolean
@@ -2563,7 +2859,9 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
     Dim lMagic          As Long
     Dim hResult         As Long
     Dim sApiSource      As String
+    Dim vErr            As Variant
 
+    On Error GoTo EH
     dwFlags = CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG Or CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG
     If CryptAcquireCertificatePrivateKey(pCertContext, dwFlags, 0, hProv, lKeySpec, lFree) = 0 Then
         dwFlags = dwFlags Or CRYPT_ACQUIRE_CACHE_FLAG
@@ -2707,8 +3005,18 @@ QH:
         Call CryptAcquireContext(0, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags Or CRYPT_DELETEKEYSET)
     End If
     If LenB(sApiSource) <> 0 Then
+        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
+    If IsArray(vErr) Then
+        On Error GoTo 0
+        ErrRaise vErr(0), vErr(1), vErr(2)
+    End If
+    Exit Function
+EH:
+    vErr = Array(Err.Number, Err.Source, Err.Description)
+    PrintError FUNC_NAME
+    Resume QH
 End Function
 
 Private Function pvPkiExportRsaPrivateKey(baRetVal() As Byte, baPrivBlob() As Byte, ByVal lStructType As Long) As Boolean
@@ -2719,7 +3027,9 @@ Private Function pvPkiExportRsaPrivateKey(baRetVal() As Byte, baPrivBlob() As By
     Dim sObjId          As String
     Dim hResult         As Long
     Dim sApiSource      As String
+    Dim vErr            As Variant
     
+    On Error GoTo EH
     If CryptEncodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, lStructType, baPrivBlob(0), 0, 0, ByVal 0, lSize) = 0 Then
         hResult = Err.LastDllError
         sApiSource = "CryptEncodeObjectEx"
@@ -2752,8 +3062,18 @@ Private Function pvPkiExportRsaPrivateKey(baRetVal() As Byte, baPrivBlob() As By
     pvPkiExportRsaPrivateKey = True
 QH:
     If LenB(sApiSource) <> 0 Then
+        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
+    If IsArray(vErr) Then
+        On Error GoTo 0
+        ErrRaise vErr(0), vErr(1), vErr(2)
+    End If
+    Exit Function
+EH:
+    vErr = Array(Err.Number, Err.Source, Err.Description)
+    PrintError FUNC_NAME
+    Resume QH
 End Function
 
 Private Function pvPkiExportEccPrivateKey(baRetVal() As Byte, baPrivBlob() As Byte, ByVal lMagic As Long) As Boolean
@@ -2763,7 +3083,9 @@ Private Function pvPkiExportEccPrivateKey(baRetVal() As Byte, baPrivBlob() As By
     Dim lSize           As Long
     Dim hResult         As Long
     Dim sApiSource      As String
+    Dim vErr            As Variant
     
+    On Error GoTo EH
     sObjId = StrConv(Switch(lMagic = BCRYPT_ECDH_PRIVATE_P521_MAGIC, szOID_ECC_CURVE_P521, _
                             lMagic = BCRYPT_ECDH_PRIVATE_P384_MAGIC, szOID_ECC_CURVE_P384, _
                             True, szOID_ECC_CURVE_P256), vbFromUnicode)
@@ -2788,8 +3110,18 @@ Private Function pvPkiExportEccPrivateKey(baRetVal() As Byte, baPrivBlob() As By
     pvPkiExportEccPrivateKey = True
 QH:
     If LenB(sApiSource) <> 0 Then
+        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
+    If IsArray(vErr) Then
+        On Error GoTo 0
+        ErrRaise vErr(0), vErr(1), vErr(2)
+    End If
+    Exit Function
+EH:
+    vErr = Array(Err.Number, Err.Source, Err.Description)
+    PrintError FUNC_NAME
+    Resume QH
 End Function
 
 Private Function pvPkiCloneKeyWithExportPolicy(ByVal hKey As Long, ByVal lPolicy As Long) As Long
@@ -2807,7 +3139,9 @@ Private Function pvPkiCloneKeyWithExportPolicy(ByVal hKey As Long, ByVal lPolicy
     Dim baBuffer()      As Byte
     Dim hResult         As Long
     Dim sApiSource      As String
+    Dim vErr            As Variant
     
+    On Error GoTo EH
     '--- export PKCS#8 password protected blob
     ReDim uParams.Buffers(0 To 2) As NCryptBuffer
     Debug.Assert RedimStats(MODULE_NAME & "." & FUNC_NAME & ".uParams.Buffers", 0)
@@ -2902,18 +3236,31 @@ QH:
         Call NCryptFreeObject(hProv)
     End If
     If LenB(sApiSource) <> 0 Then
+        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
+    If IsArray(vErr) Then
+        On Error GoTo 0
+        ErrRaise vErr(0), vErr(1), vErr(2)
+    End If
+    Exit Function
+EH:
+    vErr = Array(Err.Number, Err.Source, Err.Description)
+    PrintError FUNC_NAME
+    Resume QH
 End Function
 
 Private Function pvPkiIssuerToCertRdn(vIssuer As Variant, uOutput As CERT_RDN) As Boolean
+    Const FUNC_NAME     As String = "pvPkiIssuerToCertRdn"
     Dim baRDN()         As Byte
     Dim lPtr            As Long
     Dim uNameInfo       As CRYPT_DATA_BLOB
     Dim uCertRdn()      As CRYPT_DATA_BLOB
     Dim lIdx            As Long
     Dim lPos            As Long
+    Dim vErr            As Variant
     
+    On Error GoTo EH
     If Not IsArray(vIssuer) Then
         GoTo QH
     End If
@@ -2933,7 +3280,7 @@ Private Function pvPkiIssuerToCertRdn(vIssuer As Variant, uOutput As CERT_RDN) A
         Next
     End If
     If lPos > 0 Then
-        ReDim uOutput.Buffer(0 To lPos - 1)
+        ReDim uOutput.Buffer(0 To lPos - 1) As CERT_RDN_ATTR
         lPos = 0
         For lIdx = 0 To UBound(uCertRdn)
             Debug.Assert uCertRdn(lIdx).pbData <> 0
@@ -2949,6 +3296,15 @@ QH:
     If lPtr <> 0 Then
         Call LocalFree(lPtr)
     End If
+    If IsArray(vErr) Then
+        On Error GoTo 0
+        ErrRaise vErr(0), vErr(1), vErr(2)
+    End If
+    Exit Function
+EH:
+    vErr = Array(Err.Number, Err.Source, Err.Description)
+    PrintError FUNC_NAME
+    Resume QH
 End Function
 
 Private Function pvPkiParseSelectorString(ByVal Subject As String, lStoreFlags As Long, sStoreName As String, sCertName As String) As Boolean
@@ -2988,6 +3344,104 @@ Private Function pvPkiParseSelectorString(ByVal Subject As String, lStoreFlags A
     pvPkiParseSelectorString = True
 End Function
 
+Private Function pvPkiAsn1Scanf(ByVal lPtr As Long, ByVal lSize As Long, sFormat As String) As Collection
+    Dim uInput          As CRYPT_DATA_BLOB
+    Dim cOutput         As Collection
+    
+    uInput.pbData = lPtr
+    uInput.cbData = lSize
+    Set cOutput = New Collection
+    pvPkiAsn1Parse uInput, sFormat, cOutput
+    Set pvPkiAsn1Scanf = cOutput
+End Function
+
+Private Function pvPkiAsn1Parse(uInput As CRYPT_DATA_BLOB, sFormat As String, cOutput As Collection) As Boolean
+    Const FUNC_NAME     As String = "pvPkiAsn1DecodeRaw"
+    Const ASN_SEQUENCE  As Long = &H30
+    Dim sChar           As String
+    Dim lPtr            As Long
+    Dim uBlob           As CRYPT_DATA_BLOB
+    Dim uDers()         As CRYPT_DATA_BLOB
+    Dim lIdx            As Long
+    Dim baBuffer()      As Byte
+    Dim lType           As Long
+    
+    Select Case Left$(sFormat, 1)
+    Case "("
+        sFormat = Mid$(sFormat, 2)
+        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_SEQUENCE_OF_ANY, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, 4) <> 0 Then
+            Call CopyMemory(uBlob, ByVal lPtr, LenB(uBlob))
+            If uBlob.cbData > 0 Then
+                ReDim uDers(0 To uBlob.cbData - 1) As CRYPT_DATA_BLOB
+                Call CopyMemory(uDers(0), ByVal uBlob.pbData, uBlob.cbData * sizeof_CRYPT_DATA_BLOB)
+            End If
+            For lIdx = 0 To uBlob.cbData - 1
+                Select Case Left$(sFormat, 1)
+                Case ")"
+                    Exit For
+                Case "("
+                    If uDers(lIdx).cbData > 0 Then
+                        Call CopyMemory(lType, ByVal uDers(lIdx).pbData, 1)
+                    End If
+                    If lType = ASN_SEQUENCE Then
+                        pvPkiAsn1Parse uDers(lIdx), sFormat, cOutput
+                    End If
+                Case Else
+                    If pvPkiAsn1Parse(uDers(lIdx), sFormat, cOutput) Then
+                        sFormat = Mid$(sFormat, 2)
+                    End If
+                End Select
+            Next
+        End If
+        Do
+            sChar = Left$(sFormat, 1)
+            If sChar <> "(" Then
+                sFormat = Mid$(sFormat, 2)
+            End If
+            Select Case sChar
+            Case ")"
+                Exit Do
+            Case "("
+                ReDim uDers(0 To 0) As CRYPT_DATA_BLOB
+                pvPkiAsn1Parse uDers(0), sFormat, cOutput
+            Case "o"
+                cOutput.Add vbNullString
+            Case "x"
+                baBuffer = vbNullString
+                cOutput.Add baBuffer
+            Case "i"
+                cOutput.Add 0
+            End Select
+        Loop
+    Case "o"
+        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_OBJECT_IDENTIFIER, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, 4) = 0 Then
+            GoTo QH
+        End If
+        Call CopyMemory(lIdx, ByVal lPtr, 4)
+        cOutput.Add pvToString(lIdx)
+    Case "x"
+        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_OCTET_STRING, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, 4) = 0 Then
+            GoTo QH
+        End If
+        Call CopyMemory(uBlob, ByVal lPtr, LenB(uBlob))
+        If uBlob.cbData > 0 Then
+            pvArrayAllocate baBuffer, uBlob.cbData, FUNC_NAME & ".baBuffer"
+            Call CopyMemory(baBuffer(0), ByVal uBlob.pbData, uBlob.cbData)
+        Else
+            baBuffer = vbNullString
+        End If
+        cOutput.Add baBuffer
+    Case "i"
+        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_INTEGER, ByVal uInput.pbData, uInput.cbData, 0, 0, lIdx, 4) = 0 Then
+            GoTo QH
+        End If
+        cOutput.Add lIdx
+    End Select
+    '--- success
+    pvPkiAsn1Parse = True
+QH:
+End Function
+
 Private Function pvNCryptGetStringProperty(ByVal hNKey As String, sPropName As String) As String
     Const FUNC_NAME     As String = "pvNCryptGetStringProperty"
     Dim lSize           As Long
@@ -3006,6 +3460,13 @@ Private Function pvNCryptGetStringProperty(ByVal hNKey As String, sPropName As S
     '--- remove trailing terminating zero too
     pvNCryptGetStringProperty = Replace(CStr(baBuffer), vbNullChar, vbNullString)
 QH:
+End Function
+
+Private Function pvToString(ByVal lPtr As Long) As String
+    If lPtr <> 0 Then
+        pvToString = String$(lstrlen(lPtr), 0)
+        Call CopyMemory(ByVal pvToString, ByVal lPtr, Len(pvToString))
+    End If
 End Function
 
 Private Function pvToStringW(ByVal lPtr As Long) As String
