@@ -362,7 +362,7 @@ Private Const ERR_NO_REMOTE_RANDOM                      As String = "Missing rem
 Private Const ERR_NO_SERVER_CERTIFICATE                 As String = "Missing server certificate"
 Private Const ERR_NO_SUPPORTED_CIPHER_SUITE             As String = "Missing supported ciphersuite (%1)"
 Private Const ERR_NO_CERTIFICATE                        As String = "Missing certificate"
-Private Const ERR_NO_SERVER_COMPILED                    As String = "Server TLS not compiled (TLS_NOSERVER = 1)"
+Private Const ERR_NO_SERVER_COMPILED                    As String = "Server-side TLS not compiled (ASYNCSOCKET_NO_TLSSERVER = 1)"
 Private Const ERR_NO_SUPPORTED_GROUPS                   As String = "Missing supported remote group"
 Private Const ERR_NO_ALPN_NEGOTIATED                    As String = "No application protocol negotiated"
 Private Const ERR_NO_EXTENSION                          As String = "Missing extension (%1)"

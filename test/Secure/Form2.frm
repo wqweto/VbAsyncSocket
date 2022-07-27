@@ -72,6 +72,7 @@ DefObj A-Z
 Private Const MODULE_NAME As String = "Form1"
 
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
+#Const ImplTlsServer = (ASYNCSOCKET_NO_TLSSERVER = 0)
 
 '=========================================================================
 ' API
@@ -143,30 +144,32 @@ Private Sub Form_Load()
     If txtResult.Font.Name = "Arial" Then
         txtResult.Font.Name = "Courier New"
     End If
-    For Each vElem In Split("www.howsmyssl.com/a/check|cert-test.sandbox.google.com|tls13.1d.pw|localhost:44330/renegcert|websocket.org|www.mikestoolbox.org|swifttls.org|rsa8192.badssl.com|rsa4096.badssl.com|rsa2048.badssl.com|ecc384.badssl.com|ecc256.badssl.com|dir.bg|host.bg|bgdev.org|cnn.com|gmail.com|google.com|saas.bg|saas.bg:465|www.cloudflare.com|devblogs.microsoft.com|www.brentozar.com|ayende.com/blog|www.nerds2nerds.com|robert.ocallahan.org|distrowatch.com|server.cryptomix.com/secure/|www.integralblue.com/testhandshake/|tlshello.agwa.name|client.badssl.com", "|")
+    For Each vElem In Split("www.howsmyssl.com/a/check|clienttest.ssllabs.com:8443/ssltest/viewMyClient.html|client.tlsfingerprint.io:8443|tls13.1d.pw|localhost:44330/renegcert|websocket.org|www.mikestoolbox.org|swifttls.org|rsa8192.badssl.com|rsa4096.badssl.com|rsa2048.badssl.com|ecc384.badssl.com|ecc256.badssl.com|dir.bg|host.bg|bgdev.org|cnn.com|gmail.com|google.com|saas.bg|saas.bg:465|www.cloudflare.com|devblogs.microsoft.com|www.brentozar.com|ayende.com/blog|www.nerds2nerds.com|robert.ocallahan.org|distrowatch.com|server.cryptomix.com/secure/|www.integralblue.com/testhandshake/|tlshello.agwa.name|client.badssl.com", "|")
         cobUrl.AddItem vElem
     Next
     sAddr = GetSetting(App.Title, "Form1", "Url", cobUrl.Text)
     If LenB(sAddr) <> 0 Then
         cobUrl.Text = sAddr
     End If
-    Set m_oRootCa = New cTlsSocket
-    m_oRootCa.ImportPemRootCaCertStore App.Path & "\ca-bundle.pem"
-    Set m_oServerSocket = New cTlsSocket
-    ChDir App.Path
-    If Not m_oServerSocket.InitServerTls(STR_CERTFILE, STR_PASSWORD) Then
-        MsgBox "Error starting TLS server on localhost:10443" & vbCrLf & vbCrLf & "No private key found!", vbExclamation
-        GoTo QH
-    End If
-    If Not m_oServerSocket.Create(SocketPort:=10443, SocketAddress:="localhost") Then
-        GoTo QH
-    End If
-    If Not m_oServerSocket.Listen() Then
-        GoTo QH
-    End If
     Set m_cRequestHandlers = New Collection
-    m_oServerSocket.Socket.GetSockName sAddr, lPort
-    DebugLog MODULE_NAME, "Form_Load", "Listening on " & sAddr & ":" & lPort
+    #If ImplTlsServer Then
+        Set m_oRootCa = New cTlsSocket
+        m_oRootCa.ImportPemRootCaCertStore App.Path & "\ca-bundle.pem"
+        Set m_oServerSocket = New cTlsSocket
+        ChDir App.Path
+        If Not m_oServerSocket.InitServerTls(STR_CERTFILE, STR_PASSWORD) Then
+            MsgBox "Error starting TLS server on localhost:10443" & vbCrLf & vbCrLf & "No private key found!", vbExclamation
+            GoTo QH
+        End If
+        If Not m_oServerSocket.Create(SocketPort:=10443, SocketAddress:="localhost") Then
+            GoTo QH
+        End If
+        If Not m_oServerSocket.Listen() Then
+            GoTo QH
+        End If
+        m_oServerSocket.Socket.GetSockName sAddr, lPort
+        DebugLog MODULE_NAME, "Form_Load", "Listening on " & sAddr & ":" & lPort
+    #End If
 QH:
     Exit Sub
 EH:
@@ -331,7 +334,7 @@ QH:
 End Function
 
 Private Function pvIsKnownBadCertificate(sHost As String) As Boolean
-    Const STR_HOSTS     As String = "mikestoolbox.org|localhost"
+    Const STR_HOSTS     As String = "mikestoolbox.org|localhost|client.tlsfingerprint.io"
     Dim vElem           As Variant
     
     For Each vElem In Split(STR_HOSTS, "|")
@@ -428,25 +431,39 @@ Private Function pvSetVisible(oCtl As Object, ByVal bValue As Boolean) As Boolea
 End Function
 
 Private Sub m_oServerSocket_OnCertificate(Issuers As Object, Confirmed As Boolean)
-    Const STR_CERTFILE  As String = "eccert.pfx"
-    Const STR_PASSWORD  As String = ""
+    Const STR_CERTFILE  As String = "client2.pkcs8.pem"
+    Const STR_PASSWORD  As String = "#####"
     
-    Confirmed = m_oServerSocket.ImportPkcs12Certificates(STR_CERTFILE, STR_PASSWORD)
-'    Confirmed = m_oServerSocket.ImportSystemStoreCertificates("cd18a3874e7ce0b3ef30c6914b8f618979fcf577")
+'    Confirmed = m_oServerSocket.ImportPemCertificates(STR_CERTFILE, STR_PASSWORD)
+    Confirmed = m_oServerSocket.ImportSystemStoreCertificates("cd18a3874e7ce0b3ef30c6914b8f618979fcf577")
 '    Confirmed = m_oServerSocket.ImportSystemStoreCertificates("68b5220077de8bbeaed8e1c2540fec6c16b418a8")
+End Sub
+
+Private Sub m_oServerSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
+    Const FUNC_NAME     As String = "m_oServerSocket_OnError"
+    
+    With m_oServerSocket.LastError
+        If .Number <> 0 Then
+            DebugLog MODULE_NAME, FUNC_NAME & ", " & Replace(.Source, vbCrLf, ", "), .Description & " &H" & Hex$(.Number), vbLogEventTypeError
+        End If
+    End With
 End Sub
 
 Private Sub m_oSocket_OnCertificate(Issuers As Object, Confirmed As Boolean)
     DebugLog MODULE_NAME, "m_oSocket_OnCertificate", "Raised"
     If m_oSocket.LocalCertificates Is Nothing Then
         If Issuers.Count > 0 Then
-            Confirmed = m_oSocket.ImportSystemStoreCertificates(Issuers, hWnd)
+'            Confirmed = m_oSocket.ImportSystemStoreCertificates(Issuers, hWnd)
             If Not Confirmed Then
-                Confirmed = m_oSocket.ImportSystemStoreCertificates(vbNullString)
+                Confirmed = m_oSocket.ImportSystemStoreCertificates(vbNullString, hWnd)
             End If
         End If
         If Not Confirmed Then
-            Confirmed = m_oSocket.ImportPkcs12Certificates(App.Path & "\client2.full.pfx")
+            #If ImplTlsServer Then
+                Confirmed = m_oSocket.ImportPkcs12Certificates(App.Path & "\client2.full.pfx")
+            #Else
+                Confirmed = m_oSocket.ImportSystemStoreCertificates(vbNullString)
+            #End If
         End If
     End If
 End Sub

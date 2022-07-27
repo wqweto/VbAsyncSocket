@@ -28,6 +28,7 @@ Private Const MODULE_NAME As String = "cTlsSocket"
 #Const ImplUseShared = (ASYNCSOCKET_USE_SHARED <> 0)
 #Const ImplSync = Not (ASYNCSOCKET_NO_SYNC <> 0)
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
+#Const ImplTlsServer = (ASYNCSOCKET_NO_TLSSERVER = 0)
 #Const ImplEncryptedPrivateKey = True
 
 '=========================================================================
@@ -209,7 +210,7 @@ Private Declare Function NCryptGetProperty Lib "ncrypt" (ByVal hObject As Long, 
 Private Declare Function NCryptSetProperty Lib "ncrypt" (ByVal hObject As Long, ByVal pszProperty As Long, pbInput As Any, ByVal cbInput As Long, ByVal dwFlags As Long) As Long
 Private Declare Function NCryptFinalizeKey Lib "ncrypt" (ByVal hKey As Long, ByVal dwFlags As Long) As Long
 '--- BCrypt
-#If ImplEncryptedPrivateKey Then
+#If ImplTlsServer And ImplEncryptedPrivateKey Then
     Private Declare Function BCryptOpenAlgorithmProvider Lib "bcrypt" (ByRef hAlgorithm As Long, ByVal pszAlgId As Long, ByVal pszImplementation As Long, ByVal dwFlags As Long) As Long
     Private Declare Function BCryptCloseAlgorithmProvider Lib "bcrypt" (ByVal hAlgorithm As Long, ByVal dwFlags As Long) As Long
     Private Declare Function BCryptGetProperty Lib "bcrypt" (ByVal hObject As Long, ByVal pszProperty As Long, pbOutput As Any, ByVal cbOutput As Long, cbResult As Long, ByVal dwFlags As Long) As Long
@@ -438,7 +439,7 @@ Private Const LNG_FACILITY_WIN32                        As Long = &H80070000
 Private Const LNG_STATUS_DATA_ERROR                     As Long = &HC000003E
 '--- errors
 Private Const ERR_NO_MATCHING_ALT_NAME                  As String = "No certificate subject name matches target host name"
-Private Const ERR_NO_CERTIFICATE                        As String = "No server certificate found"
+Private Const ERR_NO_CERTIFICATE                        As String = "No certificate is available"
 Private Const ERR_TRUST_IS_REVOKED                      As String = "Trust for this certificate or one of the certificates in the certificate chain has been revoked"
 Private Const ERR_TRUST_IS_NOT_SIGNATURE_VALID          As String = "The certificate or one of the certificates in the certificate chain does not have a valid signature"
 Private Const ERR_TRUST_IS_PARTIAL_CHAIN                As String = "The certificate chain is not complete"
@@ -450,6 +451,7 @@ Private Const ERR_UNKNOWN_CAPI_MAGIC                    As String = "Unknown CAP
 Private Const ERR_UNKNOWN_CERTIFICATECHAIN_ERROR_MASK   As String = "Unknown CertGetCertificateChain error mask (%1)"
 Private Const ERR_UNKNOWN_OID                           As String = "Unknown %1 OID (%2)"
 Private Const ERR_INCORRECT_PASSWORD                    As String = "Incorrect password"
+Private Const ERR_NO_SERVER_COMPILED                    As String = "Server-side TLS not compiled (ASYNCSOCKET_NO_TLSSERVER = 1)"
 
 Private WithEvents m_oAsyncSocket As cAsyncSocket
 Attribute m_oAsyncSocket.VB_VarHelpID = -1
@@ -471,6 +473,9 @@ Private m_baSendBuffer()        As Byte
 Private m_lSendPos              As Long
 Private m_lCallbackPtr          As Long
 Private m_eRaisedEvent          As UcsAsyncSocketEventMaskEnum
+Private m_lLastErrNumber        As Long
+Private m_sLastErrSource        As String
+Private m_sLastError            As String
 
 #If Not ImplUseShared Then
 Private Enum UcsOsVersionEnum
@@ -525,14 +530,20 @@ Public Property Get LastError() As VBA.ErrObject
     
     Set LastError = Err
     With LastError
-        .Description = TlsGetLastError(m_uCtx, lErrNumber, sErrSource)
-        If LenB(.Description) <> 0 And lErrNumber <> 0 Then
-            .Number = IIf(lErrNumber < 0, lErrNumber, lErrNumber Or LNG_FACILITY_WIN32)
-            .Source = sErrSource
-        ElseIf m_oSocket.HasPendingEvent Then
-            .Number = 0
+        If m_lLastErrNumber <> 0 Then
+            .Description = m_sLastError
+            .Number = m_lLastErrNumber
+            .Source = m_sLastErrSource
         Else
-            Set LastError = m_oSocket.LastError
+            .Description = TlsGetLastError(m_uCtx, lErrNumber, sErrSource)
+            If LenB(.Description) <> 0 And lErrNumber <> 0 Then
+                .Number = IIf(lErrNumber < 0, lErrNumber, lErrNumber Or LNG_FACILITY_WIN32)
+                .Source = sErrSource
+            ElseIf m_oSocket.HasPendingEvent Then
+                .Number = 0
+            Else
+                Set LastError = m_oSocket.LastError
+            End If
         End If
     End With
 End Property
@@ -649,6 +660,9 @@ Public Function InitServerTls( _
             Optional PrivateKey As Collection, _
             Optional AlpnProtocols As String, _
             Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum) As Boolean
+#If Not ImplTlsServer Then
+    ErrRaise vbObjectError, , ERR_NO_SERVER_COMPILED
+#Else
     Const FUNC_NAME     As String = "InitServerTls"
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
@@ -656,6 +670,7 @@ Public Function InitServerTls( _
     If m_bUseTls Then
         GoTo QH
     End If
+    pvSetLastError
     If pvCollectionCount(Certificates) > 0 And pvCollectionCount(PrivateKey) > 0 Then
         Set cCerts = Certificates
         Set cPrivKey = PrivateKey
@@ -668,14 +683,14 @@ Public Function InitServerTls( _
         If pvPkiPemImportCertificates(Split(CertFile, "|"), Password, cCerts, cPrivKey) Then
             GoTo StartTls
         End If
-        pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
+        pvSetLastError vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_NO_CERTIFICATE
         GoTo QH
     End If
     If LenB(CertSubject) <> 0 Then
         If pvPkiSystemStoreImportCertificate(CertSubject, 0, cCerts, cPrivKey) Then
             GoTo StartTls
         End If
-        pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
+        pvSetLastError vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_NO_CERTIFICATE
         GoTo QH
     End If
 StartTls:
@@ -694,36 +709,46 @@ StartTls:
     '--- success
     InitServerTls = True
 QH:
+#End If
 End Function
 
 Public Function Accept( _
             ConnectedSocket As cTlsSocket, _
             Optional SocketAddress As String, _
             Optional SocketPort As Long, _
-            Optional ByVal UseTls As Boolean = True) As Boolean
+            Optional ByVal UseTls As Variant) As Boolean
     Const FUNC_NAME     As String = "Accept"
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
     
     On Error GoTo EH
+    pvSetLastError
     If ConnectedSocket Is Nothing Then
         Set ConnectedSocket = New cTlsSocket
     End If
     If Not m_oSocket.Accept(ConnectedSocket.Socket, SocketAddress, SocketPort) Then
         GoTo QH
     End If
+    If IsMissing(UseTls) Then
+        UseTls = m_bUseTls
+    End If
     If UseTls Then
-        If pvCollectionCount(LocalCertificates) = 0 Then
-            If Not FireOnCertificate(Nothing) Then
-                If pvPkiGenerSelfSignedCertificate(cCerts, cPrivKey) Then
+        #If Not ImplTlsServer Then
+            ErrRaise vbObjectError, , ERR_NO_SERVER_COMPILED
+        #Else
+            If pvCollectionCount(LocalCertificates) = 0 Then
+                If Not FireOnCertificate(Nothing) Then
+                    If Not pvPkiGenerSelfSignedCertificate(cCerts, cPrivKey) Then
+                        GoTo QH
+                    End If
                     Set LocalCertificates = cCerts
                     Set LocalPrivateKey = cPrivKey
                 End If
             End If
-        End If
-        If Not ConnectedSocket.InitServerTls(Certificates:=LocalCertificates, PrivateKey:=LocalPrivateKey, AlpnProtocols:=m_sAlpnProtocols, LocalFeatures:=m_eLocalFeatures) Then
-            GoTo QH
-        End If
+            If Not ConnectedSocket.InitServerTls(Certificates:=LocalCertificates, PrivateKey:=LocalPrivateKey, AlpnProtocols:=m_sAlpnProtocols, LocalFeatures:=m_eLocalFeatures) Then
+                GoTo QH
+            End If
+        #End If
     End If
     '--- success
     Accept = True
@@ -782,7 +807,9 @@ Public Function StartTls( _
         m_sRemoteHostName = RemoteHostName
     End If
     If (LocalFeatures And ucsTlsSupportAll) = 0 Then
-        m_eLocalFeatures = LocalFeatures Or ucsTlsSupportAll Or IIf(OsVersion < ucsOsvXp, ucsTlsIgnoreServerCertificateErrors Or ucsTlsIgnoreServerCertificateRevocation, 0)
+        m_eLocalFeatures = LocalFeatures Or ucsTlsSupportAll _
+            Or IIf(OsVersion < ucsOsvXp, ucsTlsIgnoreServerCertificateErrors, 0) _
+            Or IIf(OsVersion < ucsOsvWin7, ucsTlsIgnoreServerCertificateRevocation, 0)
     Else
         m_eLocalFeatures = LocalFeatures
     End If
@@ -1339,6 +1366,7 @@ Public Function SyncWaitForEvent( _
     Const LNG_MASK      As Long = ucsSfdConnect Or ucsSfdRead Or ucsSfdWrite
     Dim dblTimer        As Double
     Dim lElapsed        As Long
+    Dim lErrNumber      As Long
     
     On Error GoTo EH
     If m_bUseTls And (EventMask And LNG_MASK) <> 0 Then
@@ -1364,7 +1392,8 @@ Public Function SyncWaitForEvent( _
                 GoTo QH
             End If
             m_oSocket.SyncProcessMsgQueue
-            If LastError.Number <> 0 Then
+            TlsGetLastError m_uCtx, lErrNumber
+            If lErrNumber <> 0 Then
                 GoTo QH
             End If
         Loop
@@ -1440,10 +1469,12 @@ Private Function pvHandleReceive(Optional ByVal Flush As Boolean) As Boolean
                         DebugLog MODULE_NAME, FUNC_NAME, "Will skip server certificate checks for " & RemoteHostName
                     #End If
                 ElseIf RemoteCertificates Is Nothing Then
-                    pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME, ucsSfdRead
+                    pvSetLastError vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_NO_CERTIFICATE
+                    pvFireOnError vbObjectError, ucsSfdRead
                     GoTo QH
                 ElseIf Not pvPkiCertValidate(RemoteHostName, RemoteCertificates, RemoteCertStatuses, frRootStore, sError) Then
-                    pvSetLastError sError, MODULE_NAME & "." & FUNC_NAME & vbCrLf & MODULE_NAME & ".pvPkiCertValidate", ucsSfdRead
+                    pvSetLastError vbObjectError, MODULE_NAME & ".pvPkiCertValidate", sError
+                    pvFireOnError vbObjectError, ucsSfdRead
                     GoTo QH
                 End If
             End If
@@ -1541,11 +1572,17 @@ EH:
     Resume QH
 End Function
 
-Private Function pvSetLastError(sError As String, sErrSource As String, Optional ByVal EventMask As UcsAsyncSocketEventMaskEnum)
-    m_uCtx.LastErrNumber = vbObjectError
-    m_uCtx.LastError = sError
-    m_uCtx.LastErrSource = sErrSource
-    pvFireOnError vbObjectError, EventMask
+Private Function pvSetLastError( _
+            Optional ByVal ErrNumber As Long, _
+            Optional ErrSource As String, _
+            Optional ErrDescription As String)
+    m_lLastErrNumber = ErrNumber
+    m_sLastErrSource = ErrSource
+    If LenB(ErrDescription) <> 0 Then
+        m_sLastError = ErrDescription
+    Else
+        m_sLastError = GetErrorDescription(ErrNumber)
+    End If
 End Function
 
 Private Sub pvFireOnResolve(IpAddress As String)
@@ -1901,54 +1938,75 @@ End Sub
 ' PKI
 '=========================================================================
 
-Public Function ImportPemCertificates(CertFile As String, Optional Password As String) As Boolean
-    Const FUNC_NAME     As String = "ImportPemCertificates"
-    Dim cCerts          As Collection
-    Dim cPrivKey        As Collection
-
-    If pvPkiPemImportCertificates(Split(CertFile, "|"), Password, cCerts, cPrivKey) Then
-        Set LocalCertificates = cCerts
-        Set LocalPrivateKey = cPrivKey
-        '--- success
-        ImportPemCertificates = True
-    Else
-        pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
-    End If
-End Function
-
-Public Function ImportPkcs12Certificates(CertFile As String, Optional Password As String) As Boolean
-    Const FUNC_NAME     As String = "ImportPkcs12Certificates"
-    Dim cCerts          As Collection
-    Dim cPrivKey        As Collection
-
-    If pvPkiPkcs12ImportCertificates(CertFile, Password & "", cCerts, cPrivKey) Then
-        Set LocalCertificates = cCerts
-        Set LocalPrivateKey = cPrivKey
-        '--- success
-        ImportPkcs12Certificates = True
-    Else
-        pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
-    End If
-End Function
-
 Public Function ImportSystemStoreCertificates(CertSubject As Variant, Optional ByVal hWndOwner As Long) As Boolean
     Const FUNC_NAME     As String = "ImportSystemStoreCertificates"
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
     
+    pvSetLastError
     If pvPkiSystemStoreImportCertificate(CertSubject, hWndOwner, cCerts, cPrivKey) Then
         Set LocalCertificates = cCerts
         Set LocalPrivateKey = cPrivKey
         '--- success
         ImportSystemStoreCertificates = True
     Else
-        pvSetLastError ERR_NO_CERTIFICATE, MODULE_NAME & "." & FUNC_NAME
+        If m_lLastErrNumber = 0 Then
+            pvSetLastError vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_NO_CERTIFICATE
+        End If
     End If
 End Function
 
+Public Function ImportPemCertificates(CertFile As String, Optional Password As String) As Boolean
+#If Not ImplTlsServer Then
+    ErrRaise vbObjectError, , ERR_NO_SERVER_COMPILED
+#Else
+    Const FUNC_NAME     As String = "ImportPemCertificates"
+    Dim cCerts          As Collection
+    Dim cPrivKey        As Collection
+
+    pvSetLastError
+    If pvPkiPemImportCertificates(Split(CertFile, "|"), Password, cCerts, cPrivKey) Then
+        Set LocalCertificates = cCerts
+        Set LocalPrivateKey = cPrivKey
+        '--- success
+        ImportPemCertificates = True
+    Else
+        If m_lLastErrNumber = 0 Then
+            pvSetLastError vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_NO_CERTIFICATE
+        End If
+    End If
+#End If
+End Function
+
+Public Function ImportPkcs12Certificates(CertFile As String, Optional Password As String) As Boolean
+#If Not ImplTlsServer Then
+    ErrRaise vbObjectError, , ERR_NO_SERVER_COMPILED
+#Else
+    Const FUNC_NAME     As String = "ImportPkcs12Certificates"
+    Dim cCerts          As Collection
+    Dim cPrivKey        As Collection
+
+    pvSetLastError
+    If pvPkiPkcs12ImportCertificates(CertFile, Password & "", cCerts, cPrivKey) Then
+        Set LocalCertificates = cCerts
+        Set LocalPrivateKey = cPrivKey
+        '--- success
+        ImportPkcs12Certificates = True
+    Else
+        If m_lLastErrNumber = 0 Then
+            pvSetLastError vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_NO_CERTIFICATE
+        End If
+    End If
+#End If
+End Function
+
 Public Function ImportPemRootCaCertStore(Optional CaBundleFile As String, Optional RootCa As cTlsSocket) As Boolean
+#If Not ImplTlsServer Then
+    ErrRaise vbObjectError, , ERR_NO_SERVER_COMPILED
+#Else
     Dim hCertStore      As Long
     
+    pvSetLastError
     If LenB(CaBundleFile) <> 0 Then
         hCertStore = pvPkiPemImportRootCaCertStore(CaBundleFile)
         If hCertStore = 0 Then
@@ -1969,35 +2027,34 @@ Public Function ImportPemRootCaCertStore(Optional CaBundleFile As String, Option
     '--- success
     ImportPemRootCaCertStore = True
 QH:
+#End If
 End Function
 
 '= private ===============================================================
 
+#If ImplTlsServer Then
 Private Function pvPkiPemImportCertificates(ByVal vPemFiles As Variant, sPassword As String, cCerts As Collection, cPrivKey As Collection) As Boolean
-    Const FUNC_NAME     As String = "pvPkiPemImportCertificates"
     Dim vElem           As Variant
     Dim sPemText        As String
     Dim vKey            As Variant
     Dim baPrivKey()     As Byte
     Dim baEncrKey()     As Byte
-    Dim vErr            As Variant
     
-    On Error GoTo EH
     If VarType(vPemFiles) = vbString Then
         vPemFiles = Array(vPemFiles)
     End If
     For Each vElem In vPemFiles
         sPemText = StrConv(CStr(ReadBinaryFile(CStr(vElem))), vbUnicode)
         pvPkiPemGetTextPortions sPemText, "PRIVATE KEY", cPrivKey
-#If ImplEncryptedPrivateKey Then
-        For Each vKey In pvPkiPemGetTextPortions(sPemText, "ENCRYPTED PRIVATE KEY")
-            baEncrKey = vKey
-            If Not pvPkiPemDecryptPrivateKey(baPrivKey, baEncrKey, sPassword) Then
-                GoTo QH
-            End If
-            cPrivKey.Add baPrivKey
-        Next
-#End If
+        #If ImplEncryptedPrivateKey Then
+            For Each vKey In pvPkiPemGetTextPortions(sPemText, "ENCRYPTED PRIVATE KEY")
+                baEncrKey = vKey
+                If Not pvPkiPemDecryptPrivateKey(baPrivKey, baEncrKey, sPassword) Then
+                    GoTo QH
+                End If
+                cPrivKey.Add baPrivKey
+            Next
+        #End If
         pvPkiPemGetTextPortions sPemText, "RSA PRIVATE KEY", cPrivKey
         pvPkiPemGetTextPortions sPemText, "EC PRIVATE KEY", cPrivKey
         pvPkiPemGetTextPortions sPemText, "CERTIFICATE", cCerts
@@ -2007,18 +2064,10 @@ Private Function pvPkiPemImportCertificates(ByVal vPemFiles As Variant, sPasswor
         pvPkiPemImportCertificates = True
     End If
 QH:
-    If IsArray(vErr) Then
-        On Error GoTo 0
-        ErrRaise vErr(0), vErr(1), vErr(2)
-    End If
-    Exit Function
-EH:
-    vErr = Array(Err.Number, Err.Source, Err.Description)
-    PrintError FUNC_NAME
-    Resume QH
 End Function
+#End If
 
-#If ImplEncryptedPrivateKey Then
+#If ImplTlsServer And ImplEncryptedPrivateKey Then
 Private Function pvPkiPemDecryptPrivateKey(baRetVal() As Byte, baEncrKey() As Byte, sPassword As String) As Boolean
     Const FUNC_NAME     As String = "pvPkiPemDecryptPrivateKey"
     Const szOID_PKCS_5_PBES2        As String = "1.2.840.113549.1.5.13"
@@ -2055,19 +2104,19 @@ Private Function pvPkiPemDecryptPrivateKey(baRetVal() As Byte, baEncrKey() As By
     
     On Error GoTo EH
     If CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, PKCS_ENCRYPTED_PRIVATE_KEY_INFO, baEncrKey(0), UBound(baEncrKey) + 1, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lEncrPtr, 0) = 0 Then
-        pvSetLastError GetErrorDescription(Err.LastDllError), MODULE_NAME & "." & FUNC_NAME
+        pvSetLastError Err.LastDllError, MODULE_NAME & "." & FUNC_NAME
         GoTo QH
     End If
     Call CopyMemory(uEncrInfo, ByVal lEncrPtr, LenB(uEncrInfo))
     sOID = pvToString(uEncrInfo.EncryptionAlgorithm.pszObjId)
     If sOID <> szOID_PKCS_5_PBES2 Then
-        pvSetLastError Replace(Replace(ERR_UNKNOWN_OID, "%1", "encryption scheme"), "%2", sOID), MODULE_NAME & "." & FUNC_NAME
+        pvSetLastError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Replace(Replace(ERR_UNKNOWN_OID, "%1", "encryption scheme"), "%2", sOID)
         GoTo QH
     End If
     Set cParams = pvPkiAsn1Scanf(uEncrInfo.EncryptionAlgorithm.Parameters.pbData, uEncrInfo.EncryptionAlgorithm.Parameters.cbData, "((o(xi(o)))(ox))")
     sOID = cParams.Item(1)
     If sOID <> szOID_PKCS_5_PBKDF2 Then
-        pvSetLastError Replace(Replace(ERR_UNKNOWN_OID, "%1", "key derivation function"), "%2", sOID), MODULE_NAME & "." & FUNC_NAME
+        pvSetLastError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Replace(Replace(ERR_UNKNOWN_OID, "%1", "key derivation function"), "%2", sOID)
         GoTo QH
     End If
     sOID = cParams.Item(4)
@@ -2079,7 +2128,7 @@ Private Function pvPkiPemDecryptPrivateKey(baRetVal() As Byte, baEncrKey() As By
     Case szOID_RSA_HMAC_SHA512
         sHashAlg = "SHA512"
     Case Else
-        pvSetLastError Replace(Replace(ERR_UNKNOWN_OID, "%1", "hash"), "%2", sOID), MODULE_NAME & "." & FUNC_NAME
+        pvSetLastError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Replace(Replace(ERR_UNKNOWN_OID, "%1", "hash"), "%2", sOID)
         GoTo QH
     End Select
     sOID = cParams.Item(5)
@@ -2094,10 +2143,10 @@ Private Function pvPkiPemDecryptPrivateKey(baRetVal() As Byte, baEncrKey() As By
         sEncrAlg = "AES"
         lKeySize = 32
     Case Else
-        pvSetLastError Replace(Replace(ERR_UNKNOWN_OID, "%1", "encryption"), "%2", sOID), MODULE_NAME & "." & FUNC_NAME
+        pvSetLastError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Replace(Replace(ERR_UNKNOWN_OID, "%1", "encryption"), "%2", sOID)
         GoTo QH
     End Select
-    baPass = ToUtf8Array(sPassword)
+    baPass = StrConv(sPassword, vbFromUnicode)
     baSalt = cParams.Item(2)
     lIterations = cParams.Item(3)
     baIV = cParams.Item(6)
@@ -2145,7 +2194,7 @@ Private Function pvPkiPemDecryptPrivateKey(baRetVal() As Byte, baEncrKey() As By
     hResult = BCryptDecrypt(hKey, ByVal uEncrInfo.EncryptedPrivateKey.pbData, uEncrInfo.EncryptedPrivateKey.cbData, 0, baIV(0), UBound(baIV) + 1, baRetVal(0), UBound(baRetVal) + 1, lSize, BCRYPT_BLOCK_PADDING)
     If hResult < 0 Then
         If hResult = LNG_STATUS_DATA_ERROR Then
-            pvSetLastError ERR_INCORRECT_PASSWORD, MODULE_NAME & "." & FUNC_NAME
+            pvSetLastError vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_INCORRECT_PASSWORD
             GoTo QH
         End If
         sApiSource = "BCryptDecrypt"
@@ -2155,6 +2204,7 @@ Private Function pvPkiPemDecryptPrivateKey(baRetVal() As Byte, baEncrKey() As By
     '--- success
     pvPkiPemDecryptPrivateKey = True
 QH:
+    On Error GoTo 0
     If hKey <> 0 Then
         Call BCryptDestroyKey(hKey)
     End If
@@ -2165,11 +2215,9 @@ QH:
         Call LocalFree(lEncrPtr)
     End If
     If LenB(sApiSource) <> 0 Then
-        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
     If IsArray(vErr) Then
-        On Error GoTo 0
         ErrRaise vErr(0), vErr(1), vErr(2)
     End If
     Exit Function
@@ -2180,6 +2228,7 @@ EH:
 End Function
 #End If
 
+#If ImplTlsServer Then
 Private Function pvPkiPemImportRootCaCertStore(sPemFile As String) As Long
     Const FUNC_NAME     As String = "pvPkiPemImportRootCaCertStore"
     Dim hCertStore      As Long
@@ -2213,15 +2262,14 @@ Private Function pvPkiPemImportRootCaCertStore(sPemFile As String) As Long
     pvPkiPemImportRootCaCertStore = hCertStore
     hCertStore = 0
 QH:
+    On Error GoTo 0
     If hCertStore <> 0 Then
         Call CertCloseStore(hCertStore, 0)
     End If
     If LenB(sApiSource) <> 0 Then
-        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
     If IsArray(vErr) Then
-        On Error GoTo 0
         ErrRaise vErr(0), vErr(1), vErr(2)
     End If
     Exit Function
@@ -2230,7 +2278,9 @@ EH:
     PrintError FUNC_NAME
     Resume QH
 End Function
+#End If
 
+#If ImplTlsServer Then
 Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As String, cCerts As Collection, cPrivKey As Collection) As Boolean
     Const FUNC_NAME     As String = "pvPkiPkcs12ImportCertificates"
     Dim baPfx()         As Byte
@@ -2253,6 +2303,7 @@ Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As 
         hPfxStore = PFXImportCertStore(baPfx(0), 0, dwFlags)
     End If
     If hPfxStore = 0 Then
+        pvSetLastError Err.LastDllError, MODULE_NAME & "." & FUNC_NAME
         GoTo QH
     End If
     Do
@@ -2266,11 +2317,11 @@ Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As 
         End If
     Loop
 QH:
+    On Error GoTo 0
     If hPfxStore <> 0 Then
         Call CertCloseStore(hPfxStore, 0)
     End If
     If IsArray(vErr) Then
-        On Error GoTo 0
         ErrRaise vErr(0), vErr(1), vErr(2)
     End If
     Exit Function
@@ -2279,6 +2330,7 @@ EH:
     PrintError FUNC_NAME
     Resume QH
 End Function
+#End If
 
 Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Variant, ByVal hWndParent As Long, cCerts As Collection, cPrivKey As Collection) As Boolean
     Const FUNC_NAME     As String = "pvPkiSystemStoreImportCertificate"
@@ -2293,6 +2345,7 @@ Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Var
     Dim dwFindType      As Long
     Dim pvFindPara      As Long
     Dim uSelect         As CERT_SELECT_STRUCT_W
+    Dim lSize           As Long
     Dim hResult         As Long
     Dim sApiSource      As String
     Dim vErr            As Variant
@@ -2343,10 +2396,18 @@ Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Var
                 sApiSource = "CertOpenStore(CERT_STORE_PROV_MEMORY)"
                 GoTo QH
             End If
-            Do While pCertContext <> 0
+        End If
+        Do While pCertContext <> 0
+            '--- check if (persistent) private key is availabe for the certificate
+            If CertGetCertificateContextProperty(pCertContext, CERT_KEY_PROV_INFO_PROP_ID, ByVal 0, lSize) <> 0 And lSize <> 0 Then
+                If hMemStore = 0 Then
+                    Exit Do
+                End If
                 Call CertAddCertificateContextToStore(hMemStore, pCertContext, CERT_STORE_ADD_USE_EXISTING, ByVal 0)
-                pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, pCertContext)
-            Loop
+            End If
+            pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, pCertContext)
+        Loop
+        If hWndParent <> 0 Then
             With uSelect
                 .dwSize = LenB(uSelect)
                 .hWndParent = hWndParent
@@ -2370,6 +2431,7 @@ Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Var
         End If
     End If
 QH:
+    On Error GoTo 0
     If pCertContext <> 0 Then
         Call CertFreeCertificateContext(pCertContext)
     End If
@@ -2380,11 +2442,9 @@ QH:
         Call CertCloseStore(hMemStore, 0)
     End If
     If LenB(sApiSource) <> 0 Then
-        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
     If IsArray(vErr) Then
-        On Error GoTo 0
         ErrRaise vErr(0), vErr(1), vErr(2)
     End If
     Exit Function
@@ -2394,6 +2454,7 @@ EH:
     Resume QH
 End Function
 
+#If ImplTlsServer Then
 Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey As Collection, Optional ByVal Subject As String) As Boolean
     Const FUNC_NAME     As String = "pvPkiGenerSelfSignedCertificate"
     Dim hProv           As Long
@@ -2420,6 +2481,8 @@ Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey 
         GoTo QH
     End If
     If CryptGenKey(hProv, uProvInfo.dwKeySpec, RSA1024BIT_KEY Or CRYPT_EXPORTABLE, hKey) = 0 Then
+        hResult = Err.LastDllError
+        sApiSource = "CryptGenKey"
         GoTo QH
     End If
     If Left$(Subject, 3) <> "CN=" Then
@@ -2431,10 +2494,14 @@ Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey 
         sName = Subject
     End If
     If CertStrToName(X509_ASN_ENCODING, StrPtr(sName), CERT_OID_NAME_STR, 0, ByVal 0, lSize, 0) = 0 Then
+        hResult = Err.LastDllError
+        sApiSource = "CertStrToName"
         GoTo QH
     End If
     pvArrayAllocate baName, lSize, FUNC_NAME & ".baName"
     If CertStrToName(X509_ASN_ENCODING, StrPtr(sName), CERT_OID_NAME_STR, 0, baName(0), lSize, 0) = 0 Then
+        hResult = Err.LastDllError
+        sApiSource = "CertStrToName#2"
         GoTo QH
     End If
     With uName
@@ -2458,6 +2525,7 @@ Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey 
         pvPkiGenerSelfSignedCertificate = True
     End If
 QH:
+    On Error GoTo 0
     If hKey <> 0 Then
         Call CryptDestroyKey(hKey)
     End If
@@ -2465,11 +2533,9 @@ QH:
         Call CryptReleaseContext(hProv, 0)
     End If
     If LenB(sApiSource) <> 0 Then
-        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
     If IsArray(vErr) Then
-        On Error GoTo 0
         ErrRaise vErr(0), vErr(1), vErr(2)
     End If
     Exit Function
@@ -2478,6 +2544,7 @@ EH:
     PrintError FUNC_NAME
     Resume QH
 End Function
+#End If
 
 Private Function pvPkiCertValidate(ByVal sHostName As String, cCerts As Collection, cStatuses As Collection, ByVal hRootStore As Long, sError As String) As Boolean
     Const FUNC_NAME     As String = "pvPkiCertValidate"
@@ -2557,6 +2624,7 @@ Private Function pvPkiCertValidate(ByVal sHostName As String, cCerts As Collecti
         End If
     Loop
 QH:
+    On Error GoTo 0
     If pCertContext <> 0 Then
         Call CertFreeCertificateContext(pCertContext)
     End If
@@ -2564,11 +2632,9 @@ QH:
         Call CertCloseStore(hCertStore, 0)
     End If
     If LenB(sApiSource) <> 0 Then
-        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
     If IsArray(vErr) Then
-        On Error GoTo 0
         ErrRaise vErr(0), vErr(1), vErr(2)
     End If
     Exit Function
@@ -2700,6 +2766,7 @@ Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hRootStor
         End If
     Next
 QH:
+    On Error GoTo 0
     If pChainContext <> 0 Then
         Call CertFreeCertificateChain(pChainContext)
     End If
@@ -2707,11 +2774,9 @@ QH:
         Call CertFreeCertificateChainEngine(hChainEngine)
     End If
     If LenB(sApiSource) <> 0 Then
-        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
     If IsArray(vErr) Then
-        On Error GoTo 0
         ErrRaise vErr(0), vErr(1), vErr(2)
     End If
     Exit Function
@@ -2721,6 +2786,7 @@ EH:
     Resume QH
 End Function
 
+#If ImplTlsServer Then
 Private Function pvPkiPemGetTextPortions(sContents As String, sBoundary As String, Optional RetVal As Collection) As Collection
     Dim vSplit          As Variant
     Dim lIdx            As Long
@@ -2762,6 +2828,7 @@ Private Function pvPkiPemGetTextPortions(sContents As String, sBoundary As Strin
     Next
     Set pvPkiPemGetTextPortions = RetVal
 End Function
+#End If
 
 Private Function pvPkiAppendCertChain(ByVal pCertContext As Long, ByVal hCertStore As Long, cCerts As Collection, cPrivKey As Collection) As Boolean
     Const FUNC_NAME     As String = "pvPkiAppendCertChain"
@@ -2796,15 +2863,14 @@ Private Function pvPkiAppendCertChain(ByVal pCertContext As Long, ByVal hCertSto
         End If
     Next
 QH:
+    On Error GoTo 0
     If pChainContext <> 0 Then
         Call CertFreeCertificateChain(pChainContext)
     End If
     If LenB(sApiSource) <> 0 Then
-        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
     If IsArray(vErr) Then
-        On Error GoTo 0
         ErrRaise vErr(0), vErr(1), vErr(2)
     End If
     Exit Function
@@ -2866,6 +2932,7 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
     If CryptAcquireCertificatePrivateKey(pCertContext, dwFlags, 0, hProv, lKeySpec, lFree) = 0 Then
         dwFlags = dwFlags Or CRYPT_ACQUIRE_CACHE_FLAG
         If CryptAcquireCertificatePrivateKey(pCertContext, dwFlags, 0, hProv, lKeySpec, lFree) = 0 Then
+            pvSetLastError Err.LastDllError, MODULE_NAME & "." & FUNC_NAME
             GoTo QH
         End If
     End If
@@ -2985,6 +3052,7 @@ ExportFailed:
     '--- success
     pvPkiExportPrivateKey = True
 QH:
+    On Error GoTo 0
     If hKey <> 0 Then
         Call CryptDestroyKey(hKey)
     End If
@@ -3005,11 +3073,9 @@ QH:
         Call CryptAcquireContext(0, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags Or CRYPT_DELETEKEYSET)
     End If
     If LenB(sApiSource) <> 0 Then
-        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
     If IsArray(vErr) Then
-        On Error GoTo 0
         ErrRaise vErr(0), vErr(1), vErr(2)
     End If
     Exit Function
@@ -3061,12 +3127,11 @@ Private Function pvPkiExportRsaPrivateKey(baRetVal() As Byte, baPrivBlob() As By
     '--- success
     pvPkiExportRsaPrivateKey = True
 QH:
+    On Error GoTo 0
     If LenB(sApiSource) <> 0 Then
-        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
     If IsArray(vErr) Then
-        On Error GoTo 0
         ErrRaise vErr(0), vErr(1), vErr(2)
     End If
     Exit Function
@@ -3109,12 +3174,11 @@ Private Function pvPkiExportEccPrivateKey(baRetVal() As Byte, baPrivBlob() As By
     '--- success
     pvPkiExportEccPrivateKey = True
 QH:
+    On Error GoTo 0
     If LenB(sApiSource) <> 0 Then
-        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
     If IsArray(vErr) Then
-        On Error GoTo 0
         ErrRaise vErr(0), vErr(1), vErr(2)
     End If
     Exit Function
@@ -3229,6 +3293,7 @@ Private Function pvPkiCloneKeyWithExportPolicy(ByVal hKey As Long, ByVal lPolicy
     pvPkiCloneKeyWithExportPolicy = hNewKey
     hNewKey = 0
 QH:
+    On Error GoTo 0
     If hNewKey <> 0 Then
         Call NCryptFreeObject(hNewKey)
     End If
@@ -3236,11 +3301,9 @@ QH:
         Call NCryptFreeObject(hProv)
     End If
     If LenB(sApiSource) <> 0 Then
-        On Error GoTo 0
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
     If IsArray(vErr) Then
-        On Error GoTo 0
         ErrRaise vErr(0), vErr(1), vErr(2)
     End If
     Exit Function
@@ -3293,11 +3356,11 @@ Private Function pvPkiIssuerToCertRdn(vIssuer As Variant, uOutput As CERT_RDN) A
         pvPkiIssuerToCertRdn = True
     End If
 QH:
+    On Error GoTo 0
     If lPtr <> 0 Then
         Call LocalFree(lPtr)
     End If
     If IsArray(vErr) Then
-        On Error GoTo 0
         ErrRaise vErr(0), vErr(1), vErr(2)
     End If
     Exit Function
@@ -3344,6 +3407,7 @@ Private Function pvPkiParseSelectorString(ByVal Subject As String, lStoreFlags A
     pvPkiParseSelectorString = True
 End Function
 
+#If ImplTlsServer And ImplEncryptedPrivateKey Then
 Private Function pvPkiAsn1Scanf(ByVal lPtr As Long, ByVal lSize As Long, sFormat As String) As Collection
     Dim uInput          As CRYPT_DATA_BLOB
     Dim cOutput         As Collection
@@ -3441,6 +3505,7 @@ Private Function pvPkiAsn1Parse(uInput As CRYPT_DATA_BLOB, sFormat As String, cO
     pvPkiAsn1Parse = True
 QH:
 End Function
+#End If
 
 Private Function pvNCryptGetStringProperty(ByVal hNKey As String, sPropName As String) As String
     Const FUNC_NAME     As String = "pvNCryptGetStringProperty"

@@ -208,7 +208,7 @@ Private Sub Command2_Click()
     pvTestSslLabs
     If m_oRootCa Is Nothing Then
         Set m_oRootCa = New cTlsSocket
-        m_oRootCa.ImportPemRootCaCertStore App.Path & "\ca-bundle.pem"
+'        m_oRootCa.ImportPemRootCaCertStore App.Path & "\ca-bundle.pem"
     End If
     If m_oRequest Is Nothing Then
         Set m_oRequest = New cHttpRequest

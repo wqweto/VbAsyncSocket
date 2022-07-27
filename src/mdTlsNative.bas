@@ -13,6 +13,7 @@ Option Explicit
 DefObj A-Z
 Private Const MODULE_NAME As String = "mdTlsNative"
 
+#Const ImplTlsServer = (ASYNCSOCKET_NO_TLSSERVER = 0)
 #Const ImplUseShared = (ASYNCSOCKET_USE_SHARED <> 0)
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
 #Const ImplCaptureTraffic = CLng(ASYNCSOCKET_CAPTURE_TRAFFIC) '--- bitmask: 1 - traffic
@@ -331,6 +332,7 @@ Private Const ERR_UNEXPECTED_RESULT         As String = "Unexpected result from 
 Private Const ERR_CONNECTION_CLOSED         As String = "Connection closed"
 Private Const ERR_UNKNOWN_ECC_PRIVKEY       As String = "Unknown ECC private key (%1)"
 Private Const ERR_UNKNOWN_PUBKEY            As String = "Unknown public key (%1)"
+Private Const ERR_NO_SERVER_COMPILED        As String = "Server-side TLS not compiled (ASYNCSOCKET_NO_TLSSERVER = 1)"
 '--- numeric
 Private Const TLS_CONTENT_TYPE_ALERT        As Long = 21
 Private Const LNG_FACILITY_WIN32            As Long = &H80070000
@@ -502,6 +504,9 @@ Public Function TlsInitServer( _
             Optional PrivateKey As Collection, _
             Optional AlpnProtocols As String, _
             Optional ByVal LocalFeatures As Long = ucsTlsSupportAll) As Boolean
+#If Not ImplTlsServer Then
+    ErrRaise vbObjectError, , ERR_NO_SERVER_COMPILED
+#Else
     Dim uEmpty          As UcsTlsContext
     
     On Error GoTo EH
@@ -526,6 +531,7 @@ Public Function TlsInitServer( _
     Exit Function
 EH:
     pvTlsSetLastError uCtx, Err.Number, Err.Source, Err.Description
+#End If
 End Function
 
 Public Function TlsTerminate(uCtx As UcsTlsContext)
@@ -639,9 +645,11 @@ RetryCredentials:
         If .hTlsContext = 0 Then
             pvInitSecDesc .InDesc, 3, .InBuffers
             pvInitSecDesc .OutDesc, 3, .OutBuffers
-            If .IsServer Then
-                pvTlsParseHandshakeClientHello uCtx, baInput, 0
-            End If
+            #If ImplTlsServer Then
+                If .IsServer Then
+                    pvTlsParseHandshakeClientHello uCtx, baInput, 0
+                End If
+            #End If
             If LenB(.AlpnProtocols) <> 0 Then
                 pvTlsBuildAlpnBuffer baAlpnBuffer, 0, .AlpnProtocols
             End If
@@ -660,15 +668,19 @@ RetryCredentials:
                 pvInitSecBuffer .InBuffers(IIf(lPtr <> 0, 1, 0)), SECBUFFER_APPLICATION_PROTOCOLS, VarPtr(baAlpnBuffer(0)), UBound(baAlpnBuffer) + 1
                 lPtr = VarPtr(.InDesc)
             End If
-            If .IsServer Then
-                hResult = AcceptSecurityContext(.hTlsCredentials, IIf(.hTlsContext <> 0, VarPtr(.hTlsContext), 0), ByVal lPtr, .ContextReq, _
-                    SECURITY_NATIVE_DREP, .hTlsContext, .OutDesc, lContextAttr, 0)
-                sApiSource = "AcceptSecurityContext"
-            Else
-                hResult = InitializeSecurityContext(.hTlsCredentials, IIf(.hTlsContext <> 0, VarPtr(.hTlsContext), 0), ByVal .RemoteHostName, .ContextReq, 0, _
-                    SECURITY_NATIVE_DREP, ByVal lPtr, 0, .hTlsContext, .OutDesc, lContextAttr, 0)
-                sApiSource = "InitializeSecurityContext"
-            End If
+            #If ImplTlsServer Then
+                If .IsServer Then
+                    hResult = AcceptSecurityContext(.hTlsCredentials, IIf(.hTlsContext <> 0, VarPtr(.hTlsContext), 0), ByVal lPtr, .ContextReq, _
+                        SECURITY_NATIVE_DREP, .hTlsContext, .OutDesc, lContextAttr, 0)
+                    sApiSource = "AcceptSecurityContext"
+                Else
+            #End If
+                    hResult = InitializeSecurityContext(.hTlsCredentials, IIf(.hTlsContext <> 0, VarPtr(.hTlsContext), 0), ByVal .RemoteHostName, .ContextReq, 0, _
+                        SECURITY_NATIVE_DREP, ByVal lPtr, 0, .hTlsContext, .OutDesc, lContextAttr, 0)
+                    sApiSource = "InitializeSecurityContext"
+            #If ImplTlsServer Then
+                End If
+            #End If
             If hResult = SEC_E_INCOMPLETE_MESSAGE Then
                 pvInitSecBuffer .InBuffers(1), SECBUFFER_EMPTY
                 Exit Do
@@ -1038,15 +1050,19 @@ Public Function TlsShutdown(uCtx As UcsTlsContext, baOutput() As Byte, lPos As L
         For lIdx = 1 To UBound(.OutBuffers)
             pvInitSecBuffer .OutBuffers(lIdx), SECBUFFER_EMPTY
         Next
-        If .IsServer Then
-            hResult = AcceptSecurityContext(.hTlsCredentials, VarPtr(.hTlsContext), ByVal 0, .ContextReq, _
-                SECURITY_NATIVE_DREP, .hTlsContext, .OutDesc, lContextAttr, 0)
-            sApiSource = "AcceptSecurityContext"
-        Else
-            hResult = InitializeSecurityContext(.hTlsCredentials, VarPtr(.hTlsContext), ByVal .RemoteHostName, .ContextReq, 0, _
-                SECURITY_NATIVE_DREP, ByVal 0, 0, .hTlsContext, .OutDesc, lContextAttr, 0)
-            sApiSource = "InitializeSecurityContext"
-        End If
+        #If ImplTlsServer Then
+            If .IsServer Then
+                hResult = AcceptSecurityContext(.hTlsCredentials, VarPtr(.hTlsContext), ByVal 0, .ContextReq, _
+                    SECURITY_NATIVE_DREP, .hTlsContext, .OutDesc, lContextAttr, 0)
+                sApiSource = "AcceptSecurityContext"
+            Else
+        #End If
+                hResult = InitializeSecurityContext(.hTlsCredentials, VarPtr(.hTlsContext), ByVal .RemoteHostName, .ContextReq, 0, _
+                    SECURITY_NATIVE_DREP, ByVal 0, 0, .hTlsContext, .OutDesc, lContextAttr, 0)
+                sApiSource = "InitializeSecurityContext"
+        #If ImplTlsServer Then
+            End If
+        #End If
         If hResult < 0 Then
             pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & sApiSource
             GoTo QH
