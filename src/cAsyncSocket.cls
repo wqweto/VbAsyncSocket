@@ -424,7 +424,7 @@ Public Function Create( _
         pvClose
         GoTo QH
     End If
-    If SocketPort <> 0 Then
+    If SocketPort <> 0 Or LenB(SocketAddress) <> 0 Then
         If Not Bind(SocketAddress, SocketPort) Then
             pvClose
             GoTo QH
