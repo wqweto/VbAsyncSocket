@@ -69,7 +69,7 @@ Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
 Option Explicit
 DefObj A-Z
-Private Const MODULE_NAME As String = "Form1"
+Private Const MODULE_NAME As String = "Form2"
 
 #Const ImplUseDebugLog = (USE_DEBUG_LOG <> 0)
 #Const ImplTlsServer = (ASYNCSOCKET_NO_TLSSERVER = 0)
@@ -453,16 +453,13 @@ Private Sub m_oSocket_OnCertificate(Issuers As Object, Confirmed As Boolean)
     DebugLog MODULE_NAME, "m_oSocket_OnCertificate", "Raised"
     If m_oSocket.LocalCertificates Is Nothing Then
         If Issuers.Count > 0 Then
-'            Confirmed = m_oSocket.ImportSystemStoreCertificates(Issuers, hWnd)
-            If Not Confirmed Then
-                Confirmed = m_oSocket.ImportSystemStoreCertificates(vbNullString, hWnd)
-            End If
+            Confirmed = m_oSocket.ImportSystemStoreCertificates(Issuers, hWnd)
         End If
         If Not Confirmed Then
             #If ImplTlsServer Then
                 Confirmed = m_oSocket.ImportPkcs12Certificates(App.Path & "\client2.full.pfx")
             #Else
-                Confirmed = m_oSocket.ImportSystemStoreCertificates(vbNullString)
+                Confirmed = m_oSocket.ImportSystemStoreCertificates(vbNullString, hWnd)
             #End If
         End If
     End If

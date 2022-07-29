@@ -2079,7 +2079,13 @@ Private Function pvPkiPemDecryptPrivateKey(baRetVal() As Byte, baEncrKey() As By
     Const szOID_NIST_AES128_CBC     As String = "2.16.840.1.101.3.4.1.2"
     Const szOID_NIST_AES256_CBC     As String = "2.16.840.1.101.3.4.1.42"
     Const BCRYPT_ALG_HANDLE_HMAC_FLAG As Long = 8
-    Const BCRYPT_BLOCK_PADDING        As Long = 1
+    Const BCRYPT_BLOCK_PADDING      As Long = 1
+    Const IDX_KDF_OID               As Long = 1
+    Const IDX_KDF_SALT              As Long = 2
+    Const IDX_KDF_ITER              As Long = 3
+    Const IDX_KDF_HASH_OID          As Long = 4
+    Const IDX_KDF_ENCR_OID          As Long = 5
+    Const IDX_KDF_ENCR_IV           As Long = 6
     Dim lEncrPtr        As Long
     Dim uEncrInfo       As CRYPT_ENCRYPTED_PRIVATE_KEY_INFO
     Dim sOID            As String
@@ -2114,12 +2120,12 @@ Private Function pvPkiPemDecryptPrivateKey(baRetVal() As Byte, baEncrKey() As By
         GoTo QH
     End If
     Set cParams = pvPkiAsn1Scanf(uEncrInfo.EncryptionAlgorithm.Parameters.pbData, uEncrInfo.EncryptionAlgorithm.Parameters.cbData, "((o(xi(o)))(ox))")
-    sOID = cParams.Item(1)
+    sOID = cParams.Item(IDX_KDF_OID)
     If sOID <> szOID_PKCS_5_PBKDF2 Then
         pvSetLastError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Replace(Replace(ERR_UNKNOWN_OID, "%1", "key derivation function"), "%2", sOID)
         GoTo QH
     End If
-    sOID = cParams.Item(4)
+    sOID = cParams.Item(IDX_KDF_HASH_OID)
     Select Case sOID
     Case szOID_RSA_HMAC_SHA1
         sHashAlg = "SHA1"
@@ -2131,7 +2137,7 @@ Private Function pvPkiPemDecryptPrivateKey(baRetVal() As Byte, baEncrKey() As By
         pvSetLastError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Replace(Replace(ERR_UNKNOWN_OID, "%1", "hash"), "%2", sOID)
         GoTo QH
     End Select
-    sOID = cParams.Item(5)
+    sOID = cParams.Item(IDX_KDF_ENCR_OID)
     Select Case sOID
     Case szOID_RSA_DES_EDE3_CBC
         sEncrAlg = "3DES"
@@ -2147,9 +2153,9 @@ Private Function pvPkiPemDecryptPrivateKey(baRetVal() As Byte, baEncrKey() As By
         GoTo QH
     End Select
     baPass = StrConv(sPassword, vbFromUnicode)
-    baSalt = cParams.Item(2)
-    lIterations = cParams.Item(3)
-    baIV = cParams.Item(6)
+    baSalt = cParams.Item(IDX_KDF_SALT)
+    lIterations = cParams.Item(IDX_KDF_ITER)
+    baIV = cParams.Item(IDX_KDF_ENCR_IV)
     hResult = BCryptOpenAlgorithmProvider(hAlg, StrPtr(sHashAlg), 0, BCRYPT_ALG_HANDLE_HMAC_FLAG)
     If hResult < 0 Then
         sApiSource = "BCryptOpenAlgorithmProvider(" & sHashAlg & ")"
