@@ -287,7 +287,7 @@ Private m_lLastSendBytes        As Long
 Private m_uGetHostByName()      As UcsAsyncGetHostByNameType
 Private m_uWindowState()        As UcsHelperWindowStateType
 #If ImplSync Then
-    Private m_cMsgQueue         As Collection
+    Private m_cMsgQueue         As VBA.Collection
     Private m_bBlocking         As Boolean
 #End If
 
@@ -536,7 +536,7 @@ Public Function GetLocalHost(HostName As String, HostAddress As String, Optional
     HostName = Left$(sBuffer, InStr(sBuffer, Chr$(0)) - 1)
     pvToSockAddr HostName, 0, uAddr
     pvFromSockAddr uAddr, HostAddress, 0
-    AdaptersInfo = pvGetAdaptersInfo
+    pvGetAdaptersInfo AdaptersInfo
     '--- success
     m_lLastError = 0
     GetLocalHost = True
@@ -1167,31 +1167,42 @@ Private Sub pvClose()
     End If
 End Sub
 
-Private Function pvGetAdaptersInfo() As Variant
+Private Sub pvGetAdaptersInfo(vOutput As Variant)
     Dim baBuffer()      As Byte
     Dim lSize           As Long
     Dim lPtr            As Long
     Dim uInfo           As IP_ADAPTER_INFO
-    Dim vRetVal         As Variant
+    Dim vGateway        As Variant
+    Dim vIpAddress      As Variant
+    Dim vElem           As Variant
+    Dim lIdx            As Long
     
-    vRetVal = Array()
+    vOutput = Array()
     Call GetAdaptersInfo(ByVal 0, lSize)
     ReDim baBuffer(0 To lSize - 1) As Byte
     If GetAdaptersInfo(baBuffer(0), lSize) = 0 Then
         lPtr = VarPtr(baBuffer(0))
         Do While lPtr <> 0
             Call CopyMemory(uInfo, ByVal lPtr, Len(uInfo))
-            pvGetAddrList VarPtr(uInfo.IpAddressList), vRetVal
+            pvGetAddrList VarPtr(uInfo.GatewayList), vGateway
+            For lIdx = 0 To UBound(vGateway)
+                vGateway(lIdx) = vGateway(lIdx)(0)
+            Next
+            pvGetAddrList VarPtr(uInfo.IpAddressList), vIpAddress
+            For Each vElem In vIpAddress
+                ReDim Preserve vOutput(UBound(vOutput) + 1)
+                vOutput(UBound(vOutput)) = Array(vElem(0), vElem(1), vGateway, Replace(uInfo.AdapterName, vbNullChar, vbNullString), Replace(uInfo.Description, vbNullChar, vbNullString), uInfo.Index, uInfo.Type)
+            Next
             lPtr = uInfo.Next
         Loop
     End If
-    pvGetAdaptersInfo = vRetVal
-End Function
+End Sub
 
 Private Sub pvGetAddrList(ByVal lPtr As Long, vOutput As Variant)
     Dim uString         As IP_ADDR_STRING
     Dim sAddr           As String
     
+    vOutput = Array()
     Do While lPtr <> 0
         Call CopyMemory(uString, ByVal lPtr, Len(uString))
         sAddr = pvToString(VarPtr(uString.IpAddress(0)))
@@ -1526,7 +1537,7 @@ Public Function SyncWaitForEvent( _
             If uMsg.wParam <> INVALID_SOCKET And uMsg.lParam <> 0 Then
                 If uMsg.wParam = m_hSocket Then
                     If m_cMsgQueue Is Nothing Then
-                        Set m_cMsgQueue = New Collection
+                        Set m_cMsgQueue = New VBA.Collection
                     End If
                     m_cMsgQueue.Add Array(WM_SOCKET_NOTIFY, uMsg.wParam, uMsg.lParam)
                     If (uMsg.lParam And EventMask) <> 0 Then
