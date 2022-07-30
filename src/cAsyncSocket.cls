@@ -204,6 +204,7 @@ Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref
 Private Declare Function GetCurrentProcessId Lib "kernel32" () As Long
 Private Declare Function LoadLibrary Lib "kernel32" Alias "LoadLibraryA" (ByVal lpLibFileName As String) As Long
 Private Declare Function GetAdaptersInfo Lib "iphlpapi" (AdapterInfo As Any, OutBufLen As Long) As Long
+Private Declare Function GetIpForwardTable Lib "iphlpapi" (pIpForwardTable As Any, pdwSize As Long, ByVal bOrder As Long) As Long
 Private Declare Function WSAStartup Lib "ws2_32" (ByVal wVersionRequired As Long, lpWSAData As Any) As Long
 Private Declare Function WSACleanup Lib "ws2_32" () As Long
 Private Declare Function WSAAsyncGetHostByName Lib "ws2_32" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal strHostName As String, buf As Any, ByVal BufLen As Long) As Long
@@ -303,6 +304,24 @@ Private Type IP_ADAPTER_INFO
     LeaseObtained       As Long
     LeaseExpires        As Long
 End Type
+
+Private Type MIB_IPFORWARDROW
+    dwForwardDest       As Long
+    dwForwardMask       As Long
+    dwForwardPolicy     As Long
+    dwForwardNextHop    As Long
+    dwForwardIfIndex    As Long
+    dwForwardType       As Long
+    dwForwardProto      As Long
+    dwForwardAge        As Long
+    dwForwardNextHopAS  As Long
+    dwForwardMetric1    As Long
+    dwForwardMetric2    As Long
+    dwForwardMetric3    As Long
+    dwForwardMetric4    As Long
+    dwForwardMetric5    As Long
+End Type
+Private Const sizeof_MIB_IPFORWARDROW As Long = 56
 
 '=========================================================================
 ' Constants and member variables
@@ -560,7 +579,7 @@ EH:
     PrintError FUNC_NAME
 End Function
 
-Public Function GetLocalHost(HostName As String, HostAddress As String, Optional AdaptersInfo As Variant) As Boolean
+Public Function GetLocalHost(HostName As String, HostAddress As String, Optional AdaptersInfo As Variant, Optional ForwardTable As Variant) As Boolean
     Const FUNC_NAME     As String = "GetLocalHost"
     Dim sBuffer         As String
     Dim uAddr           As SOCKADDR_IN
@@ -574,7 +593,12 @@ Public Function GetLocalHost(HostName As String, HostAddress As String, Optional
     HostName = Left$(sBuffer, InStr(sBuffer, Chr$(0)) - 1)
     pvToSockAddr HostName, 0, uAddr
     pvFromSockAddr uAddr, HostAddress, 0
-    pvGetAdaptersInfo AdaptersInfo
+    If Not IsMissing(AdaptersInfo) Then
+        pvGetAdaptersInfo AdaptersInfo
+    End If
+    If Not IsMissing(ForwardTable) Then
+        pvGetForwardTable ForwardTable
+    End If
     '--- success
     m_lLastError = 0
     GetLocalHost = True
@@ -1217,23 +1241,29 @@ Private Sub pvGetAdaptersInfo(vOutput As Variant)
     
     vOutput = Array()
     Call GetAdaptersInfo(ByVal 0, lSize)
-    ReDim baBuffer(0 To lSize - 1) As Byte
-    If GetAdaptersInfo(baBuffer(0), lSize) = 0 Then
-        lPtr = VarPtr(baBuffer(0))
-        Do While lPtr <> 0
-            Call CopyMemory(uInfo, ByVal lPtr, Len(uInfo))
-            pvGetAddrList VarPtr(uInfo.GatewayList), vGateway
-            For lIdx = 0 To UBound(vGateway)
-                vGateway(lIdx) = vGateway(lIdx)(0)
-            Next
-            pvGetAddrList VarPtr(uInfo.IpAddressList), vIpAddress
-            For Each vElem In vIpAddress
-                ReDim Preserve vOutput(UBound(vOutput) + 1)
-                vOutput(UBound(vOutput)) = Array(vElem(0), vElem(1), vGateway, Replace(uInfo.AdapterName, vbNullChar, vbNullString), Replace(uInfo.Description, vbNullChar, vbNullString), uInfo.Index, uInfo.Type)
-            Next
-            lPtr = uInfo.Next
-        Loop
+    If lSize = 0 Then
+        GoTo QH
     End If
+    ReDim baBuffer(0 To lSize - 1) As Byte
+    If GetAdaptersInfo(baBuffer(0), lSize) <> 0 Then
+        m_lLastError = Err.LastDllError
+        GoTo QH
+    End If
+    lPtr = VarPtr(baBuffer(0))
+    Do While lPtr <> 0
+        Call CopyMemory(uInfo, ByVal lPtr, Len(uInfo))
+        pvGetAddrList VarPtr(uInfo.GatewayList), vGateway
+        For lIdx = 0 To UBound(vGateway)
+            vGateway(lIdx) = vGateway(lIdx)(0)
+        Next
+        pvGetAddrList VarPtr(uInfo.IpAddressList), vIpAddress
+        For Each vElem In vIpAddress
+            ReDim Preserve vOutput(UBound(vOutput) + 1)
+            vOutput(UBound(vOutput)) = Array(vElem(0), vElem(1), vGateway, Replace(uInfo.AdapterName, vbNullChar, vbNullString), Replace(uInfo.Description, vbNullChar, vbNullString), uInfo.Index, uInfo.Type)
+        Next
+        lPtr = uInfo.Next
+    Loop
+QH:
 End Sub
 
 Private Sub pvGetAddrList(ByVal lPtr As Long, vOutput As Variant)
@@ -1250,6 +1280,43 @@ Private Sub pvGetAddrList(ByVal lPtr As Long, vOutput As Variant)
         End If
         lPtr = uString.Next
     Loop
+End Sub
+
+Private Sub pvGetForwardTable(vOutput As Variant)
+    Dim lSize           As Long
+    Dim baBuffer()      As Byte
+    Dim uInfo()         As MIB_IPFORWARDROW
+    Dim lIdx            As Long
+    Dim sDest           As String
+    Dim sMask           As String
+    Dim sNextHop        As String
+    
+    vOutput = Array()
+    Call GetIpForwardTable(ByVal 0, lSize, 0)
+    If lSize = 0 Then
+        GoTo QH
+    End If
+    ReDim baBuffer(0 To lSize - 1) As Byte
+    If GetIpForwardTable(baBuffer(0), lSize, 0) <> 0 Then
+        m_lLastError = Err.LastDllError
+        GoTo QH
+    End If
+    Call CopyMemory(lSize, baBuffer(0), 4)
+    If lSize = 0 Then
+        GoTo QH
+    End If
+    ReDim uInfo(0 To lSize - 1) As MIB_IPFORWARDROW
+    Call CopyMemory(uInfo(0), baBuffer(4), lSize * sizeof_MIB_IPFORWARDROW)
+    ReDim vOutput(0 To lSize - 1) As Variant
+    For lIdx = 0 To lSize - 1
+        With uInfo(lIdx)
+            sDest = pvToString(ws_inet_ntoa(.dwForwardDest))
+            sMask = pvToString(ws_inet_ntoa(.dwForwardMask))
+            sNextHop = pvToString(ws_inet_ntoa(.dwForwardNextHop))
+            vOutput(lIdx) = Array(sDest, sMask, sNextHop, .dwForwardIfIndex, .dwForwardType, .dwForwardMetric1)
+        End With
+    Next
+QH:
 End Sub
 
 '= sync ==================================================================
