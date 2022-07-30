@@ -52,6 +52,14 @@ Event AfterNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum)
 Public Enum UcsAsyncSocketTypeEnum
     ucsSckStream = 1
     ucsSckDatagram = 2
+    ucsSckRaw = 3
+End Enum
+
+Public Enum UcsAsyncSocketProtocolEnum
+    ucsScpICMP = 1
+    ucsScpIGMP = 2
+    ucsScpTCP = 6
+    ucsScpUDP = 17
 End Enum
 
 Public Enum UcsAsyncSocketEventMaskEnum
@@ -67,6 +75,11 @@ Public Enum UcsAsyncSocketEventMaskEnum
 End Enum
 
 Public Enum UcsAsyncSocketOptionLevelEnum
+    ucsSolIP = 0
+    ucsSolICMP = 1
+    ucsSolIGMP = 2
+    ucsSolTCP = 6
+    ucsSolUDP = 17
     ucsSolSocket = &HFFFF&                  ' SOL_SOCKET
 End Enum
 
@@ -96,6 +109,30 @@ Public Enum UcsAsyncSocketOptionNameEnum
     ucsSsoProtocolInfo = &H2004             ' Description of protocol information for protocol that is bound to this socket.
     ucsSsoReuseUnicastPort = &H3007         ' Defer ephemeral port allocation for outbound connections
     ucsSsoMaxConnections = &H7FFFFFFF       ' Maximum queue length specifiable by listen.
+    '-- IP
+    ucsSsoIPOptions = 1                     ' IP options.
+    ucsSsoHeaderIncluded = 2                ' Header is included with data.
+    ucsSsoTypeOfService = 3                 ' IP type of service and preced.
+    ucsSsoIpTimeToLive = 4                  ' IP time to live.
+    ucsSsoMulticastInterface = 9            ' IP multicast interface.
+    ucsSsoMulticastTimeToLive = 10          ' IP multicast time to live.
+    ucsSsoMulticastLoopback = 11            ' IP Multicast loopback.
+    ucsSsoAddMembership = 12                ' Add an IP group membership.
+    ucsSsoDropMembership = 13               ' Drop an IP group membership.
+    ucsSsoDontFragment = 14                 ' Don't fragment IP datagrams.
+    ucsSsoAddSourceMembership = 15          ' Join IP group/source.
+    ucsSsoDropSourceMembership = 16         ' Leave IP group/source.
+    ucsSsoBlockSource = 17                  ' Block IP group/source.
+    ucsSsoUnblockSource = 18                ' Unblock IP group/source.
+    ucsSsoPacketInformation = 19            ' Receive packet information for ipv4.
+    '-- TCP
+    ucsSsoNoDelay = 1                       ' Disables the Nagle algorithm for send coalescing.
+    ucsSsoExpedited = 2
+    '--- UDP
+    ucsSsoNoChecksum = 1
+    ucsSsoChecksumCoverage = 20             ' Udp-Lite checksum coverage.
+    ucsSsoUpdateAcceptContext = &H700B
+    ucsSsoUpdateConnectContext = &H7010
 End Enum
 
 Public Enum UcsAsyncSocketCodePageEnum
@@ -397,7 +434,8 @@ Public Function Create( _
             Optional ByVal SocketPort As Long, _
             Optional ByVal SocketType As UcsAsyncSocketTypeEnum = ucsSckStream, _
             Optional ByVal EventMask As UcsAsyncSocketEventMaskEnum = ucsSfdAll, _
-            Optional SocketAddress As String) As Boolean
+            Optional SocketAddress As String, _
+            Optional ByVal SocketProtocol As UcsAsyncSocketProtocolEnum) As Boolean
     Const FUNC_NAME     As String = "Create"
     
     On Error GoTo EH
@@ -409,7 +447,7 @@ Public Function Create( _
         m_lLastError = WSANOTINITIALISED
         GoTo QH
     End If
-    m_hSocket = ws_socket(AF_INET, SocketType, 0)
+    m_hSocket = ws_socket(AF_INET, SocketType, SocketProtocol)
     If m_hSocket = INVALID_SOCKET Then
         m_lLastError = Err.LastDllError
         GoTo QH
@@ -752,7 +790,7 @@ Public Function ReceiveArray( _
             If lSize = SOCKET_ERROR Then
                 m_lLastError = Err.LastDllError
                 GoTo QH
-            ElseIf lSize = 0 Or SockOpt(ucsSsoType) = ucsSckDatagram Then
+            ElseIf lSize = 0 Or SockOpt(ucsSsoType) <> ucsSckStream Then
                 If lPos + lSize = 0 Then
                     Buffer = vbNullString
                 Else
