@@ -203,9 +203,11 @@ Private Sub Command2_Click()
     Const FUNC_NAME     As String = "Command2_Click"
      
     On Error GoTo EH
-    pvTestSeecaoCom
-    pvTestHowsMySsl
-    pvTestSslLabs
+    If chkUseHttps.Value = vbChecked Then
+        pvTestSeecaoCom
+        pvTestHowsMySsl
+        pvTestSslLabs
+    End If
     If m_oRootCa Is Nothing Then
         Set m_oRootCa = New cTlsSocket
 '        m_oRootCa.ImportPemRootCaCertStore App.Path & "\ca-bundle.pem"

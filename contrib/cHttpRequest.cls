@@ -2044,19 +2044,11 @@ Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsy
     Const FUNC_NAME     As String = "m_oSocket_OnError"
     
     On Error GoTo EH
-    #If ImplUseTls Then
-        With m_oSocket.LastError
-            If .Number <> 0 Then
-                pvSetError .Number, .Source, .Description
-            End If
-        End With
-    #Else
-        With m_oSocket
-            If .LastError <> 0 Then
-                pvSetError .LastError, MODULE_NAME & "." & FUNC_NAME, .GetErrorDescription(.LastError)
-            End If
-        End With
-    #End If
+    With m_oSocket.LastError
+        If .Number <> 0 Then
+            pvSetError .Number, .Source, .Description
+        End If
+    End With
     Exit Sub
 EH:
     pvSetError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Err.Description
