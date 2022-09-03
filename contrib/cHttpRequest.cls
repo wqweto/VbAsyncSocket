@@ -103,6 +103,7 @@ Private Const WINHTTP_ERROR_BASE                    As Long = &H80070000 + 12000
 Private Const ERROR_WINHTTP_TIMEOUT                 As Long = (WINHTTP_ERROR_BASE + 2)
 Private Const ERROR_WINHTTP_INVALID_URL             As Long = (WINHTTP_ERROR_BASE + 5)
 Private Const ERROR_WINHTTP_UNRECOGNIZED_SCHEME     As Long = (WINHTTP_ERROR_BASE + 6)
+Private Const ERROR_WINHTTP_NAME_NOT_RESOLVED       As Long = (WINHTTP_ERROR_BASE + 7)
 Private Const ERROR_WINHTTP_INVALID_SERVER_RESPONSE As Long = (WINHTTP_ERROR_BASE + 152)
 Private Const ERROR_WINHTTP_SECURE_INVALID_CERT     As Long = (WINHTTP_ERROR_BASE + 169)
 Private Const ERROR_WINHTTP_HEADER_SIZE_OVERFLOW    As Long = (WINHTTP_ERROR_BASE + 182)
@@ -2042,12 +2043,16 @@ End Sub
 
 Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSocketEventMaskEnum)
     Const FUNC_NAME     As String = "m_oSocket_OnError"
+    Const WSAHOST_NOT_FOUND As Long = 11001
     
     On Error GoTo EH
     With m_oSocket.LastError
-        If .Number <> 0 Then
+        Select Case .Number
+        Case WSAHOST_NOT_FOUND
+            pvSetError ERROR_WINHTTP_NAME_NOT_RESOLVED
+        Case Is <> 0
             pvSetError .Number, .Source, .Description
-        End If
+        End Select
     End With
     Exit Sub
 EH:
