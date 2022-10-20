@@ -199,7 +199,7 @@ Private Sub Command1_Click()
     dblTimer = Timer
     Screen.MousePointer = vbHourglass
     bKeepDebug = IsKeyPressed(vbKeyControl)
-    If Not ParseUrl(Trim$(cobUrl.Text), uRemote, DefProtocol:="https") Then
+    If Not pvParseUrl(Trim$(cobUrl.Text), uRemote, DefProtocol:="https") Then
         txtResult.Text = "Error: Invalid URL"
         GoTo QH
     End If
@@ -286,7 +286,7 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
                 Exit Do
             End If
         Else
-            HttpsRequest = HttpsRequest & StrConv(baRecv, vbUnicode)
+            HttpsRequest = HttpsRequest & m_oSocket.FromTextArray(baRecv)
 '            DebugLog MODULE_NAME, FUNC_NAME, "Len(HttpsRequest)=" & Len(HttpsRequest)
         End If
         If IsEmpty(vHeaders) Then
@@ -345,10 +345,9 @@ Private Function pvIsKnownBadCertificate(sHost As String) As Boolean
     Next
 End Function
 
-Private Function ParseUrl(sUrl As String, uParsed As UcsParsedUrl, Optional DefProtocol As String) As Boolean
+Private Function pvParseUrl(sUrl As String, uParsed As UcsParsedUrl, Optional DefProtocol As String) As Boolean
     With CreateObject("VBScript.RegExp")
-        .Global = True
-        .Pattern = "^(?:(.*)://)?(?:(?:([^:]*):)?([^@]*)@)?([A-Za-z0-9\-\.]+)(:[0-9]+)?(/[^?#]*)?(\?[^#]*)?(#.*)?$"
+        .Pattern = "^(?:(?:(.+?):)?//)?(?:(?:([^:]*?):)?([^@]*)@)?([A-Za-z0-9\-\.]+)?(:[0-9]+)?(/[^?#]*?)?(\?[^#]*?)?(#.*)?$"
         With .Execute(sUrl)
             If .Count > 0 Then
                 With .Item(0).SubMatches
@@ -378,7 +377,7 @@ Private Function ParseUrl(sUrl As String, uParsed As UcsParsedUrl, Optional DefP
                     uParsed.QueryString = .Item(6)
                     uParsed.Anchor = .Item(7)
                 End With
-                ParseUrl = True
+                pvParseUrl = True
             End If
         End With
     End With
