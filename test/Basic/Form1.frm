@@ -318,7 +318,7 @@ End With
 End Sub
 
 
-Private Sub m_oRequest_OnResponseStart(Status As Long, ContentType As String)
+Private Sub m_oRequest_OnResponseStart(ByVal Status As Long, ByVal ContentType As String)
     DebugLog MODULE_NAME, "m_oRequest_OnResponseStart", "Status=" & Status & ", ContentType=" & ContentType
 End Sub
 

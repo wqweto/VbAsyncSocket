@@ -86,10 +86,10 @@ End Enum
 ' Events
 '=========================================================================
 
-Event OnResponseStart(Status As Long, ContentType As String)
+Event OnResponseStart(ByVal Status As Long, ByVal ContentType As String)
 Event OnResponseDataAvailable(Data() As Byte)
 Event OnResponseFinished()
-Event OnError(ErrorNumber As Long, ErrorDescription As String)
+Event OnError(ByVal ErrorNumber As Long, ByVal ErrorDescription As String)
 
 '=========================================================================
 ' API
@@ -110,6 +110,7 @@ Private Const ERROR_WINHTTP_HEADER_SIZE_OVERFLOW    As Long = (WINHTTP_ERROR_BAS
 Private Const ERROR_INVALID_PARAMETER               As Long = &H80070057
 Private Const E_NOTIMPL                             As Long = &H80004001
 Private Const E_POINTER                             As Long = &H80004003
+Private Const E_INSUFFICIENTMEMORY                  As Long = &H80030008
 '--- for Modern Subclassing Thunk (MST)
 Private Const MEM_COMMIT                    As Long = &H1000
 Private Const PAGE_EXECUTE_READWRITE        As Long = &H40
@@ -228,7 +229,7 @@ Private Type UcsRequestType
     Async               As Boolean
     Headers             As Object
     NumOfRedirects      As Long
-    Stream              As IUnknown
+    SendStream          As IUnknown
     SendBuffer          As UcsBuffer
 End Type
 
@@ -237,7 +238,7 @@ Private Type UcsResponseType
     StatusText          As String
     AllHeaders          As String
     Headers             As Object
-    Stream              As IUnknown
+    RecvStream          As IUnknown
     Text                As String
     BytesProgress       As Double
     ContentLength       As Double
@@ -283,7 +284,7 @@ End Sub
 '=========================================================================
 
 Public Property Get ResponseStream() As Variant
-    Set ResponseStream = m_uResponse.Stream
+    Set ResponseStream = m_uResponse.RecvStream
 End Property
 
 Public Property Get ResponseBody() As Byte()
@@ -294,10 +295,10 @@ Public Property Get ResponseBody() As Byte()
     
     On Error GoTo EH
     m_vLastError = Empty
-    lSize = IStream_GetSize(m_uResponse.Stream)
+    lSize = IStream_GetSize(m_uResponse.RecvStream)
     If lSize > 0 Then
         ReDim baData(0 To lSize - 1) As Byte
-        hResult = IStream_Read(m_uResponse.Stream, baData)
+        hResult = IStream_Read(m_uResponse.RecvStream, baData)
         If hResult < 0 Then
             pvSetError hResult, "IStream_Read"
             GoTo QH
@@ -461,14 +462,14 @@ Public Sub Send(Optional ByVal Body As Variant)
     With m_uRequest
         '--- preapare request stream from body
         If IsObject(Body) Then
-            Set .Stream = AsIStream(Body)
+            Set .SendStream = AsIStream(Body)
         ElseIf IsMissing(Body) Or IsEmpty(Body) Or IsNull(Body) Then
-            Set .Stream = Nothing
+            Set .SendStream = Nothing
         ElseIf VarType(Body) = vbByte + vbArray Then
             If UBound(Body) >= 0 Then
-                Set .Stream = SHCreateMemStream(Body(0), UBound(Body) + 1)
+                Set .SendStream = SHCreateMemStream(Body(0), UBound(Body) + 1)
             Else
-                Set .Stream = Nothing
+                Set .SendStream = Nothing
             End If
         ElseIf VarType(Body) = vbString Then
             If LenB(Body) <> 0 Then
@@ -484,17 +485,17 @@ Public Sub Send(Optional ByVal Body As Variant)
                     End If
                 End If
                 baData = pvToTextArray(CStr(Body), eCodePage)
-                Set .Stream = SHCreateMemStream(baData(0), UBound(baData) + 1)
+                Set .SendStream = SHCreateMemStream(baData(0), UBound(baData) + 1)
             Else
-                Set .Stream = Nothing
+                Set .SendStream = Nothing
             End If
         Else
             pvSetError ERROR_INVALID_PARAMETER
             GoTo QH
         End If
         '--- prepare headers
-        If Not .Stream Is Nothing Or .Method <> "GET" Then
-            SetRequestHeader HDR_CONTENT_LENGTH, IStream_GetSize(.Stream)
+        If Not .SendStream Is Nothing Or .Method <> "GET" Then
+            SetRequestHeader HDR_CONTENT_LENGTH, IStream_GetSize(.SendStream)
         End If
         If LenB(.Remote.User) <> 0 Or LenB(.Remote.Pass) <> 0 Then
             SetRequestHeader "Authorization", "Basic " & Replace(ToBase64Array( _
@@ -590,9 +591,9 @@ End Sub
 Public Sub Abort()
     pvSetState ucsIdle
     Set m_oSocket = pvCreateNewSocket
-    Set m_uRequest.Stream = Nothing
+    Set m_uRequest.SendStream = Nothing
     m_uRequest.Headers.RemoveAll
-    Set m_uResponse.Stream = Nothing
+    Set m_uResponse.RecvStream = Nothing
     m_uResponse.Text = vbNullChar
 End Sub
 
@@ -798,7 +799,7 @@ Private Function pvSendBody(uRequest As UcsRequestType) As Boolean
                     If pvArraySize(.SendBuffer.Data) <> DEF_BUFFER_SIZE Then
                         ReDim .SendBuffer.Data(0 To DEF_BUFFER_SIZE - 1) As Byte
                     End If
-                    hResult = IStream_Read(.Stream, .SendBuffer.Data, lSize)
+                    hResult = IStream_Read(.SendStream, .SendBuffer.Data, lSize)
                     If hResult < 0 Then
                         pvSetError hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "IStream_Read"
                         GoTo QH
@@ -969,7 +970,7 @@ TryDownload:
                         pvSendHeaders uRequest
                     End If
                 Else
-                    Set uRequest.Stream = Nothing
+                    Set uRequest.SendStream = Nothing
                     uRequest.Headers.RemoveAll
                     If .Headers.Exists(HDR_CONTENT_LENGTH) Then
                         .ContentLength = Val(.Headers.Item(HDR_CONTENT_LENGTH))
@@ -986,7 +987,7 @@ TryDownload:
                     End If
                     RaiseEvent OnResponseStart(.Status, GetResponseHeader(HDR_CONTENT_TYPE))
                     .RecvBuffer.Size = 0
-                    Set .Stream = SHCreateMemStream(ByVal 0, 0)
+                    Set .RecvStream = SHCreateMemStream(ByVal 0, 0)
                     .Text = vbNullChar
                 End If
             End Select
@@ -1060,22 +1061,24 @@ Private Function pvRecvBody(baData() As Byte, uResponse As UcsResponseType, Opti
                 If .RecvBuffer.Size < UBound(.RecvBuffer.Data) + 1 Then
                     ReDim Preserve .RecvBuffer.Data(0 To .RecvBuffer.Size - 1) As Byte
                 End If
-                hResult = IStream_Write(.Stream, .RecvBuffer.Data)
+                hResult = IStream_Write(.RecvStream, .RecvBuffer.Data)
                 .RecvBuffer.Size = 0
-                If hResult < 0 Then
+                If hResult = E_INSUFFICIENTMEMORY Then
+                    Set .RecvStream = Nothing
+                ElseIf hResult < 0 Then
                     pvSetError hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "IStream_Write"
                     GoTo QH
                 End If
             End If
         End If
         If Flush Then
-            If pvIsEqual(.ContentEncoding, "gzip") And Not .Stream Is Nothing Then
-                hResult = IStream_Seek(.Stream, 0, STREAM_SEEK_SET)
+            If pvIsEqual(.ContentEncoding, "gzip") And Not .RecvStream Is Nothing Then
+                hResult = IStream_Seek(.RecvStream, 0, STREAM_SEEK_SET)
                 If hResult < 0 Then
                     pvSetError hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "IStream_Seek(STREAM_SEEK_SET)"
                 End If
-                If pvUngzipStream(.Stream, pOutput) Then
-                    Set .Stream = pOutput
+                If pvUngzipStream(.RecvStream, pOutput) Then
+                    Set .RecvStream = pOutput
                     .ContentEncoding = vbNullString
                 End If
             End If
@@ -1323,7 +1326,7 @@ Private Sub pvResetResponse(uResponse As UcsResponseType)
         .ContentEncoding = vbNullString
         .RecvBuffer.Size = 0
         .ChunksBuffer.Size = 0
-        Set .Stream = Nothing
+        Set .RecvStream = Nothing
         .Text = vbNullChar
     End With
 End Sub
