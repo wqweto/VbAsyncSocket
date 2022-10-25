@@ -124,6 +124,77 @@ Public Enum UcsErrorConstants
     sckNoData = 11004
 End Enum
 
+Public Enum UcsSckLocalFeaturesEnum '--- bitmask
+    ucsSckSupportTls10 = 2 ^ 0
+    ucsSckSupportTls11 = 2 ^ 1
+    ucsSckSupportTls12 = 2 ^ 2
+    ucsSckSupportTls13 = 2 ^ 3
+    ucsSckIgnoreServerCertificateErrors = 2 ^ 4
+    ucsSckIgnoreServerCertificateRevocation = 2 ^ 5
+    ucsSckSupportAll = ucsSckSupportTls10 Or ucsSckSupportTls11 Or ucsSckSupportTls12 Or ucsSckSupportTls13
+End Enum
+
+Public Enum UcsSckOptionLevelEnum
+    ucsSckIP = 0
+    ucsSckICMP = 1
+    ucsSckIGMP = 2
+    ucsSckTCP = 6
+    ucsSckUDP = 17
+    ucsSckSocket = &HFFFF&                  ' SOL_SOCKET
+End Enum
+
+Public Enum UcsSckOptionNameEnum
+    ucsSckDebug = &H1                       ' Debugging is enabled.
+    ucsSckAcceptConnection = &H2            ' Socket is listening.
+    ucsSckReuseAddress = &H4                ' The socket can be bound to an address which is already in use. Not applicable for ATM sockets.
+    ucsSckKeepAlive = &H8                   ' Keep-alives are being sent. Not supported on ATM sockets.
+    ucsSckDontRoute = &H10                  ' Routing is disabled. Not supported on ATM sockets.
+    ucsSckBroadcast = &H20                  ' Socket is configured for the transmission of broadcast messages.
+    ucsSckUseLoopback = &H40                ' Bypass hardware when possible.
+    ucsSckLinger = &H80                     ' Linger on close if unsent data is present.
+    ucsSckOutOfBandInline = &H100           ' Receives out-of-band data in the normal data stream.
+    ucsSckDontLinger = Not ucsSckLinger     ' Close socket gracefully without lingering.
+    ucsSckExclusiveAddressUse = Not ucsSckReuseAddress ' Enables a socket to be bound for exclusive access.
+    ucsSckSendBuffer = &H1001               ' Buffer size for sends.
+    ucsSckReceiveBuffer = &H1002            ' Buffer size for receives.
+    ucsSckSendLowWater = &H1003             ' Specifies the total per-socket buffer space reserved for receives.
+    ucsSckReceiveLowWater = &H1004          ' Receive low water mark.
+    ucsSckSendTimeout = &H1005              ' Sends time-out (available in Microsoft implementation of Windows Sockets 2).
+    ucsSckReceiveTimeout = &H1006           ' Receives time-out (available in Microsoft implementation of Windows Sockets 2).
+    ucsSckError = &H1007                    ' Get error status and clear.
+    ucsSckType = &H1008                     ' Get socket type.
+'    ucsSckGroupId = &H2001                  ' Reserved.
+'    ucsSckGroupPriority = &H2002            ' Reserved.
+    ucsSckMaxMsgSize = &H2003               ' Maximum size of a message for message-oriented socket types (for example, SOCK_DGRAM). Has no meaning for stream oriented sockets.
+    ucsSckProtocolInfo = &H2004             ' Description of protocol information for protocol that is bound to this socket.
+    ucsSckReuseUnicastPort = &H3007         ' Defer ephemeral port allocation for outbound connections
+    ucsSckMaxConnections = &H7FFFFFFF       ' Maximum queue length specifiable by listen.
+    '-- IP
+    ucsSckIPOptions = 1                     ' IP options.
+    ucsSckHeaderIncluded = 2                ' Header is included with data.
+    ucsSckTypeOfService = 3                 ' IP type of service and preced.
+    ucsSckIpTimeToLive = 4                  ' IP time to live.
+    ucsSckMulticastInterface = 9            ' IP multicast interface.
+    ucsSckMulticastTimeToLive = 10          ' IP multicast time to live.
+    ucsSckMulticastLoopback = 11            ' IP Multicast loopback.
+    ucsSckAddMembership = 12                ' Add an IP group membership.
+    ucsSckDropMembership = 13               ' Drop an IP group membership.
+    ucsSckDontFragment = 14                 ' Don't fragment IP datagrams.
+    ucsSckAddSourceMembership = 15          ' Join IP group/source.
+    ucsSckDropSourceMembership = 16         ' Leave IP group/source.
+    ucsSckBlockSource = 17                  ' Block IP group/source.
+    ucsSckUnblockSource = 18                ' Unblock IP group/source.
+    ucsSckPacketInformation = 19            ' Receive packet information for ipv4.
+    '-- TCP
+    ucsSckNoDelay = 1                       ' Disables the Nagle algorithm for send coalescing.
+    ucsSckExpedited = 2
+    '--- UDP
+    ucsSckNoChecksum = 1
+    ucsSckChecksumCoverage = 20             ' Udp-Lite checksum coverage.
+    ucsSckUpdateAcceptContext = &H700B
+    ucsSckUpdateConnectContext = &H7010
+End Enum
+
 '=========================================================================
 ' API
 '=========================================================================
@@ -275,11 +346,11 @@ Property Get RemoteHostIP() As String
     pvSocket.GetPeerName RemoteHostIP, 0
 End Property
 
-Property Get SockOpt(ByVal OptionName As UcsAsyncSocketOptionNameEnum, Optional ByVal Level As UcsAsyncSocketOptionLevelEnum = ucsSolSocket) As Long
+Property Get SockOpt(ByVal OptionName As UcsSckOptionNameEnum, Optional ByVal Level As UcsSckOptionLevelEnum = ucsSckSocket) As Long
     SockOpt = pvSocket.Socket.SockOpt(OptionName, Level)
 End Property
 
-Property Let SockOpt(ByVal OptionName As UcsAsyncSocketOptionNameEnum, Optional ByVal Level As UcsAsyncSocketOptionLevelEnum = ucsSolSocket, ByVal Value As Long)
+Property Let SockOpt(ByVal OptionName As UcsSckOptionNameEnum, Optional ByVal Level As UcsSckOptionLevelEnum = ucsSckSocket, ByVal Value As Long)
     pvSocket.Socket.SockOpt(OptionName, Level) = Value
 End Property
 
@@ -370,7 +441,7 @@ EH:
     pvSetError LastError:=Err, RaiseError:=True
 End Sub
 
-Public Sub Connect(Optional RemoteHost As String, Optional ByVal RemotePort As Long, Optional ByVal LocalFeatures As UcsTlsLocalFeaturesEnum)
+Public Sub Connect(Optional RemoteHost As String, Optional ByVal RemotePort As Long, Optional ByVal LocalFeatures As UcsSckLocalFeaturesEnum)
     On Error GoTo EH
     Close_
     If LenB(RemoteHost) <> 0 Then
