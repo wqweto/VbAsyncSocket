@@ -354,7 +354,13 @@ End Property
 
 Public Property Let Option_(ByVal eOption As WinHttpRequestOption, ByVal RHS As Variant)
     If IsObject(m_vOptions(eOption)) Then
-        Set m_vOptions(eOption) = RHS
+        If eOption = WinHttpRequestOption_RootCA And Not IsObject(RHS) Then
+            Dim oRootCa As New cTlsSocket
+            oRootCa.ImportPemRootCaCertStore CStr(RHS)
+            Set m_vOptions(eOption) = oRootCa
+        Else
+            Set m_vOptions(eOption) = RHS
+        End If
     Else
         Select Case VarType(m_vOptions(eOption))
         Case vbBoolean
@@ -466,8 +472,9 @@ Public Sub Send(Optional ByVal Body As Variant)
         ElseIf IsMissing(Body) Or IsEmpty(Body) Or IsNull(Body) Then
             Set .SendStream = Nothing
         ElseIf VarType(Body) = vbByte + vbArray Then
-            If UBound(Body) >= 0 Then
-                Set .SendStream = SHCreateMemStream(Body(0), UBound(Body) + 1)
+            baData = Body
+            If UBound(baData) >= 0 Then
+                Set .SendStream = SHCreateMemStream(baData(0), UBound(baData) + 1)
             Else
                 Set .SendStream = Nothing
             End If
@@ -2112,7 +2119,7 @@ Private Sub Class_Initialize()
     m_vOptions(WinHttpRequestOption_EnableCertificateRevocationCheck) = False
     m_vOptions(WinHttpRequestOption_RejectUserpwd) = False
     Set m_vOptions(WinHttpRequestOption_RootCA) = Nothing
-    SetTimeouts 5000, 5000, 15000, 15000
+    SetTimeouts 5000, 5000, 30000, 30000
     Set m_uRequest.Headers = CreateObject("Scripting.Dictionary")
     m_uRequest.Headers.CompareMode = vbTextCompare
     Set m_uResponse.Headers = CreateObject("Scripting.Dictionary")
