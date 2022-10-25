@@ -472,9 +472,8 @@ Public Sub Send(Optional ByVal Body As Variant)
         ElseIf IsMissing(Body) Or IsEmpty(Body) Or IsNull(Body) Then
             Set .SendStream = Nothing
         ElseIf VarType(Body) = vbByte + vbArray Then
-            baData = Body
-            If UBound(baData) >= 0 Then
-                Set .SendStream = SHCreateMemStream(baData(0), UBound(baData) + 1)
+            If UBound(Body) >= 0 Then
+                Set .SendStream = SHCreateMemStream(ByVal pvGetByteArrayPtr(Body), UBound(Body) + 1)
             Else
                 Set .SendStream = Nothing
             End If
@@ -1779,6 +1778,13 @@ Private Function pvIsEqual(sFirst As String, sSecond As String) As Boolean
     If Len(sFirst) = Len(sSecond) Then
         pvIsEqual = (StrComp(sFirst, sSecond, vbTextCompare) = 0)
     End If
+End Function
+
+Private Function pvGetByteArrayPtr(vValue As Variant) As Long
+    Dim lPtr            As Long
+    
+    Call CopyMemory(lPtr, ByVal VarPtr(vValue) + 8, 4)
+    Call CopyMemory(pvGetByteArrayPtr, ByVal lPtr + 12, 4)
 End Function
 
 '= buffers ===============================================================
