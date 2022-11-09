@@ -37,7 +37,7 @@ Public Function DesignDumpMemory(ByVal lPtr As Long, ByVal lSize As Long) As Str
         If lIdx < lSize Then
             If IsBadReadPtr(lPtr, 1) = 0 Then
                 Call CopyMemory(lValue, ByVal lPtr, 1)
-                sHex = sHex & Right$("0" & Hex$(lValue), 2) & " "
+                sHex = sHex & Right$("0" & LCase$(Hex$(lValue)), 2) & " "
                 If lValue >= 32 Then
                     sChar = sChar & Chr$(lValue)
                 Else
@@ -54,7 +54,7 @@ Public Function DesignDumpMemory(ByVal lPtr As Long, ByVal lSize As Long) As Str
             sHex = sHex & " "
         End If
         If ((lIdx + 1) Mod 16) = 0 Then
-            aResult(lIdx \ 16) = Right$("000" & Hex$(lIdx - 15), 4) & " - " & sHex & sChar
+            aResult(lIdx \ 16) = Right$("000" & LCase$(Hex$(lIdx - 15)), 4) & " - " & sHex & "|" & sChar & "|"
             sHex = vbNullString
             sChar = vbNullString
         End If
@@ -82,7 +82,7 @@ Public Function ToHex(baText() As Byte, Optional Delimiter As String = "-") As S
         ReDim aText(0 To UBound(baText)) As String
         Debug.Assert RedimStats("ToHex.aText", 0)
         For lIdx = 0 To UBound(baText)
-            aText(lIdx) = Right$("0" & Hex$(baText(lIdx)), 2)
+            aText(lIdx) = Right$("0" & LCase$(Hex$(baText(lIdx))), 2)
         Next
         ToHex = Join(aText, Delimiter)
     End If

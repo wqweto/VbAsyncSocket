@@ -86,7 +86,7 @@ Private Const WM_VSCROLL                As Long = &H115
 '--- for WM_VSCROLL
 Private Const SB_BOTTOM                 As Long = 7
 
-Private Declare Function SendMessage Lib "user32" Alias "SendMessageA" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, lParam As Any) As Long
+Private Declare Function SendMessage Lib "user32" Alias "SendMessageW" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, lParam As Any) As Long
 Private Declare Function GetAsyncKeyState Lib "user32" (ByVal vKey As Long) As Integer
 
 '=========================================================================
@@ -144,7 +144,7 @@ Private Sub Form_Load()
     If txtResult.Font.Name = "Arial" Then
         txtResult.Font.Name = "Courier New"
     End If
-    For Each vElem In Split("www.howsmyssl.com/a/check|clienttest.ssllabs.com:8443/ssltest/viewMyClient.html|client.tlsfingerprint.io:8443|tls13.1d.pw|localhost:44330/renegcert|websocket.org|www.mikestoolbox.org|swifttls.org|rsa8192.badssl.com|rsa4096.badssl.com|rsa2048.badssl.com|ecc384.badssl.com|ecc256.badssl.com|dir.bg|host.bg|bgdev.org|cnn.com|gmail.com|google.com|saas.bg|saas.bg:465|www.cloudflare.com|devblogs.microsoft.com|www.brentozar.com|ayende.com/blog|www.nerds2nerds.com|robert.ocallahan.org|distrowatch.com|server.cryptomix.com/secure/|www.integralblue.com/testhandshake/|tlshello.agwa.name|client.badssl.com", "|")
+    For Each vElem In Split("www.howsmyssl.com/a/check|clienttest.ssllabs.com:8443/ssltest/viewMyClient.html|client.tlsfingerprint.io:8443|tls13.1d.pw|localhost:44330/renegcert|websocket.org|www.mikestoolbox.org|swifttls.org|rsa8192.badssl.com|rsa4096.badssl.com|rsa2048.badssl.com|ecc384.badssl.com|ecc256.badssl.com|dir.bg|host.bg|bgdev.org|cnn.com|gmail.com|google.com|saas.bg|saas.bg:465|www.cloudflare.com|devblogs.microsoft.com|www.brentozar.com|ayende.com/blog|www.nerds2nerds.com|robert.ocallahan.org|distrowatch.com|server.cryptomix.com|www.integralblue.com/testhandshake/|tlshello.agwa.name|client.badssl.com", "|")
         cobUrl.AddItem vElem
     Next
     sAddr = GetSetting(App.Title, "Form1", "Url", cobUrl.Text)
@@ -245,6 +245,7 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
     Dim vHeaders        As Variant
     Dim lHeaderLength   As Long
     Dim lContentLength  As Long
+    Dim lRecvLength     As Long
     Dim sEncoding       As String
     Dim sConnection     As String
     Dim vElem           As Variant
@@ -287,7 +288,8 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
             End If
         Else
             HttpsRequest = HttpsRequest & m_oSocket.FromTextArray(baRecv)
-'            DebugLog MODULE_NAME, FUNC_NAME, "Len(HttpsRequest)=" & Len(HttpsRequest)
+            lRecvLength = lRecvLength + UBound(baRecv) + 1
+'            DebugLog MODULE_NAME, FUNC_NAME, "lRecvLength=" & lRecvLength
         End If
         If IsEmpty(vHeaders) Then
             lHeaderLength = InStr(1, HttpsRequest, vbCrLf & vbCrLf) - 1
@@ -306,9 +308,9 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
             End If
         End If
         If lContentLength >= 0 Then
-            If Len(HttpsRequest) >= lHeaderLength + lContentLength Then
-                If Len(HttpsRequest) <> lHeaderLength + lContentLength Then
-                    DebugLog MODULE_NAME, FUNC_NAME, "Received " & Len(HttpsRequest) & " instead of " & lHeaderLength + lContentLength, vbLogEventTypeWarning
+            If lRecvLength >= lHeaderLength + lContentLength Then
+                If lRecvLength <> lHeaderLength + lContentLength Then
+                    DebugLog MODULE_NAME, FUNC_NAME, "Received " & lRecvLength & " instead of " & lHeaderLength + lContentLength, vbLogEventTypeWarning
                 End If
                 Exit Do
             End If
@@ -387,7 +389,7 @@ Private Sub pvAppendLogText(txtLog As TextBox, sValue As String)
     Call SendMessage(txtLog.hWnd, WM_SETREDRAW, 0, ByVal 0)
     Call SendMessage(txtLog.hWnd, EM_SETSEL, 0, ByVal -1)
     Call SendMessage(txtLog.hWnd, EM_SETSEL, -1, ByVal -1)
-    Call SendMessage(txtLog.hWnd, EM_REPLACESEL, 1, ByVal sValue)
+    Call SendMessage(txtLog.hWnd, EM_REPLACESEL, 1, ByVal StrPtr(sValue))
     Call SendMessage(txtLog.hWnd, EM_SETSEL, 0, ByVal -1)
     Call SendMessage(txtLog.hWnd, EM_SETSEL, -1, ByVal -1)
     Call SendMessage(txtLog.hWnd, WM_SETREDRAW, 1, ByVal 0)
@@ -430,8 +432,8 @@ Private Function pvSetVisible(oCtl As Object, ByVal bValue As Boolean) As Boolea
 End Function
 
 Private Sub m_oServerSocket_OnCertificate(Issuers As Object, Confirmed As Boolean)
-    Const STR_CERTFILE  As String = "client2.pkcs8.pem"
-    Const STR_PASSWORD  As String = "#####"
+'    Const STR_CERTFILE  As String = "client2.pkcs8.pem"
+'    Const STR_PASSWORD  As String = "#####"
     
 '    Confirmed = m_oServerSocket.ImportPemCertificates(STR_CERTFILE, STR_PASSWORD)
     Confirmed = m_oServerSocket.ImportSystemStoreCertificates("cd18a3874e7ce0b3ef30c6914b8f618979fcf577")
