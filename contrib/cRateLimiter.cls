@@ -40,16 +40,16 @@ Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency A
 '--- for Modern Subclassing Thunk (MST)
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function VirtualAlloc Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As Long
-Private Declare Function CallWindowProc Lib "user32" Alias "CallWindowProcA" (ByVal lpPrevWndFunc As Long, ByVal hWnd As Long, ByVal Msg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
-Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleA" (ByVal lpModuleName As String) As Long
+Private Declare Function CallWindowProc Lib "user32" Alias "CallWindowProcW" (ByVal lpPrevWndFunc As Long, ByVal hWnd As Long, ByVal Msg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
+Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleW" (ByVal lpModuleName As Long) As Long
 Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
 Private Declare Function GetCurrentProcessId Lib "kernel32" () As Long
 #If Not ImplNoIdeProtection Then
-    Private Declare Function FindWindowEx Lib "user32" Alias "FindWindowExA" (ByVal hWndParent As Long, ByVal hWndChildAfter As Long, ByVal lpszClass As String, ByVal lpszWindow As String) As Long
+    Private Declare Function FindWindowEx Lib "user32" Alias "FindWindowExW" (ByVal hWndParent As Long, ByVal hWndChildAfter As Long, ByVal lpszClass As Long, ByVal lpszWindow As Long) As Long
     Private Declare Function GetWindowThreadProcessId Lib "user32" (ByVal hWnd As Long, lpdwProcessId As Long) As Long
 #End If
-Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableA" (ByVal lpName As String, ByVal lpBuffer As String, ByVal nSize As Long) As Long
-Private Declare Function SetEnvironmentVariable Lib "kernel32" Alias "SetEnvironmentVariableA" (ByVal lpName As String, ByVal lpValue As String) As Long
+Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableW" (ByVal lpName As Long, ByVal lpBuffer As Long, ByVal nSize As Long) As Long
+Private Declare Function SetEnvironmentVariable Lib "kernel32" Alias "SetEnvironmentVariableW" (ByVal lpName As Long, ByVal lpValue As Long) As Long
 '--- end MST
 
 '=========================================================================
@@ -156,7 +156,7 @@ Private Function InitAddressOfMethod(pObj As Object, ByVal MethodParamCount As L
     If hThunk = 0 Then
         Exit Function
     End If
-    lSize = CallWindowProc(hThunk, ObjPtr(pObj), MethodParamCount, GetProcAddress(GetModuleHandle("kernel32"), "VirtualFree"), VarPtr(InitAddressOfMethod))
+    lSize = CallWindowProc(hThunk, ObjPtr(pObj), MethodParamCount, GetProcAddress(GetModuleHandle(StrPtr("kernel32")), "VirtualFree"), VarPtr(InitAddressOfMethod))
     Debug.Assert lSize = THUNK_SIZE
 End Function
 
@@ -179,16 +179,16 @@ Private Function InitFireOnceTimerThunk(pObj As Object, ByVal pfnCallback As Lon
         If hThunk = 0 Then
             Exit Function
         End If
-        aParams(2) = GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemAlloc")
-        aParams(3) = GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemFree")
-        aParams(4) = GetProcAddress(GetModuleHandle("user32"), "SetTimer")
-        aParams(5) = GetProcAddress(GetModuleHandle("user32"), "KillTimer")
+        aParams(2) = GetProcAddress(GetModuleHandle(StrPtr("ole32")), "CoTaskMemAlloc")
+        aParams(3) = GetProcAddress(GetModuleHandle(StrPtr("ole32")), "CoTaskMemFree")
+        aParams(4) = GetProcAddress(GetModuleHandle(StrPtr("user32")), "SetTimer")
+        aParams(5) = GetProcAddress(GetModuleHandle(StrPtr("user32")), "KillTimer")
         '--- for IDE protection
         Debug.Assert pvThunkIdeOwner(aParams(6))
         If aParams(6) <> 0 Then
-            aParams(7) = GetProcAddress(GetModuleHandle("user32"), "GetWindowLongA")
-            aParams(8) = GetProcAddress(GetModuleHandle("vba6"), "EbMode")
-            aParams(9) = GetProcAddress(GetModuleHandle("vba6"), "EbIsResetting")
+            aParams(7) = GetProcAddress(GetModuleHandle(StrPtr("user32")), "GetWindowLongA")
+            aParams(8) = GetProcAddress(GetModuleHandle(StrPtr("vba6")), "EbMode")
+            aParams(9) = GetProcAddress(GetModuleHandle(StrPtr("vba6")), "EbIsResetting")
         End If
         #If ImplSelfContained Then
             pvThunkGlobalData("InitFireOnceTimerThunk") = hThunk
@@ -203,7 +203,7 @@ Private Function pvThunkIdeOwner(hIdeOwner As Long) As Boolean
         Dim lProcessId      As Long
         
         Do
-            hIdeOwner = FindWindowEx(0, hIdeOwner, "IDEOwner", vbNullString)
+            hIdeOwner = FindWindowEx(0, hIdeOwner, StrPtr("IDEOwner"), 0)
             Call GetWindowThreadProcessId(hIdeOwner, lProcessId)
         Loop While hIdeOwner <> 0 And lProcessId <> GetCurrentProcessId()
     #End If
@@ -246,12 +246,12 @@ Private Property Get pvThunkGlobalData(sKey As String) As Long
     Dim sBuffer     As String
     
     sBuffer = String$(50, 0)
-    Call GetEnvironmentVariable("_MST_GLOBAL" & GetCurrentProcessId() & "_" & sKey, sBuffer, Len(sBuffer) - 1)
+    Call GetEnvironmentVariable(StrPtr("_MST_GLOBAL" & GetCurrentProcessId() & "_" & sKey), StrPtr(sBuffer), Len(sBuffer) - 1)
     pvThunkGlobalData = Val(Left$(sBuffer, InStr(sBuffer, vbNullChar) - 1))
 End Property
 
 Private Property Let pvThunkGlobalData(sKey As String, ByVal lValue As Long)
-    Call SetEnvironmentVariable("_MST_GLOBAL" & GetCurrentProcessId() & "_" & sKey, lValue)
+    Call SetEnvironmentVariable(StrPtr("_MST_GLOBAL" & GetCurrentProcessId() & "_" & sKey), StrPtr(lValue))
 End Property
 
 '=========================================================================

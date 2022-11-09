@@ -9,7 +9,7 @@ DefObj A-Z
 Private Const WM_VSCROLL                        As Long = &H115
 Private Const SB_BOTTOM                         As Long = 7
 
-Private Declare Function SendMessage Lib "user32" Alias "SendMessageA" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, lParam As Any) As Long
+Private Declare Function SendMessage Lib "user32" Alias "SendMessageW" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, lParam As Any) As Long
 
 '=========================================================================
 ' Functions

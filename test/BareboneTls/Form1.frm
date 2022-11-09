@@ -68,7 +68,7 @@ Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
 Option Explicit
 
-Private Declare Function SendMessage Lib "user32" Alias "SendMessageA" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, lParam As Any) As Long
+Private Declare Function SendMessage Lib "user32" Alias "SendMessageW" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, lParam As Any) As Long
 
 Private m_uCtx              As UcsTlsContext
 Private m_sRequest          As String
@@ -261,7 +261,7 @@ Private Sub pvAppendLogText(txtLog As TextBox, sValue As String)
     Call SendMessage(txtLog.hWnd, WM_SETREDRAW, 0, ByVal 0)
     Call SendMessage(txtLog.hWnd, EM_SETSEL, 0, ByVal -1)
     Call SendMessage(txtLog.hWnd, EM_SETSEL, -1, ByVal -1)
-    Call SendMessage(txtLog.hWnd, EM_REPLACESEL, 1, ByVal preg_replace("\r*\n", sValue, vbCrLf))
+    Call SendMessage(txtLog.hWnd, EM_REPLACESEL, 1, ByVal StrPtr(preg_replace("\r*\n", sValue, vbCrLf)))
     Call SendMessage(txtLog.hWnd, EM_SETSEL, 0, ByVal -1)
     Call SendMessage(txtLog.hWnd, EM_SETSEL, -1, ByVal -1)
     Call SendMessage(txtLog.hWnd, WM_SETREDRAW, 1, ByVal 0)

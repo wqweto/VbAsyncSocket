@@ -68,18 +68,18 @@ Private Const szOID_ECC_CURVE_P521                      As String = "1.3.132.0.3
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
-Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleA" (ByVal lpModuleName As String) As Long
-Private Declare Function lstrlen Lib "kernel32" Alias "lstrlenA" (ByVal lpString As Long) As Long
+Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleW" (ByVal lpModuleName As Long) As Long
+Private Declare Function lstrlenA Lib "kernel32" (ByVal lpString As Long) As Long
 Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
-Private Declare Function LoadLibrary Lib "kernel32" Alias "LoadLibraryA" (ByVal lpLibFileName As String) As Long
-Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableA" (ByVal lpName As String, ByVal lpBuffer As String, ByVal nSize As Long) As Long
+Private Declare Function LoadLibrary Lib "kernel32" Alias "LoadLibraryW" (ByVal lpLibFileName As Long) As Long
+Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableW" (ByVal lpName As Long, ByVal lpBuffer As Long, ByVal nSize As Long) As Long
 '--- msvbvm60
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
 #If ImplTlsServer Or Not ImplLibSodium Then
     Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
     '--- version
-    Private Declare Function GetFileVersionInfo Lib "Version" Alias "GetFileVersionInfoA" (ByVal lptstrFilename As String, ByVal dwHandle As Long, ByVal dwLen As Long, lpData As Any) As Long
-    Private Declare Function VerQueryValue Lib "Version" Alias "VerQueryValueA" (pBlock As Any, ByVal lpSubBlock As String, lplpBuffer As Any, puLen As Long) As Long
+    Private Declare Function GetFileVersionInfo Lib "version" Alias "GetFileVersionInfoW" (ByVal lptstrFilename As Long, ByVal dwHandle As Long, ByVal dwLen As Long, lpData As Any) As Long
+    Private Declare Function VerQueryValue Lib "version" Alias "VerQueryValueW" (pBlock As Any, ByVal lpSubBlock As Long, lplpBuffer As Any, puLen As Long) As Long
 #End If
 '--- advapi32
 Private Declare Function CryptAcquireContext Lib "advapi32" Alias "CryptAcquireContextW" (phProv As Long, ByVal pszContainer As Long, ByVal pszProvider As Long, ByVal dwProvType As Long, ByVal dwFlags As Long) As Long
@@ -2946,13 +2946,12 @@ Private Sub pvTlsResetHandshakeHash(uCtx As UcsTlsContext)
 End Sub
 
 Private Sub pvTlsLogSecret(uCtx As UcsTlsContext, sLabel As String, baSecret() As Byte, Optional ByVal Pos As Long, Optional ByVal Size As Long = -1)
-    Const ForAppending  As Long = 8
     Dim sFileName       As String
     Dim nFile           As Integer
     
     On Error GoTo EH
     sFileName = String$(1000, 0)
-    Call GetEnvironmentVariable("SSLKEYLOGFILE", sFileName, Len(sFileName) + 1)
+    Call GetEnvironmentVariable(StrPtr("SSLKEYLOGFILE"), StrPtr(sFileName), Len(sFileName) + 1)
     sFileName = Left$(sFileName, InStr(sFileName, vbNullChar) - 1)
     If LenB(sFileName) <> 0 Then
         If Size < 0 Then
@@ -3588,10 +3587,10 @@ Private Sub pvArrayReverse(baData() As Byte)
     Next
 End Sub
 
-Private Function pvToString(ByVal lPtr As Long) As String
+Private Function pvToStringA(ByVal lPtr As Long) As String
     If lPtr <> 0 Then
-        pvToString = String$(lstrlen(lPtr), 0)
-        Call CopyMemory(ByVal pvToString, ByVal lPtr, Len(pvToString))
+        pvToStringA = String$(lstrlenA(lPtr), 0)
+        Call CopyMemory(ByVal pvToStringA, ByVal lPtr, Len(pvToStringA))
     End If
 End Function
 
@@ -3800,7 +3799,7 @@ Private Function pvAsn1DecodePrivateKey(baPrivKey() As Byte, uRetVal As UcsKeyIn
         If pvCryptoSetApiError(lResult, "CryptDecodeObjectEx(PKCS_RSA_PRIVATE_KEY)") Then
             GoTo QH
         End If
-        uRetVal.AlgoObjId = pvToString(uPrivKey.Algorithm.pszObjId)
+        uRetVal.AlgoObjId = pvToStringA(uPrivKey.Algorithm.pszObjId)
         GoTo DecodeRsa
     ElseIf CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, PKCS_RSA_PRIVATE_KEY, baPrivKey(0), UBound(baPrivKey) + 1, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lKeyPtr, lKeySize) <> 0 Then
         uRetVal.AlgoObjId = szOID_RSA_RSA
@@ -3815,7 +3814,7 @@ DecodeRsa:
             GoTo QH
         End If
         Call CopyMemory(uEccKeyInfo, ByVal lKeyPtr, Len(uEccKeyInfo))
-        uRetVal.AlgoObjId = pvToString(uEccKeyInfo.szCurveOid)
+        uRetVal.AlgoObjId = pvToStringA(uEccKeyInfo.szCurveOid)
         If uEccKeyInfo.PublicKey.cbData > 0 Then
             pvArrayAllocate uRetVal.KeyBlob, uEccKeyInfo.PublicKey.cbData - 1 + uEccKeyInfo.PrivateKey.cbData, FUNC_NAME & ".uRetVal.KeyBlob"
             Debug.Assert UBound(uRetVal.KeyBlob) + 1 >= uEccKeyInfo.PublicKey.cbData - 1
@@ -3847,9 +3846,9 @@ Private Function pvCryptoInit() As Boolean
     pvCryptoClearApiError
     With m_uData
 #If ImplLibSodium Then
-        If GetModuleHandle("libsodium.dll") = 0 Then
-            If LoadLibrary(App.Path & "\libsodium.dll") = 0 Then
-                Call LoadLibrary(App.Path & "\..\..\lib\libsodium.dll")
+        If GetModuleHandle(StrPtr("libsodium.dll")) = 0 Then
+            If LoadLibrary(StrPtr(App.Path & "\libsodium.dll")) = 0 Then
+                Call LoadLibrary(StrPtr(App.Path & "\..\..\lib\libsodium.dll"))
             End If
             If sodium_init() < 0 Then
                 pvCryptoSetApiResult LNG_OUT_OF_MEMORY, "sodium_init"
@@ -4524,8 +4523,8 @@ Private Property Get RealOsVersion() As UcsOsVersionEnum
     
     If lVersion = 0 Then
         ReDim baBuffer(0 To 8192) As Byte
-        Call GetFileVersionInfo("kernel32.dll", 0, UBound(baBuffer), baBuffer(0))
-        Call VerQueryValue(baBuffer(0), "\", lPtr, lSize)
+        Call GetFileVersionInfo(StrPtr("kernel32.dll"), 0, UBound(baBuffer), baBuffer(0))
+        Call VerQueryValue(baBuffer(0), StrPtr("\"), lPtr, lSize)
         Call CopyMemory(aVer(0), ByVal lPtr, 20)
         lVersion = aVer(9) * 100 + aVer(8)
     End If

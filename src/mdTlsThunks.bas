@@ -94,12 +94,12 @@ Private Declare Sub FillMemory Lib "kernel32" Alias "RtlFillMemory" (Destination
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
 Private Declare Function VirtualAlloc Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As Long
 Private Declare Function VirtualProtect Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flNewProtect As Long, ByRef lpflOldProtect As Long) As Long
-Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleA" (ByVal lpModuleName As String) As Long
+Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleW" (ByVal lpModuleName As Long) As Long
 Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
-Private Declare Function lstrlen Lib "kernel32" Alias "lstrlenA" (ByVal lpString As Long) As Long
+Private Declare Function lstrlenA Lib "kernel32" (ByVal lpStr As Long) As Long
 Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
-Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableA" (ByVal lpName As String, ByVal lpBuffer As String, ByVal nSize As Long) As Long
-Private Declare Function GetVersionEx Lib "kernel32" Alias "GetVersionExA" (lpVersionInformation As Any) As Long
+Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableW" (ByVal lpName As Long, ByVal lpBuffer As Long, ByVal nSize As Long) As Long
+Private Declare Function GetVersionEx Lib "kernel32" Alias "GetVersionExW" (lpVersionInformation As Any) As Long
 '--- msvbvm60
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
@@ -115,7 +115,7 @@ Private Declare Function CryptHashData Lib "advapi32" (ByVal hHash As Long, pbDa
 Private Declare Function CryptGetHashParam Lib "advapi32" (ByVal hHash As Long, ByVal dwParam As Long, pbData As Any, pdwDataLen As Long, ByVal dwFlags As Long) As Long
 Private Declare Function CryptSetHashParam Lib "advapi32" (ByVal hHash As Long, ByVal dwParam As Long, pbData As Any, ByVal dwFlags As Long) As Long
 Private Declare Function CryptGetUserKey Lib "advapi32" (ByVal hProv As Long, ByVal dwKeySpec As Long, phUserKey As Long) As Long
-Private Declare Function CryptSignHash Lib "advapi32" Alias "CryptSignHashA" (ByVal hHash As Long, ByVal dwKeySpec As Long, ByVal szDescription As Long, ByVal dwFlags As Long, pbSignature As Any, pdwSigLen As Long) As Long
+Private Declare Function CryptSignHash Lib "advapi32" Alias "CryptSignHashW" (ByVal hHash As Long, ByVal dwKeySpec As Long, ByVal szDescription As Long, ByVal dwFlags As Long, pbSignature As Any, pdwSigLen As Long) As Long
 Private Declare Function CryptDecrypt Lib "advapi32" (ByVal hKey As Long, ByVal hHash As Long, ByVal Final As Long, ByVal dwFlags As Long, pbData As Any, pdwDataLen As Long) As Long
 '--- Crypt32
 Private Declare Function CryptImportPublicKeyInfo Lib "crypt32" (ByVal hCryptProv As Long, ByVal dwCertEncodingType As Long, pInfo As Any, phKey As Long) As Long
@@ -4249,7 +4249,7 @@ Private Sub pvTlsLogSecret(uCtx As UcsTlsContext, sLabel As String, baSecret() A
     
     On Error GoTo EH
     sFileName = String$(1000, 0)
-    Call GetEnvironmentVariable("SSLKEYLOGFILE", sFileName, Len(sFileName) + 1)
+    Call GetEnvironmentVariable(StrPtr("SSLKEYLOGFILE"), StrPtr(sFileName), Len(sFileName) + 1)
     sFileName = Left$(sFileName, InStr(sFileName, vbNullChar) - 1)
     If LenB(sFileName) <> 0 Then
         If Size < 0 Then
@@ -5307,10 +5307,10 @@ Private Function pvArrayEqual(baFirst() As Byte, baSecond() As Byte) As Boolean
     End If
 End Function
 
-Private Function pvToString(ByVal lPtr As Long) As String
+Private Function pvToStringA(ByVal lPtr As Long) As String
     If lPtr <> 0 Then
-        pvToString = String$(lstrlen(lPtr), 0)
-        Call CopyMemory(ByVal pvToString, ByVal lPtr, Len(pvToString))
+        pvToStringA = String$(lstrlenA(lPtr), 0)
+        Call CopyMemory(ByVal pvToStringA, ByVal lPtr, Len(pvToStringA))
     End If
 End Function
 
@@ -5703,7 +5703,7 @@ Private Function pvAsn1DecodePrivateKey(cCerts As Collection, cPrivKey As Collec
                 sApiSource = "CryptDecodeObjectEx(PKCS_RSA_PRIVATE_KEY)"
                 GoTo QH
             End If
-            uRetVal.AlgoObjId = pvToString(uPrivKey.Algorithm.pszObjId)
+            uRetVal.AlgoObjId = pvToStringA(uPrivKey.Algorithm.pszObjId)
             GoTo DecodeRsa
         ElseIf CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, PKCS_RSA_PRIVATE_KEY, baPrivKey(0), UBound(baPrivKey) + 1, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lKeyPtr, lKeySize) <> 0 Then
             uRetVal.AlgoObjId = szOID_RSA_RSA
@@ -5741,7 +5741,7 @@ DecodeRsa:
             pvArrayReverse uRetVal.PrivExp
         ElseIf CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, X509_ECC_PRIVATE_KEY, baPrivKey(0), UBound(baPrivKey) + 1, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lKeyPtr, 0) <> 0 Then
             Call CopyMemory(uEccKeyInfo, ByVal lKeyPtr, Len(uEccKeyInfo))
-            uRetVal.AlgoObjId = pvToString(uEccKeyInfo.szCurveOid)
+            uRetVal.AlgoObjId = pvToStringA(uEccKeyInfo.szCurveOid)
             pvArrayAllocate uRetVal.KeyBlob, uEccKeyInfo.PrivateKey.cbData, FUNC_NAME & ".uRetVal.KeyBlob"
             Call CopyMemory(uRetVal.KeyBlob(0), ByVal uEccKeyInfo.PrivateKey.pbData, uEccKeyInfo.PrivateKey.cbData)
         ElseIf Err.LastDllError = ERROR_FILE_NOT_FOUND Then
@@ -5802,7 +5802,7 @@ Private Function pvAsn1DecodeCertificate(baCert() As Byte, uRetVal As UcsKeyInfo
     Call CopyMemory(lPtr, ByVal UnsignedAdd(pCertContext, 12), 4)       '--- dereference pCertContext->pCertInfo
     lPtr = UnsignedAdd(lPtr, 56)                                        '--- &pCertContext->pCertInfo->SubjectPublicKeyInfo
     Call CopyMemory(uPublicKeyInfo, ByVal lPtr, Len(uPublicKeyInfo))
-    uRetVal.AlgoObjId = pvToString(uPublicKeyInfo.Algorithm.pszObjId)
+    uRetVal.AlgoObjId = pvToStringA(uPublicKeyInfo.Algorithm.pszObjId)
     pvArrayAllocate uRetVal.KeyBlob, uPublicKeyInfo.PublicKey.cbData, FUNC_NAME & ".uRetVal.KeyBlob"
     Call CopyMemory(uRetVal.KeyBlob(0), ByVal uPublicKeyInfo.PublicKey.pbData, uPublicKeyInfo.PublicKey.cbData)
     If uRetVal.AlgoObjId = szOID_RSA_RSA Then
@@ -6029,9 +6029,9 @@ Private Function pvCryptoInit() As Boolean
             Call pvPatchTrampoline(AddressOf pvCallRsaCrtModExp)
             '--- init thunk's first 4 bytes -> global data in C/C++
             Call CopyMemory(ByVal .Thunk, VarPtr(.Glob(0)), 4)
-            Call CopyMemory(.Glob(0), GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemAlloc"), 4)
-            Call CopyMemory(.Glob(4), GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemRealloc"), 4)
-            Call CopyMemory(.Glob(8), GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemFree"), 4)
+            Call CopyMemory(.Glob(0), GetProcAddress(GetModuleHandle(StrPtr("ole32")), "CoTaskMemAlloc"), 4)
+            Call CopyMemory(.Glob(4), GetProcAddress(GetModuleHandle(StrPtr("ole32")), "CoTaskMemRealloc"), 4)
+            Call CopyMemory(.Glob(8), GetProcAddress(GetModuleHandle(StrPtr("ole32")), "CoTaskMemFree"), 4)
         End If
     End With
     '--- success
@@ -6870,7 +6870,7 @@ End Function
 
 Private Property Get OsVersion() As UcsOsVersionEnum
     Static lVersion     As Long
-    Dim aVer(0 To 37)   As Long
+    Dim aVer(0 To 69)   As Long
     
     If lVersion = 0 Then
         aVer(0) = 4 * UBound(aVer)              '--- [0] = dwOSVersionInfoSize
@@ -7159,7 +7159,7 @@ Public Sub TestCryptoEcdh(oJson As Object)
                     If UBound(baPublic) >= 0 Then
                         If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_PUBLIC_KEY_INFO, baPublic(0), UBound(baPublic) + 1, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, lSize) <> 0 Then
                             Call CopyMemory(uPublicKeyInfo, ByVal lPtr, Len(uPublicKeyInfo))
-                            Debug.Assert pvToString(uPublicKeyInfo.Algorithm.pszObjId) = szOID_ECC_PUBLIC_KEY
+                            Debug.Assert pvToStringA(uPublicKeyInfo.Algorithm.pszObjId) = szOID_ECC_PUBLIC_KEY
                             If uPublicKeyInfo.PublicKey.cbData = 0 Then
                                 baPublic = vbNullString
                             Else

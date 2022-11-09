@@ -164,11 +164,11 @@ Private Const INVALID_SOCKET                            As Long = -1
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
-Private Declare Function GetFileAttributes Lib "kernel32" Alias "GetFileAttributesA" (ByVal lpFileName As String) As Long
+Private Declare Function GetFileAttributes Lib "kernel32" Alias "GetFileAttributesW" (ByVal lpFileName As Long) As Long
 Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
-Private Declare Function lstrlen Lib "kernel32" Alias "lstrlenA" (ByVal lpString As Long) As Long
-Private Declare Function lstrlenW Lib "kernel32" (ByVal lpString As Long) As Long
-Private Declare Function GetVersionEx Lib "kernel32" Alias "GetVersionExA" (lpVersionInformation As Any) As Long
+Private Declare Function lstrlenA Lib "kernel32" (ByVal lpStr As Long) As Long
+Private Declare Function lstrlenW Lib "kernel32" (ByVal lpStr As Long) As Long
+Private Declare Function GetVersionEx Lib "kernel32" Alias "GetVersionExW" (lpVersionInformation As Any) As Long
 '--- msvbvm60
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
@@ -2114,7 +2114,7 @@ Private Function pvPkiPemDecryptPrivateKey(baRetVal() As Byte, baEncrKey() As By
         GoTo QH
     End If
     Call CopyMemory(uEncrInfo, ByVal lEncrPtr, LenB(uEncrInfo))
-    sOID = pvToString(uEncrInfo.EncryptionAlgorithm.pszObjId)
+    sOID = pvToStringA(uEncrInfo.EncryptionAlgorithm.pszObjId)
     If sOID <> szOID_PKCS_5_PBES2 Then
         pvSetLastError vbObjectError, MODULE_NAME & "." & FUNC_NAME, Replace(Replace(ERR_UNKNOWN_OID, "%1", "encryption scheme"), "%2", sOID)
         GoTo QH
@@ -3488,7 +3488,7 @@ Private Function pvPkiAsn1Parse(uInput As CRYPT_DATA_BLOB, sFormat As String, cO
             GoTo QH
         End If
         Call CopyMemory(lIdx, ByVal lPtr, 4)
-        cOutput.Add pvToString(lIdx)
+        cOutput.Add pvToStringA(lIdx)
     Case "x"
         If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_OCTET_STRING, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, 4) = 0 Then
             GoTo QH
@@ -3533,10 +3533,10 @@ Private Function pvNCryptGetStringProperty(ByVal hNKey As String, sPropName As S
 QH:
 End Function
 
-Private Function pvToString(ByVal lPtr As Long) As String
+Private Function pvToStringA(ByVal lPtr As Long) As String
     If lPtr <> 0 Then
-        pvToString = String$(lstrlen(lPtr), 0)
-        Call CopyMemory(ByVal pvToString, ByVal lPtr, Len(pvToString))
+        pvToStringA = String$(lstrlenA(lPtr), 0)
+        Call CopyMemory(ByVal pvToStringA, ByVal lPtr, Len(pvToStringA))
     End If
 End Function
 
@@ -3638,7 +3638,7 @@ Private Function ReadBinaryFile(sFile As String) As Byte()
     Dim nFile           As Integer
     
     baBuffer = vbNullString
-    If GetFileAttributes(sFile) <> -1 Then
+    If GetFileAttributes(StrPtr(sFile)) <> -1 Then
         nFile = FreeFile
         Open sFile For Binary Access Read Shared As nFile
         If LOF(nFile) > 0 Then
@@ -3652,7 +3652,7 @@ End Function
 
 Private Property Get OsVersion() As UcsOsVersionEnum
     Static lVersion     As Long
-    Dim aVer(0 To 37)   As Long
+    Dim aVer(0 To 69)   As Long
     
     If lVersion = 0 Then
         aVer(0) = 4 * UBound(aVer)              '--- [0] = dwOSVersionInfoSize

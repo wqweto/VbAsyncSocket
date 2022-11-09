@@ -118,23 +118,23 @@ Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
 Private Declare Function VirtualProtect Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flNewProtect As Long, ByRef lpflOldProtect As Long) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
-Private Declare Function lstrlen Lib "kernel32" Alias "lstrlenA" (ByVal lpString As Long) As Long
+Private Declare Function lstrlenA Lib "kernel32" (ByVal lpString As Long) As Long
 Private Declare Function lstrlenW Lib "kernel32" (ByVal lpString As Long) As Long
 Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
-Private Declare Function FormatMessage Lib "kernel32" Alias "FormatMessageA" (ByVal dwFlags As Long, ByVal lpSource As Long, ByVal dwMessageId As Long, ByVal dwLanguageId As Long, ByVal lpBuffer As String, ByVal nSize As Long, ByVal Args As Long) As Long
+Private Declare Function FormatMessage Lib "kernel32" Alias "FormatMessageW" (ByVal dwFlags As Long, ByVal lpSource As Long, ByVal dwMessageId As Long, ByVal dwLanguageId As Long, ByVal lpBuffer As Long, ByVal nSize As Long, ByVal Args As Long) As Long
 '--- msvbvm60
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
 '--- version
-Private Declare Function GetFileVersionInfo Lib "version" Alias "GetFileVersionInfoA" (ByVal lptstrFilename As String, ByVal dwHandle As Long, ByVal dwLen As Long, lpData As Any) As Long
-Private Declare Function VerQueryValue Lib "version" Alias "VerQueryValueA" (pBlock As Any, ByVal lpSubBlock As String, lplpBuffer As Any, puLen As Long) As Long
+Private Declare Function GetFileVersionInfo Lib "version" Alias "GetFileVersionInfoW" (ByVal lptstrFilename As Long, ByVal dwHandle As Long, ByVal dwLen As Long, lpData As Any) As Long
+Private Declare Function VerQueryValue Lib "version" Alias "VerQueryValueW" (pBlock As Any, ByVal lpSubBlock As Long, lpBuffer As Any, puLen As Long) As Long
 '--- security
-Private Declare Function AcquireCredentialsHandle Lib "security" Alias "AcquireCredentialsHandleA" (ByVal pszPrincipal As Long, ByVal pszPackage As String, ByVal fCredentialUse As Long, ByVal pvLogonId As Long, pAuthData As Any, ByVal pGetKeyFn As Long, ByVal pvGetKeyArgument As Long, phCredential As Currency, ByVal ptsExpiry As Long) As Long
+Private Declare Function AcquireCredentialsHandle Lib "security" Alias "AcquireCredentialsHandleW" (ByVal pszPrincipal As Long, ByVal pszPackage As Long, ByVal fCredentialUse As Long, ByVal pvLogonId As Long, pAuthData As Any, ByVal pGetKeyFn As Long, ByVal pvGetKeyArgument As Long, phCredential As Currency, ByVal ptsExpiry As Long) As Long
 Private Declare Function FreeCredentialsHandle Lib "security" (phContext As Currency) As Long
 Private Declare Function AcceptSecurityContext Lib "security" (phCredential As Currency, ByVal phContext As Long, pInput As Any, ByVal fContextReq As Long, ByVal TargetDataRep As Long, phNewContext As Currency, pOutput As Any, pfContextAttr As Long, ByVal ptsExpiry As Long) As Long
-Private Declare Function InitializeSecurityContext Lib "security" Alias "InitializeSecurityContextA" (phCredential As Currency, ByVal phContext As Long, pszTargetName As Any, ByVal fContextReq As Long, ByVal Reserved1 As Long, ByVal TargetDataRep As Long, pInput As Any, ByVal Reserved2 As Long, phNewContext As Currency, pOutput As Any, pfContextAttr As Long, ByVal ptsExpiry As Long) As Long
+Private Declare Function InitializeSecurityContext Lib "security" Alias "InitializeSecurityContextW" (phCredential As Currency, ByVal phContext As Long, ByVal pszTargetName As Long, ByVal fContextReq As Long, ByVal Reserved1 As Long, ByVal TargetDataRep As Long, pInput As Any, ByVal Reserved2 As Long, phNewContext As Currency, pOutput As Any, pfContextAttr As Long, ByVal ptsExpiry As Long) As Long
 Private Declare Function DeleteSecurityContext Lib "security" (phContext As Currency) As Long
 Private Declare Function FreeContextBuffer Lib "security" (ByVal pvContextBuffer As Long) As Long
-Private Declare Function QueryContextAttributes Lib "security" Alias "QueryContextAttributesA" (phContext As Currency, ByVal ulAttribute As Long, pBuffer As Any) As Long
+Private Declare Function QueryContextAttributes Lib "security" Alias "QueryContextAttributesW" (phContext As Currency, ByVal ulAttribute As Long, pBuffer As Any) As Long
 Private Declare Function DecryptMessage Lib "security" (phContext As Currency, pMessage As Any, ByVal MessageSeqNo As Long, ByVal pfQOP As Long) As Long
 Private Declare Function EncryptMessage Lib "security" (phContext As Currency, ByVal fQOP As Long, pMessage As Any, ByVal MessageSeqNo As Long) As Long
 Private Declare Function ApplyControlToken Lib "security" (phContext As Currency, pInput As Any) As Long
@@ -626,12 +626,12 @@ RetryCredentials:
                 uNewCred.pTlsParameters = VarPtr(uNewParams)
                 uNewParams.grbitDisabledProtocols = Not (uCred.grbitEnabledProtocols Or _
                     IIf((.LocalFeatures And ucsTlsSupportTls13) <> 0, SP_PROT_TLS1_3, 0))
-                hResult = AcquireCredentialsHandle(0, UNISP_NAME, IIf(.IsServer, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND), 0, uNewCred, 0, 0, .hTlsCredentials, 0)
+                hResult = AcquireCredentialsHandle(0, StrPtr(UNISP_NAME), IIf(.IsServer, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND), 0, uNewCred, 0, 0, .hTlsCredentials, 0)
             Else
                 hResult = -1
             End If
             If hResult < 0 Then
-                hResult = AcquireCredentialsHandle(0, UNISP_NAME, IIf(.IsServer, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND), 0, uCred, 0, 0, .hTlsCredentials, 0)
+                hResult = AcquireCredentialsHandle(0, StrPtr(UNISP_NAME), IIf(.IsServer, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND), 0, uCred, 0, 0, .hTlsCredentials, 0)
             End If
             If hResult < 0 Then
                 pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "AcquireCredentialsHandle", AlertCode:=.LastAlertCode
@@ -675,7 +675,7 @@ RetryCredentials:
                     sApiSource = "AcceptSecurityContext"
                 Else
             #End If
-                    hResult = InitializeSecurityContext(.hTlsCredentials, IIf(.hTlsContext <> 0, VarPtr(.hTlsContext), 0), ByVal .RemoteHostName, .ContextReq, 0, _
+                    hResult = InitializeSecurityContext(.hTlsCredentials, IIf(.hTlsContext <> 0, VarPtr(.hTlsContext), 0), StrPtr(.RemoteHostName), .ContextReq, 0, _
                         SECURITY_NATIVE_DREP, ByVal lPtr, 0, .hTlsContext, .OutDesc, lContextAttr, 0)
                     sApiSource = "InitializeSecurityContext"
             #If ImplTlsServer Then
@@ -763,7 +763,7 @@ RetryCredentials:
                         If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_APPLICATION_PROTOCOL, uAppProtocol) = 0 Then
                             If uAppProtocol.ProtoNegoStatus = SecApplicationProtocolNegotiationStatus_Success Then
                                 uAppProtocol.ProtocolId(uAppProtocol.ProtocolIdSize) = 0
-                                .AlpnNegotiated = pvToString(VarPtr(uAppProtocol.ProtocolId(0)))
+                                .AlpnNegotiated = pvToStringA(VarPtr(uAppProtocol.ProtocolId(0)))
                             End If
                         End If
                     End If
@@ -1057,7 +1057,7 @@ Public Function TlsShutdown(uCtx As UcsTlsContext, baOutput() As Byte, lPos As L
                 sApiSource = "AcceptSecurityContext"
             Else
         #End If
-                hResult = InitializeSecurityContext(.hTlsCredentials, VarPtr(.hTlsContext), ByVal .RemoteHostName, .ContextReq, 0, _
+                hResult = InitializeSecurityContext(.hTlsCredentials, VarPtr(.hTlsContext), StrPtr(.RemoteHostName), .ContextReq, 0, _
                     SECURITY_NATIVE_DREP, ByVal 0, 0, .hTlsContext, .OutDesc, lContextAttr, 0)
                 sApiSource = "InitializeSecurityContext"
         #If ImplTlsServer Then
@@ -1375,7 +1375,7 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
             Call CopyMemory(lPtr, ByVal UnsignedAdd(pCertContext, 12), 4)       '--- dereference pCertContext->pCertInfo
             lPtr = UnsignedAdd(lPtr, 56)                                        '--- &pCertContext->pCertInfo->SubjectPublicKeyInfo
             Call CopyMemory(uPublicKeyInfo, ByVal lPtr, Len(uPublicKeyInfo))
-            Select Case pvToString(uPublicKeyInfo.Algorithm.pszObjId)
+            Select Case pvToStringA(uPublicKeyInfo.Algorithm.pszObjId)
             Case szOID_RSA_RSA
                 uProvInfo.pwszContainerName = StrPtr(sKeyName)
                 uProvInfo.dwProvType = PROV_RSA_FULL
@@ -1425,7 +1425,7 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
                     GoTo QH
                 End If
             Case Else
-                ErrRaise vbObjectError, , Replace(ERR_UNKNOWN_PUBKEY, "%1", pvToString(uPublicKeyInfo.Algorithm.pszObjId))
+                ErrRaise vbObjectError, , Replace(ERR_UNKNOWN_PUBKEY, "%1", pvToStringA(uPublicKeyInfo.Algorithm.pszObjId))
             End Select
         End If
         If CertSetCertificateContextProperty(pCertContext, CERT_KEY_PROV_INFO_PROP_ID, 0, uProvInfo) = 0 Then
@@ -1521,7 +1521,7 @@ Private Function pvAsn1DecodePrivateKey(baPrivKey() As Byte, uRetVal As UcsKeyIn
             sApiSource = "CryptDecodeObjectEx(PKCS_RSA_PRIVATE_KEY)"
             GoTo QH
         End If
-        uRetVal.AlgoObjId = pvToString(uPrivKey.Algorithm.pszObjId)
+        uRetVal.AlgoObjId = pvToStringA(uPrivKey.Algorithm.pszObjId)
         GoTo DecodeRsa
     ElseIf CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, PKCS_RSA_PRIVATE_KEY, baPrivKey(0), UBound(baPrivKey) + 1, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lKeyPtr, lKeySize) <> 0 Then
         uRetVal.AlgoObjId = szOID_RSA_RSA
@@ -1534,7 +1534,7 @@ DecodeRsa:
     ElseIf CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, X509_ECC_PRIVATE_KEY, baPrivKey(0), UBound(baPrivKey) + 1, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lKeyPtr, 0) <> 0 Then
         Debug.Assert lKeyPtr <> 0
         Call CopyMemory(uEccKeyInfo, ByVal lKeyPtr, Len(uEccKeyInfo))
-        uRetVal.AlgoObjId = pvToString(uEccKeyInfo.szCurveOid)
+        uRetVal.AlgoObjId = pvToStringA(uEccKeyInfo.szCurveOid)
         pvArrayAllocate uRetVal.KeyBlob, uEccKeyInfo.PrivateKey.cbData, FUNC_NAME & ".uRetVal.KeyBlob"
         Debug.Assert uEccKeyInfo.PrivateKey.pbData <> 0
         Call CopyMemory(uRetVal.KeyBlob(0), ByVal uEccKeyInfo.PrivateKey.pbData, uEccKeyInfo.PrivateKey.cbData)
@@ -1676,10 +1676,10 @@ Private Sub pvInitSecBuffer(uBuffer As ApiSecBuffer, ByVal lType As Long, Option
     End With
 End Sub
 
-Private Function pvToString(ByVal lPtr As Long) As String
+Private Function pvToStringA(ByVal lPtr As Long) As String
     If lPtr <> 0 Then
-        pvToString = String$(lstrlen(lPtr), 0)
-        Call CopyMemory(ByVal pvToString, ByVal lPtr, Len(pvToString))
+        pvToStringA = String$(lstrlenA(lPtr), 0)
+        Call CopyMemory(ByVal pvToStringA, ByVal lPtr, Len(pvToStringA))
     End If
 End Function
 
@@ -1849,8 +1849,8 @@ Private Property Get RealOsVersion(Optional BuildNo As Long) As UcsOsVersionEnum
     
     If lVersion = 0 Then
         ReDim baBuffer(0 To 8192) As Byte
-        Call GetFileVersionInfo("kernel32.dll", 0, UBound(baBuffer), baBuffer(0))
-        Call VerQueryValue(baBuffer(0), "\", lPtr, lSize)
+        Call GetFileVersionInfo(StrPtr("kernel32.dll"), 0, UBound(baBuffer), baBuffer(0))
+        Call VerQueryValue(baBuffer(0), StrPtr("\"), lPtr, lSize)
         Call CopyMemory(aVer(0), ByVal lPtr, 20)
         lVersion = aVer(9) * 100 + aVer(8)
         lBuildNo = aVer(7)
@@ -1864,8 +1864,8 @@ Private Function GetSystemMessage(ByVal lLastDllError As Long) As String
     Const FORMAT_MESSAGE_IGNORE_INSERTS As Long = &H200
     Dim lSize               As Long
    
-    GetSystemMessage = Space$(2000)
-    lSize = FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM Or FORMAT_MESSAGE_IGNORE_INSERTS, 0, lLastDllError, 0, GetSystemMessage, Len(GetSystemMessage), 0)
+    GetSystemMessage = String$(2000, 0)
+    lSize = FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM Or FORMAT_MESSAGE_IGNORE_INSERTS, 0, lLastDllError, 0, StrPtr(GetSystemMessage), Len(GetSystemMessage), 0)
     GetSystemMessage = Left$(GetSystemMessage, lSize)
 End Function
 #End If ' Not ImplUseShared
