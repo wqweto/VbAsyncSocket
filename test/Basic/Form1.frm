@@ -230,7 +230,7 @@ Private Sub Command2_Click()
     m_oRequest.Send
     m_oRequest.Open_ "GET", IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://www.unicontsoft.com/"
     m_oRequest.Send
-'    m_oRequest.Open_ "GET", "http://localhost/ТоваПапка?Параметър1&Парам2#Анкор"
+'    m_oRequest.Open_ "GET", "http://localhost/РўРѕРІР°РџР°РїРєР°?РџР°СЂР°РјРµС‚СЉСЂ1&РџР°СЂР°Рј2#РђРЅРєРѕСЂ"
 '    m_oRequest.Send
 '    m_oRequest.Open_ "GET", IIf(chkUseHttps.Value = vbChecked, "https", "http") & "://client.badssl.com"
 '    m_oRequest.SetClientCertificate "68b5220077de8bbeaed8e1c2540fec6c16b418a8"
