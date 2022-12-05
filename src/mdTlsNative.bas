@@ -118,8 +118,8 @@ Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
 Private Declare Function VirtualProtect Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flNewProtect As Long, ByRef lpflOldProtect As Long) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
-Private Declare Function lstrlenA Lib "kernel32" (ByVal lpString As Long) As Long
-Private Declare Function lstrlenW Lib "kernel32" (ByVal lpString As Long) As Long
+Private Declare Function lstrlenA Lib "kernel32" (ByVal lpStr As Long) As Long
+Private Declare Function lstrlenW Lib "kernel32" (ByVal lpStr As Long) As Long
 Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
 Private Declare Function FormatMessage Lib "kernel32" Alias "FormatMessageW" (ByVal dwFlags As Long, ByVal lpSource As Long, ByVal dwMessageId As Long, ByVal dwLanguageId As Long, ByVal lpBuffer As Long, ByVal nSize As Long, ByVal Args As Long) As Long
 '--- msvbvm60
@@ -1777,7 +1777,9 @@ Private Function pvPatchMethodTrampoline(ByVal Pfn As Long, ByVal lMethodIdx As 
 End Function
 
 Private Function pvSetTrue(bValue As Boolean) As Boolean
-    bValue = True
+    #If TWINBASIC = 0 Then
+        bValue = True
+    #End If
     pvSetTrue = True
 End Function
 

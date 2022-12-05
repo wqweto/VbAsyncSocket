@@ -6741,7 +6741,9 @@ Private Function pvPatchTrampoline(ByVal Pfn As Long) As Boolean
 End Function
 
 Private Function pvSetTrue(bValue As Boolean) As Boolean
-    bValue = True
+    #If TWINBASIC = 0 Then
+        bValue = True
+    #End If
     pvSetTrue = True
 End Function
 
