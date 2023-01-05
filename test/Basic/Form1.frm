@@ -204,6 +204,7 @@ Private Sub Command2_Click()
      
     On Error GoTo EH
     If chkUseHttps.Value = vbChecked Then
+        pvTestNoContent
         pvTestSeecaoCom
         pvTestHowsMySsl
         pvTestSslLabs
@@ -317,6 +318,15 @@ With req
 End With
 End Sub
 
+Private Sub pvTestNoContent()
+    Dim req As New cHttpRequest
+    With req
+        .Open_ "GET", "https://csi.gstatic.com/csi?v=3&s=linkdoctor&action=opt&it=wtsrt_.0,tbsd_.23,tbnd_.0&tbsrt=23&tran=15&e=&rt=ol.25"
+        .SetRequestHeader "User-Agent", "curl/7.83.1"
+        .Send
+        Debug.Print .ResponseText
+    End With
+End Sub
 
 Private Sub m_oRequest_OnResponseStart(ByVal Status As Long, ByVal ContentType As String)
     DebugLog MODULE_NAME, "m_oRequest_OnResponseStart", "Status=" & Status & ", ContentType=" & ContentType

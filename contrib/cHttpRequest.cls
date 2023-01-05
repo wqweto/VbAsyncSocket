@@ -978,9 +978,17 @@ TryDownload:
                 Else
                     Set uRequest.SendStream = Nothing
                     uRequest.Headers.RemoveAll
-                    If .Headers.Exists(HDR_CONTENT_LENGTH) Then
-                        .ContentLength = Val(.Headers.Item(HDR_CONTENT_LENGTH))
-                    End If
+                    '--- Message Body Length section from https://www.rfc-editor.org/rfc/rfc7230#section-3.3.3
+                    Select Case .Status
+                    Case 100 To 199, 204, 304
+                        .ContentLength = 0
+                    Case Else
+                        If uRequest.Method = "HEAD" Then
+                            .ContentLength = 0
+                        ElseIf .Headers.Exists(HDR_CONTENT_LENGTH) Then
+                            .ContentLength = Val(.Headers.Item(HDR_CONTENT_LENGTH))
+                        End If
+                    End Select
                     .TransferEncoding = GetResponseHeader("Transfer-Encoding")
                     .ContentEncoding = GetResponseHeader("Content-Encoding")
                     pvSetState ucsWaitRecvBody
