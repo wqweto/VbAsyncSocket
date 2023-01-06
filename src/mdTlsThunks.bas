@@ -1724,6 +1724,7 @@ QH:
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
     eAlertCode = uscTlsAlertInternalError
+    Resume QH
 End Function
 
 Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sError As String, eAlertCode As UcsTlsAlertDescriptionsEnum) As Boolean
@@ -1971,6 +1972,7 @@ RecordMacFailed:
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
     eAlertCode = uscTlsAlertInternalError
+    Resume QH
 End Function
 
 Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer, ByVal lInputEnd As Long, ByVal lRecordProtocol As Long, sError As String, eAlertCode As UcsTlsAlertDescriptionsEnum) As Boolean
@@ -2624,6 +2626,7 @@ MissingTrafficKeys:
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
     eAlertCode = uscTlsAlertInternalError
+    Resume QH
 End Function
 
 Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As UcsBuffer, ByVal lInputEnd As Long, ByVal lRecordProtocol As Long, sError As String, eAlertCode As UcsTlsAlertDescriptionsEnum) As Boolean
@@ -2791,6 +2794,7 @@ UnsupportedProtocol:
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
     eAlertCode = uscTlsAlertInternalError
+    Resume QH
 End Function
 
 Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As UcsBuffer, ByVal lInputEnd As Long, sError As String, eAlertCode As UcsTlsAlertDescriptionsEnum) As Boolean
@@ -3285,6 +3289,7 @@ SecureRenegotiationFailed:
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
     eAlertCode = uscTlsAlertInternalError
+    Resume QH
 End Function
 
 Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, uInput As UcsBuffer, sError As String, eAlertCode As UcsTlsAlertDescriptionsEnum) As Boolean
@@ -3454,6 +3459,7 @@ InvalidSize:
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
     eAlertCode = uscTlsAlertInternalError
+    Resume QH
 End Function
 
 Private Function pvTlsMatchSignatureScheme(uCtx As UcsTlsContext, ByVal lSignatureScheme As Long, uKeyInfo As UcsKeyInfo) As Boolean
@@ -4822,6 +4828,7 @@ UnsupportedSignatureScheme:
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
     eAlertCode = uscTlsAlertInternalError
+    Resume QH
 End Function
 
 Private Function pvTlsSignatureHashSize(ByVal lSignatureScheme As Long) As Long
