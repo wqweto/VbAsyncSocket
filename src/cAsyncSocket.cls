@@ -13,7 +13,7 @@ Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
 '
-' VbAsyncSocket Project (c) 2018-2022 by wqweto@gmail.com
+' VbAsyncSocket Project (c) 2018-2023 by wqweto@gmail.com
 '
 ' Simple and thin WinSock API wrappers for VB6
 '
@@ -157,13 +157,13 @@ Private Const FIONREAD                      As Long = &H4004667F
 Private Const FIONBIO                       As Long = &H8004667E
 '--- for WSAGetLastError
 Private Const WSABASEERR                    As Long = 10000
-Private Const WSAEINTR                      As Long = (WSABASEERR + 4)
-Private Const WSAEINVAL                     As Long = (WSABASEERR + 22)
-Private Const WSAEMFILE                     As Long = (WSABASEERR + 24)
-Private Const WSAEWOULDBLOCK                As Long = (WSABASEERR + 35)
-Private Const WSAEALREADY                   As Long = (WSABASEERR + 37)
-Private Const WSAENOTCONN                   As Long = (WSABASEERR + 57)
-Private Const WSANOTINITIALISED             As Long = (WSABASEERR + 93)
+Private Const WSAEINTR                      As Long = WSABASEERR + 4
+Private Const WSAEINVAL                     As Long = WSABASEERR + 22
+Private Const WSAEMFILE                     As Long = WSABASEERR + 24
+Private Const WSAEWOULDBLOCK                As Long = WSABASEERR + 35
+Private Const WSAEALREADY                   As Long = WSABASEERR + 37
+Private Const WSAENOTCONN                   As Long = WSABASEERR + 57
+Private Const WSANOTINITIALISED             As Long = WSABASEERR + 93
 '--- for WSAAsyncGetHostByName
 Private Const MAXGETHOSTSTRUCT              As Long = 1024
 Private Const INADDR_ANY                    As Long = 0
@@ -175,7 +175,7 @@ Private Const WM_USER                       As Long = &H400
 Private Const WM_SOCKET_RESOLVE             As Long = WM_USER + 1
 Private Const WM_SOCKET_NOTIFY              As Long = WM_USER + 2
 '--- for Get/SetWindowLong
-Private Const GWL_USERDATA                  As Long = (-21)
+Private Const GWL_USERDATA                  As Long = -21
 Private Const HWND_MESSAGE                  As Long = -3
 '--- for PeekMessage
 Private Const PM_NOREMOVE                   As Long = 0
@@ -287,8 +287,8 @@ End Type
 Private Type IP_ADAPTER_INFO
     Next                As Long
     ComboIndex          As Long
-    AdapterName         As String * 260
-    Description         As String * 132
+    AdapterName(0 To 259) As Byte
+    Description(0 To 131) As Byte
     AddressLength       As Long
     Address(0 To 7)     As Byte
     Index               As Long
@@ -392,12 +392,12 @@ Public Property Get LastError() As VBA.ErrObject
 End Property
 
 Public Property Get SockOpt(ByVal OptionName As UcsAsyncSocketOptionNameEnum, Optional ByVal Level As UcsAsyncSocketOptionLevelEnum = ucsSolSocket) As Long
-    Call ws_getsockopt(m_hSocket, Level, OptionName, SockOpt, 4)
+    Call ws_getsockopt(m_hSocket, Level, OptionName, SockOpt, LenB(SockOpt))
     m_lLastError = Err.LastDllError
 End Property
 
 Public Property Let SockOpt(ByVal OptionName As UcsAsyncSocketOptionNameEnum, Optional ByVal Level As UcsAsyncSocketOptionLevelEnum = ucsSolSocket, ByVal Value As Long)
-    Call ws_setsockopt(m_hSocket, Level, OptionName, Value, 4)
+    Call ws_setsockopt(m_hSocket, Level, OptionName, Value, LenB(Value))
     m_lLastError = Err.LastDllError
 End Property
 
@@ -1146,9 +1146,9 @@ Private Sub pvDoResolve(ByVal wParam As Long, ByVal lParam As Long)
     uAddr.sin_family = AF_INET
     uAddr.sin_port = ws_htons(m_uGetHostByName(0).Port)
     '--- set sin_addr to first IP address resolved
-    Call CopyMemory(lPtr, m_uGetHostByName(0).Buffer(12), 4)
-    Call CopyMemory(lPtr, ByVal lPtr, 4)
-    Call CopyMemory(uAddr.sin_addr, ByVal lPtr, 4)
+    Call CopyMemory(lPtr, m_uGetHostByName(0).Buffer(12), LenB(lPtr))
+    Call CopyMemory(lPtr, ByVal lPtr, LenB(lPtr))
+    Call CopyMemory(uAddr.sin_addr, ByVal lPtr, LenB(uAddr.sin_addr))
     Erase m_uGetHostByName
     m_lLastError = 0
     RaiseEvent OnResolve(pvToStringA(ws_inet_ntoa(uAddr.sin_addr)))
@@ -1192,9 +1192,9 @@ Private Function pvToSockAddr( _
                 m_lLastError = WSAEINVAL
                 GoTo QH
             End If
-            Call CopyMemory(lPtr, ByVal UnsignedAdd(lPtr, 12), 4)
-            Call CopyMemory(lPtr, ByVal lPtr, 4)
-            Call CopyMemory(uAddr.sin_addr, ByVal lPtr, 4)
+            Call CopyMemory(lPtr, ByVal UnsignedAdd(lPtr, 12), LenB(lPtr))
+            Call CopyMemory(lPtr, ByVal lPtr, LenB(lPtr))
+            Call CopyMemory(uAddr.sin_addr, ByVal lPtr, LenB(uAddr.sin_addr))
         End If
     End If
     uAddr.sin_port = ws_htons(Port)
@@ -1251,7 +1251,7 @@ Private Sub pvGetAdaptersInfo(vOutput As Variant)
     End If
     lPtr = VarPtr(baBuffer(0))
     Do While lPtr <> 0
-        Call CopyMemory(uInfo, ByVal lPtr, Len(uInfo))
+        Call CopyMemory(uInfo, ByVal lPtr, LenB(uInfo))
         pvGetAddrList VarPtr(uInfo.GatewayList), vGateway
         For lIdx = 0 To UBound(vGateway)
             vGateway(lIdx) = vGateway(lIdx)(0)
@@ -1259,7 +1259,8 @@ Private Sub pvGetAdaptersInfo(vOutput As Variant)
         pvGetAddrList VarPtr(uInfo.IpAddressList), vIpAddress
         For Each vElem In vIpAddress
             ReDim Preserve vOutput(UBound(vOutput) + 1)
-            vOutput(UBound(vOutput)) = Array(vElem(0), vElem(1), vGateway, Replace(uInfo.AdapterName, vbNullChar, vbNullString), Replace(uInfo.Description, vbNullChar, vbNullString), uInfo.Index, uInfo.Type)
+            vOutput(UBound(vOutput)) = Array(vElem(0), vElem(1), vGateway, Replace(StrConv(uInfo.AdapterName, vbUnicode), vbNullChar, vbNullString), _
+                Replace(StrConv(uInfo.Description, vbUnicode), vbNullChar, vbNullString), uInfo.Index, uInfo.Type)
         Next
         lPtr = uInfo.Next
     Loop
@@ -1272,7 +1273,7 @@ Private Sub pvGetAddrList(ByVal lPtr As Long, vOutput As Variant)
     
     vOutput = Array()
     Do While lPtr <> 0
-        Call CopyMemory(uString, ByVal lPtr, Len(uString))
+        Call CopyMemory(uString, ByVal lPtr, LenB(uString))
         sAddr = pvToStringA(VarPtr(uString.IpAddress(0)))
         If sAddr <> "0.0.0.0" Then
             ReDim Preserve vOutput(UBound(vOutput) + 1)
@@ -1301,7 +1302,7 @@ Private Sub pvGetForwardTable(vOutput As Variant)
         m_lLastError = Err.LastDllError
         GoTo QH
     End If
-    Call CopyMemory(lSize, baBuffer(0), 4)
+    Call CopyMemory(lSize, baBuffer(0), LenB(lSize))
     If lSize = 0 Then
         GoTo QH
     End If
@@ -1902,7 +1903,7 @@ Private Function UnsignedAdd(ByVal lUnsignedPtr As Long, ByVal lSignedOffset As 
 End Function
 
 Private Function Peek(ByVal lPtr As Long) As Long
-    Call CopyMemory(Peek, ByVal lPtr, 4)
+    Call CopyMemory(Peek, ByVal lPtr, LenB(Peek))
 End Function
 
 '=========================================================================
@@ -1982,7 +1983,8 @@ Private Property Get ThunkPrivateData(pThunk As IUnknown, Optional ByVal Index A
     
     lPtr = ObjPtr(pThunk)
     If lPtr <> 0 Then
-        Call CopyMemory(ThunkPrivateData, ByVal (lPtr Xor SIGN_BIT) + 8 + Index * 4 Xor SIGN_BIT, 4)
+        lPtr = (lPtr Xor SIGN_BIT) + (2 + Index) * LenB(ThunkPrivateData) Xor SIGN_BIT
+        Call CopyMemory(ThunkPrivateData, ByVal lPtr, LenB(ThunkPrivateData))
     End If
 End Property
 
@@ -1991,7 +1993,8 @@ Private Property Let ThunkPrivateData(pThunk As IUnknown, Optional ByVal Index A
     
     lPtr = ObjPtr(pThunk)
     If lPtr <> 0 Then
-        Call CopyMemory(ByVal (lPtr Xor SIGN_BIT) + 8 + Index * 4 Xor SIGN_BIT, lValue, 4)
+        lPtr = (lPtr Xor SIGN_BIT) + (2 + Index) * LenB(lValue) Xor SIGN_BIT
+        Call CopyMemory(ByVal lPtr, lValue, LenB(lValue))
     End If
 End Property
 

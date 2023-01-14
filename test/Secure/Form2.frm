@@ -297,11 +297,11 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
                 vHeaders = Split(Left$(HttpsRequest, lHeaderLength), vbCrLf)
                 lHeaderLength = lHeaderLength + 4
                 For Each vElem In vHeaders
-                    If Left$(LCase(vElem), Len(HDR_CONTENT_LENGTH)) = HDR_CONTENT_LENGTH Then
+                    If Left$(LCase$(vElem), Len(HDR_CONTENT_LENGTH)) = HDR_CONTENT_LENGTH Then
                         lContentLength = Val(Mid$(vElem, Len(HDR_CONTENT_LENGTH) + 1))
-                    ElseIf Left$(LCase(vElem), Len(HDR_TRANSFER_ENCODING)) = HDR_TRANSFER_ENCODING Then
+                    ElseIf Left$(LCase$(vElem), Len(HDR_TRANSFER_ENCODING)) = HDR_TRANSFER_ENCODING Then
                         sEncoding = LCase$(Trim$(Mid$(vElem, Len(HDR_TRANSFER_ENCODING) + 1)))
-                    ElseIf Left$(LCase(vElem), Len(HDR_CONNECTION)) = HDR_CONNECTION Then
+                    ElseIf Left$(LCase$(vElem), Len(HDR_CONNECTION)) = HDR_CONNECTION Then
                         sConnection = LCase$(Trim$(Mid$(vElem, Len(HDR_CONNECTION) + 1)))
                     End If
                 Next

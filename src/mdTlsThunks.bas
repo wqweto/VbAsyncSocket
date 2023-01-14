@@ -1,7 +1,7 @@
 Attribute VB_Name = "mdTlsThunks"
 '=========================================================================
 '
-' VbAsyncSocket Project (c) 2018-2022 by wqweto@gmail.com
+' VbAsyncSocket Project (c) 2018-2023 by wqweto@gmail.com
 '
 ' Simple and thin WinSock API wrappers for VB6
 '
@@ -52,6 +52,7 @@ Private Const MODULE_NAME As String = "mdTlsThunks"
 '--- for thunks
 Private Const MEM_COMMIT                                As Long = &H1000
 Private Const PAGE_EXECUTE_READWRITE                    As Long = &H40
+Private Const PTR_SIZE                                  As Long = 4
 '--- for CryptAcquireContext
 Private Const PROV_RSA_FULL                             As Long = 1
 Private Const PROV_RSA_AES                              As Long = 24
@@ -289,7 +290,7 @@ Private Const TLS_ALERT_LEVEL_FATAL                     As Long = 2
 Private Const TLS_COMPRESS_NULL                         As Long = 0
 Private Const TLS_SERVER_NAME_TYPE_HOSTNAME             As Long = 0
 Private Const TLS_MAX_PLAINTEXT_RECORD_SIZE             As Long = 16384
-Private Const TLS_MAX_ENCRYPTED_RECORD_SIZE             As Long = (TLS_MAX_PLAINTEXT_RECORD_SIZE + 1 + 255) '-- 1 byte content type + 255 bytes AEAD padding
+Private Const TLS_MAX_ENCRYPTED_RECORD_SIZE             As Long = TLS_MAX_PLAINTEXT_RECORD_SIZE + 1 + 255 '-- 1 byte content type + 255 bytes AEAD padding
 Private Const TLS_HELLO_RANDOM_SIZE                     As Long = 32
 Private Const TLS_LEGACY_SECRET_SIZE                    As Long = 48
 Private Const TLS_LEGACY_SESSIONID_SIZE                 As Long = 32
@@ -4606,7 +4607,7 @@ Private Sub pvTlsSignatureSign(baRetVal() As Byte, cCerts As Collection, cPrivKe
             sApiSource = "CryptCreateHash"
             GoTo QH
         End If
-        If CryptGetHashParam(hHash, HP_HASHSIZE, lSize, 4, 0) = 0 Then
+        If CryptGetHashParam(hHash, HP_HASHSIZE, lSize, LenB(lSize), 0) = 0 Then
             hResult = Err.LastDllError
             sApiSource = "CryptGetHashParam(HP_HASHSIZE)"
             GoTo QH
@@ -5044,7 +5045,7 @@ Private Sub pvBufferWriteLong(uOutput As UcsBuffer, ByVal lValue As Long, Option
         Else
             lPos = .Size
             pvBufferWriteBlob uOutput, 0, Size
-            Call CopyMemory(baTemp(0), lValue, 4)
+            Call CopyMemory(baTemp(0), lValue, LenB(lValue))
             .Data(lPos + 0) = baTemp(Size - 1)
             .Data(lPos + 1) = baTemp(Size - 2)
             If Size >= 3 Then .Data(lPos + 2) = baTemp(Size - 3)
@@ -5062,7 +5063,7 @@ Private Function pvArrayWriteBlob(baBuffer() As Byte, ByVal lPos As Long, ByVal 
     Dim lBufPtr         As Long
     
     '--- peek long at ArrPtr(baBuffer)
-    Call CopyMemory(lBufPtr, ByVal ArrPtr(baBuffer), 4)
+    Call CopyMemory(lBufPtr, ByVal ArrPtr(baBuffer), LenB(lBufPtr))
     If lBufPtr = 0 Then
         pvArrayAllocate baBuffer, Clamp(lPos + lSize, 256), FUNC_NAME & ".baBuffer"
     ElseIf UBound(baBuffer) < lPos + lSize - 1 Then
@@ -5193,7 +5194,7 @@ Private Property Get pvArraySize(baArray() As Byte) As Long
     Dim lPtr            As Long
     
     '--- peek long at ArrPtr(baArray)
-    Call CopyMemory(lPtr, ByVal ArrPtr(baArray), 4)
+    Call CopyMemory(lPtr, ByVal ArrPtr(baArray), LenB(lPtr))
     If lPtr <> 0 Then
         pvArraySize = UBound(baArray) + 1
     End If
@@ -5214,9 +5215,9 @@ End Sub
 Private Sub pvArraySwap(baBuffer() As Byte, lBufferPos As Long, baInput() As Byte, lInputPos As Long)
     Dim lTemp           As Long
     
-    Call CopyMemory(lTemp, ByVal ArrPtr(baBuffer), 4)
-    Call CopyMemory(ByVal ArrPtr(baBuffer), ByVal ArrPtr(baInput), 4)
-    Call CopyMemory(ByVal ArrPtr(baInput), lTemp, 4)
+    Call CopyMemory(lTemp, ByVal ArrPtr(baBuffer), LenB(lTemp))
+    Call CopyMemory(ByVal ArrPtr(baBuffer), ByVal ArrPtr(baInput), LenB(lTemp))
+    Call CopyMemory(ByVal ArrPtr(baInput), lTemp, LenB(lTemp))
     lTemp = lBufferPos
     lBufferPos = lInputPos
     lInputPos = lTemp
@@ -5704,7 +5705,7 @@ Private Function pvAsn1DecodePrivateKey(cCerts As Collection, cPrivKey As Collec
         End With
     ElseIf SearchCollection(cPrivKey, 1, RetVal:=baPrivKey) Then
         If CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, PKCS_PRIVATE_KEY_INFO, baPrivKey(0), UBound(baPrivKey) + 1, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPkiPtr, 0) <> 0 Then
-            Call CopyMemory(uPrivKey, ByVal lPkiPtr, Len(uPrivKey))
+            Call CopyMemory(uPrivKey, ByVal lPkiPtr, LenB(uPrivKey))
             If CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, PKCS_RSA_PRIVATE_KEY, ByVal uPrivKey.PrivateKey.pbData, uPrivKey.PrivateKey.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lKeyPtr, lKeySize) = 0 Then
                 hResult = Err.LastDllError
                 sApiSource = "CryptDecodeObjectEx(PKCS_RSA_PRIVATE_KEY)"
@@ -5718,7 +5719,7 @@ DecodeRsa:
             pvArrayAllocate uRetVal.KeyBlob, lKeySize, FUNC_NAME & ".uRetVal.KeyBlob"
             Call CopyMemory(uRetVal.KeyBlob(0), ByVal lKeyPtr, lKeySize)
             Debug.Assert UBound(uRetVal.KeyBlob) >= 16
-            Call CopyMemory(uRetVal.BitLen, uRetVal.KeyBlob(12), 4)
+            Call CopyMemory(uRetVal.BitLen, uRetVal.KeyBlob(12), LenB(uRetVal.BitLen))
             lSize = (uRetVal.BitLen + 7) \ 8
             lHalfSize = (uRetVal.BitLen + 15) \ 16
             '--- modulus (mod = p * q)
@@ -5747,7 +5748,7 @@ DecodeRsa:
             Call CopyMemory(uRetVal.PrivExp(0), uRetVal.KeyBlob(20 + lSize + 5 * lHalfSize), UBound(uRetVal.PrivExp) + 1)
             pvArrayReverse uRetVal.PrivExp
         ElseIf CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, X509_ECC_PRIVATE_KEY, baPrivKey(0), UBound(baPrivKey) + 1, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lKeyPtr, 0) <> 0 Then
-            Call CopyMemory(uEccKeyInfo, ByVal lKeyPtr, Len(uEccKeyInfo))
+            Call CopyMemory(uEccKeyInfo, ByVal lKeyPtr, LenB(uEccKeyInfo))
             uRetVal.AlgoObjId = pvToStringA(uEccKeyInfo.szCurveOid)
             pvArrayAllocate uRetVal.KeyBlob, uEccKeyInfo.PrivateKey.cbData, FUNC_NAME & ".uRetVal.KeyBlob"
             Call CopyMemory(uRetVal.KeyBlob(0), ByVal uEccKeyInfo.PrivateKey.pbData, uEccKeyInfo.PrivateKey.cbData)
@@ -5806,9 +5807,9 @@ Private Function pvAsn1DecodeCertificate(baCert() As Byte, uRetVal As UcsKeyInfo
         sApiSource = "CertCreateCertificateContext"
         GoTo QH
     End If
-    Call CopyMemory(lPtr, ByVal UnsignedAdd(pCertContext, 12), 4)       '--- dereference pCertContext->pCertInfo
-    lPtr = UnsignedAdd(lPtr, 56)                                        '--- &pCertContext->pCertInfo->SubjectPublicKeyInfo
-    Call CopyMemory(uPublicKeyInfo, ByVal lPtr, Len(uPublicKeyInfo))
+    Call CopyMemory(lPtr, ByVal UnsignedAdd(pCertContext, 12), LenB(lPtr))  '--- dereference pCertContext->pCertInfo
+    lPtr = UnsignedAdd(lPtr, 56)                                            '--- &pCertContext->pCertInfo->SubjectPublicKeyInfo
+    Call CopyMemory(uPublicKeyInfo, ByVal lPtr, LenB(uPublicKeyInfo))
     uRetVal.AlgoObjId = pvToStringA(uPublicKeyInfo.Algorithm.pszObjId)
     pvArrayAllocate uRetVal.KeyBlob, uPublicKeyInfo.PublicKey.cbData, FUNC_NAME & ".uRetVal.KeyBlob"
     Call CopyMemory(uRetVal.KeyBlob(0), ByVal uPublicKeyInfo.PublicKey.pbData, uPublicKeyInfo.PublicKey.cbData)
@@ -5828,7 +5829,7 @@ Private Function pvAsn1DecodeCertificate(baCert() As Byte, uRetVal As UcsKeyInfo
         End If
         '--- retrieve RSA key size (in bits)
         Debug.Assert UBound(baBuffer) >= 16
-        Call CopyMemory(uRetVal.BitLen, baBuffer(12), 4)                                        '--- 12 = sizeof(PUBLICKEYSTRUC) + offset(RSAPUBKEY, bitlen)
+        Call CopyMemory(uRetVal.BitLen, baBuffer(12), LenB(uRetVal.BitLen))                     '--- 12 = sizeof(PUBLICKEYSTRUC) + offset(RSAPUBKEY, bitlen)
         lSize = (uRetVal.BitLen + 7) \ 8
         '--- retrieve RSA public exponent
         pvArrayAllocate uRetVal.PubExp, 4, FUNC_NAME & ".uRetVal.PubExp"
@@ -6012,7 +6013,7 @@ Private Function pvCryptoInit() As Boolean
             pvGetGlobData .Glob
             '--- init pfns from thunk addr + offsets stored at beginning of it
             For lIdx = LBound(.Pfn) To UBound(.Pfn)
-                Call CopyMemory(lOffset, ByVal UnsignedAdd(.Thunk, 4 * lIdx), 4)
+                Call CopyMemory(lOffset, ByVal UnsignedAdd(.Thunk, LenB(lOffset) * lIdx), LenB(lOffset))
                 .Pfn(lIdx) = UnsignedAdd(.Thunk, lOffset)
             Next
             '--- init pfns trampolines
@@ -6731,7 +6732,8 @@ Private Function pvPatchTrampoline(ByVal Pfn As Long) As Boolean
  
     Debug.Assert pvSetTrue(bInIDE)
     If bInIDE Then
-        Call CopyMemory(Pfn, ByVal UnsignedAdd(Pfn, &H16), 4)
+        '--- note: IDE is not large-address aware
+        Call CopyMemory(Pfn, ByVal Pfn + &H16, LenB(Pfn))
     Else
         Call VirtualProtect(Pfn, 8, PAGE_EXECUTE_READWRITE, 0)
     End If
@@ -6826,7 +6828,7 @@ Private Function pvPatchMethodTrampoline(ByVal Pfn As Long, ByVal lMethodIdx As 
     Debug.Assert pvSetTrue(bInIDE)
     If bInIDE Then
         '--- note: IDE is not large-address aware
-        Call CopyMemory(Pfn, ByVal Pfn + &H16, 4)
+        Call CopyMemory(Pfn, ByVal Pfn + &H16, LenB(Pfn))
     Else
         Call VirtualProtect(Pfn, 12, PAGE_EXECUTE_READWRITE, 0)
     End If
@@ -6834,7 +6836,7 @@ Private Function pvPatchMethodTrampoline(ByVal Pfn As Long, ByVal lMethodIdx As 
     ' 4: 8B 00                mov         eax,dword ptr [eax]
     ' 6: FF A0 00 00 00 00    jmp         dword ptr [eax+lMethodIdx*4]
     Call CopyMemory(ByVal Pfn, -684575231150992.4725@, 8)
-    Call CopyMemory(ByVal (Pfn Xor &H80000000) + 8 Xor &H80000000, lMethodIdx * 4, 4)
+    Call CopyMemory(ByVal (Pfn Xor &H80000000) + 8 Xor &H80000000, lMethodIdx * PTR_SIZE, LenB(lMethodIdx))
     '--- success
     pvPatchMethodTrampoline = True
 End Function
@@ -6882,7 +6884,7 @@ Private Property Get OsVersion() As UcsOsVersionEnum
     Dim aVer(0 To 69)   As Long
     
     If lVersion = 0 Then
-        aVer(0) = 4 * UBound(aVer)              '--- [0] = dwOSVersionInfoSize
+        aVer(0) = LenB(aVer(0)) * UBound(aVer)  '--- [0] = dwOSVersionInfoSize
         If GetVersionEx(aVer(0)) <> 0 Then
             lVersion = aVer(1) * 100 + aVer(2)  '--- [1] = dwMajorVersion, [2] = dwMinorVersion
         End If
@@ -7167,7 +7169,7 @@ Public Sub TestCryptoEcdh(oJson As Object)
                 If InStr(sFlags, "InvalidAsn") = 0 Then
                     If UBound(baPublic) >= 0 Then
                         If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_PUBLIC_KEY_INFO, baPublic(0), UBound(baPublic) + 1, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, lSize) <> 0 Then
-                            Call CopyMemory(uPublicKeyInfo, ByVal lPtr, Len(uPublicKeyInfo))
+                            Call CopyMemory(uPublicKeyInfo, ByVal lPtr, LenB(uPublicKeyInfo))
                             Debug.Assert pvToStringA(uPublicKeyInfo.Algorithm.pszObjId) = szOID_ECC_PUBLIC_KEY
                             If uPublicKeyInfo.PublicKey.cbData = 0 Then
                                 baPublic = vbNullString

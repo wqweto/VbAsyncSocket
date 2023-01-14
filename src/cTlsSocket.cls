@@ -13,7 +13,7 @@ Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
 '
-' VbAsyncSocket Project (c) 2018-2022 by wqweto@gmail.com
+' VbAsyncSocket Project (c) 2018-2023 by wqweto@gmail.com
 '
 ' Simple and thin WinSock API wrappers for VB6
 '
@@ -1112,8 +1112,8 @@ Public Function GetPeerName(PeerAddress As String, PeerPort As Long) As Boolean
     GetPeerName = m_oSocket.GetPeerName(PeerAddress, PeerPort)
 End Function
 
-Public Function GetLocalHost(HostName As String, HostAddress As String) As Boolean
-    GetLocalHost = m_oSocket.GetLocalHost(HostName, HostAddress)
+Public Function GetLocalHost(HostName As String, HostAddress As String, Optional AdaptersInfo As Variant, Optional ForwardTable As Variant) As Boolean
+    GetLocalHost = m_oSocket.GetLocalHost(HostName, HostAddress, AdaptersInfo, ForwardTable)
 End Function
 
 Public Function Attach( _
@@ -1583,6 +1583,10 @@ Private Function pvSetLastError( _
     Else
         m_sLastError = GetErrorDescription(ErrNumber)
     End If
+    '--- ToDo: use TlsSetLastError
+    m_uCtx.LastErrNumber = m_lLastErrNumber
+    m_uCtx.LastErrSource = m_sLastErrSource
+    m_uCtx.LastError = m_sLastError
 End Function
 
 Private Sub pvFireOnResolve(IpAddress As String)
@@ -2185,7 +2189,7 @@ Private Function pvPkiPemDecryptPrivateKey(baRetVal() As Byte, baEncrKey() As By
         sApiSource = "BCryptSetProperty(ChainingMode)"
         GoTo QH
     End If
-    hResult = BCryptGetProperty(hAlg, StrPtr("ObjectLength"), lSize, 4, 0, 0)
+    hResult = BCryptGetProperty(hAlg, StrPtr("ObjectLength"), lSize, LenB(lSize), 0, 0)
     If hResult < 0 Or lSize = 0 Then
         sApiSource = "BCryptGetProperty(ObjectLength)"
         GoTo QH
@@ -2661,22 +2665,22 @@ Private Function pvPkiCertGetSubjectAltName2(ByVal pCertContext As Long, ByVal l
     Dim vRetVal         As Variant
 
     vRetVal = Array()
-    Call CopyMemory(lPtr, ByVal UnsignedAdd(pCertContext, 12), 4)               '--- dereference pCertContext->pCertInfo->cExtension
-    Call CopyMemory(uInfo, ByVal lPtr, Len(uInfo))
+    Call CopyMemory(lPtr, ByVal UnsignedAdd(pCertContext, 12), LenB(lPtr))          '--- dereference pCertContext->pCertInfo->cExtension
+    Call CopyMemory(uInfo, ByVal lPtr, LenB(uInfo))
     lPtr = CertFindExtension(szOID_SUBJECT_ALT_NAME2, uInfo.cExtension, uInfo.rgExtension)
     If lPtr = 0 Then
         GoTo QH
     End If
-    Call CopyMemory(uExtension, ByVal lPtr, Len(uExtension))
+    Call CopyMemory(uExtension, ByVal lPtr, LenB(uExtension))
     If CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, szOID_SUBJECT_ALT_NAME2, ByVal uExtension.Value.pbData, uExtension.Value.cbData, _
             CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG Or CRYPT_DECODE_SHARE_OID_STRING_FLAG, 0, lAltInfoPtr, 0) = 0 Then
         GoTo QH
     End If
     Debug.Assert lAltInfoPtr <> 0
-    Call CopyMemory(uAltInfo, ByVal lAltInfoPtr, Len(uAltInfo))
+    Call CopyMemory(uAltInfo, ByVal lAltInfoPtr, LenB(uAltInfo))
     For lIdx = 0 To uAltInfo.cAltEntry - 1
-        lPtr = UnsignedAdd(uAltInfo.rgAltEntry, lIdx * Len(uEntry))             '--- dereference lAltInfoPtr->rgAltEntry[lidx].dwAltNameChoice
-        Call CopyMemory(uEntry, ByVal lPtr, Len(uEntry))
+        lPtr = UnsignedAdd(uAltInfo.rgAltEntry, lIdx * LenB(uEntry))                '--- dereference lAltInfoPtr->rgAltEntry[lidx].dwAltNameChoice
+        Call CopyMemory(uEntry, ByVal lPtr, LenB(uEntry))
         If uEntry.dwAltNameChoice = lNameForm Then
             ReDim Preserve vRetVal(0 To UBound(vRetVal) + 1) As Variant
             vRetVal(UBound(vRetVal)) = pvToStringW(uEntry.pwszDNSName)
@@ -2710,11 +2714,11 @@ Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hRootStor
     '--- build custom chain engine that trusts the additional root CA certificates if provided
     If hRootStore <> 0 Then
         If OsVersion <= ucsOsvWin7 Then
-            uEngineConfig.cbSize = Len(uEngineConfig) - 12
+            uEngineConfig.cbSize = LenB(uEngineConfig) - 12
             uEngineConfig.cAdditionalStore = 1
             uEngineConfig.rghAdditionalStore = VarPtr(hRootStore)
         Else
-            uEngineConfig.cbSize = Len(uEngineConfig)
+            uEngineConfig.cbSize = LenB(uEngineConfig)
             uEngineConfig.hExclusiveRoot = hRootStore
         End If
         uEngineConfig.dwFlags = CERT_CHAIN_CACHE_END_CERT
@@ -2726,7 +2730,7 @@ Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hRootStor
     End If
     '--- for the matched server certificate try to build a chain of certificates from the ones in the in-memory certificate store
     '---    and check this chain for revokation, expiry or missing link to a trust anchor
-    uChainParams.cbSize = Len(uChainParams)
+    uChainParams.cbSize = LenB(uChainParams)
     dwFlags = IIf((m_eLocalFeatures And ucsTlsIgnoreServerCertificateRevocation) <> 0, 0, CERT_CHAIN_REVOCATION_CHECK_CHAIN)
     If CertGetCertificateChain(hChainEngine, pCertContext, 0, 0, uChainParams, dwFlags, 0, pChainContext) = 0 Then
         hResult = Err.LastDllError
@@ -2734,16 +2738,17 @@ Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hRootStor
         GoTo QH
     End If
     Debug.Assert pChainContext <> 0
-    Call CopyMemory(uChain, ByVal pChainContext, Len(uChain))
+    Call CopyMemory(uChain, ByVal pChainContext, LenB(uChain))
     For lIdx = 0 To uChain.cElems - 1
-        Call CopyMemory(lPtr, ByVal UnsignedAdd(uChain.rgElem, lIdx * 4), 4)    '--- dereference pChainContext->rgpChain[lidx]->TrustStatus.dwErrorStatus
+        '--- dereference pChainContext->rgpChain[lidx]->TrustStatus.dwErrorStatus
+        Call CopyMemory(lPtr, ByVal UnsignedAdd(uChain.rgElem, lIdx * LenB(lPtr)), LenB(lPtr))
         Debug.Assert lPtr <> 0
-        Call CopyMemory(uChainSmall, ByVal lPtr, Len(uChainSmall))
+        Call CopyMemory(uChainSmall, ByVal lPtr, LenB(uChainSmall))
         dwErrorStatus = uChainSmall.TrustStatus.dwErrorStatus And Not CERT_TRUST_IS_NOT_TIME_NESTED
         If hRootStore <> 0 And uChainSmall.cElems > 0 Then
             '--- check if the last certificate in the chain is from our custom hRootStore and remove untrusted flags from status
-            Call CopyMemory(lPtr, ByVal UnsignedAdd(uChainSmall.rgElem, (uChainSmall.cElems - 1) * 4), 4)
-            Call CopyMemory(uChainElem, ByVal lPtr, Len(uChainElem))
+            Call CopyMemory(lPtr, ByVal UnsignedAdd(uChainSmall.rgElem, (uChainSmall.cElems - 1) * LenB(lPtr)), LenB(lPtr))
+            Call CopyMemory(uChainElem, ByVal lPtr, LenB(uChainElem))
             pExistContext = CertFindCertificateInStore(hRootStore, X509_ASN_ENCODING, 0, CERT_FIND_EXISTING, ByVal uChainElem.pCertContext, 0)
             If pExistContext <> 0 Then
                 Call CertFreeCertificateContext(pExistContext)
@@ -2849,20 +2854,20 @@ Private Function pvPkiAppendCertChain(ByVal pCertContext As Long, ByVal hCertSto
     Dim vErr            As Variant
 
     On Error GoTo EH
-    uChainParams.cbSize = Len(uChainParams)
+    uChainParams.cbSize = LenB(uChainParams)
     If CertGetCertificateChain(0, pCertContext, 0, hCertStore, uChainParams, 0, 0, pChainContext) = 0 Then
         hResult = Err.LastDllError
         sApiSource = "CertGetCertificateChain"
         GoTo QH
     End If
     Debug.Assert pChainContext <> 0
-    Call CopyMemory(uChain, ByVal pChainContext, Len(uChain))                   '--- dereference pChainContext->rgpChain[0]
-    Call CopyMemory(lPtr, ByVal uChain.rgElem, 4)
+    Call CopyMemory(uChain, ByVal pChainContext, LenB(uChain))                   '--- dereference pChainContext->rgpChain[0]
+    Call CopyMemory(lPtr, ByVal uChain.rgElem, LenB(lPtr))
     Debug.Assert lPtr <> 0
-    Call CopyMemory(uChain, ByVal lPtr, Len(uChain))
+    Call CopyMemory(uChain, ByVal lPtr, LenB(uChain))
     For lIdx = 0 To IIf(uChain.cElems = 1, 0, uChain.cElems - 2)
-        Call CopyMemory(lPtr, ByVal UnsignedAdd(uChain.rgElem, lIdx * 4), 4)
-        Call CopyMemory(uChainElem, ByVal lPtr, Len(uChainElem))
+        Call CopyMemory(lPtr, ByVal UnsignedAdd(uChain.rgElem, lIdx * LenB(lPtr)), LenB(lPtr))
+        Call CopyMemory(uChainElem, ByVal lPtr, LenB(uChainElem))
         If pvPkiAppendCertContext(uChainElem.pCertContext, cCerts, cPrivKey) Then
             '--- success
             pvPkiAppendCertChain = True
@@ -2892,7 +2897,7 @@ Private Function pvPkiAppendCertContext(ByVal pCertContext As Long, cCerts As Co
     Dim baBuffer()      As Byte
     
     Debug.Assert pCertContext <> 0
-    Call CopyMemory(uCertContext, ByVal pCertContext, Len(uCertContext))
+    Call CopyMemory(uCertContext, ByVal pCertContext, LenB(uCertContext))
     If uCertContext.cbCertEncoded > 0 Then
         pvArrayAllocate baBuffer, uCertContext.cbCertEncoded, FUNC_NAME & ".baBuffer"
         Debug.Assert uCertContext.pbCertEncoded <> 0
@@ -2948,7 +2953,7 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
         If hNKey = 0 Then
             Debug.Assert (dwFlags And CRYPT_ACQUIRE_CACHE_FLAG) = 0
             cPrivKey.Add pvNCryptGetStringProperty(hProv, "Name")
-            hResult = NCryptGetProperty(hProv, StrPtr("Provider Handle"), hNProv, 4, 0, 0)
+            hResult = NCryptGetProperty(hProv, StrPtr("Provider Handle"), hNProv, LenB(hNProv), 0, 0)
             Debug.Assert Not hResult < 0
             cPrivKey.Add pvNCryptGetStringProperty(hNProv, "Name")
         Else
@@ -2963,8 +2968,8 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
                 sApiSource = "NCryptExportKey(PRIVATEBLOB)#2"
                 GoTo QH
             End If
-            Debug.Assert UBound(baBuffer) + 1 >= 4
-            Call CopyMemory(lMagic, baBuffer(0), 4)
+            Debug.Assert UBound(baBuffer) + 1 >= LenB(lMagic)
+            Call CopyMemory(lMagic, baBuffer(0), LenB(lMagic))
             Select Case lMagic
             Case BCRYPT_RSAPRIVATE_MAGIC
                 hResult = NCryptExportKey(hNKey, 0, StrPtr("RSAFULLPRIVATEBLOB"), ByVal 0, ByVal 0, 0, lSize, 0)
@@ -2983,7 +2988,7 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
                 End If
             Case BCRYPT_ECDH_PRIVATE_P256_MAGIC, BCRYPT_ECDH_PRIVATE_P384_MAGIC, BCRYPT_ECDH_PRIVATE_P521_MAGIC
                 Debug.Assert UBound(baBuffer) + 1 >= 8
-                Call CopyMemory(lSize, baBuffer(4), 4)
+                Call CopyMemory(lSize, baBuffer(4), LenB(lSize))
                 Debug.Assert UBound(baBuffer) + 1 >= 8 + 3 * lSize
                 Call CopyMemory(baBuffer(0), baBuffer(8 + 2 * lSize), lSize)
                 pvArrayReallocate baBuffer, lSize, FUNC_NAME & ".baBuffer"
@@ -3015,7 +3020,7 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
             Debug.Assert UBound(baBuffer) + 1 >= LenB(uProvInfo)
             Call CopyMemory(uProvInfo, baBuffer(0), LenB(uProvInfo))
         End If
-        If CertGetCertificateContextProperty(pCertContext, CERT_KEY_PROV_HANDLE_PROP_ID, hProvGetUserKey, 4) = 0 Then
+        If CertGetCertificateContextProperty(pCertContext, CERT_KEY_PROV_HANDLE_PROP_ID, hProvGetUserKey, LenB(hProvGetUserKey)) = 0 Then
             hProvGetUserKey = hProv
             lKeySpec = uProvInfo.dwKeySpec
         End If
@@ -3037,7 +3042,7 @@ ExportFailed:
                 GoTo ExportFailed
             End If
             Debug.Assert UBound(baBuffer) + 1 >= 12
-            Call CopyMemory(lMagic, baBuffer(8), 4)
+            Call CopyMemory(lMagic, baBuffer(8), LenB(lMagic))
             Select Case lMagic
             Case BCRYPT_RSAPRIVATE_MAGIC
                 If Not pvPkiExportRsaPrivateKey(baPrivKey, baBuffer, PKCS_RSA_PRIVATE_KEY) Then
@@ -3247,7 +3252,7 @@ Private Function pvPkiCloneKeyWithExportPolicy(ByVal hKey As Long, ByVal lPolicy
         GoTo QH
     End If
     '--- retrieve more key props
-    hResult = NCryptGetProperty(hKey, StrPtr("Provider Handle"), hProv, 4, 0, 0)
+    hResult = NCryptGetProperty(hKey, StrPtr("Provider Handle"), hProv, LenB(hProv), 0, 0)
     If hResult < 0 Then
         sApiSource = "NCryptGetProperty(Provider Handle)"
         GoTo QH
@@ -3286,7 +3291,7 @@ Private Function pvPkiCloneKeyWithExportPolicy(ByVal hKey As Long, ByVal lPolicy
         sApiSource = "NCryptImportKey(PKCS8_PRIVATEKEY)"
         GoTo QH
     End If
-    hResult = NCryptSetProperty(hNewKey, StrPtr("Export Policy"), lPolicy, 4, NCRYPT_PERSIST_FLAG)
+    hResult = NCryptSetProperty(hNewKey, StrPtr("Export Policy"), lPolicy, LenB(lPolicy), NCRYPT_PERSIST_FLAG)
     If hResult < 0 Then
         sApiSource = "NCryptSetProperty(Export Policy)"
         GoTo QH
@@ -3439,7 +3444,7 @@ Private Function pvPkiAsn1Parse(uInput As CRYPT_DATA_BLOB, sFormat As String, cO
     Select Case Left$(sFormat, 1)
     Case "("
         sFormat = Mid$(sFormat, 2)
-        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_SEQUENCE_OF_ANY, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, 4) <> 0 Then
+        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_SEQUENCE_OF_ANY, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, LenB(lPtr)) <> 0 Then
             Call CopyMemory(uBlob, ByVal lPtr, LenB(uBlob))
             If uBlob.cbData > 0 Then
                 ReDim uDers(0 To uBlob.cbData - 1) As CRYPT_DATA_BLOB
@@ -3484,13 +3489,13 @@ Private Function pvPkiAsn1Parse(uInput As CRYPT_DATA_BLOB, sFormat As String, cO
             End Select
         Loop
     Case "o"
-        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_OBJECT_IDENTIFIER, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, 4) = 0 Then
+        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_OBJECT_IDENTIFIER, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, LenB(lPtr)) = 0 Then
             GoTo QH
         End If
-        Call CopyMemory(lIdx, ByVal lPtr, 4)
+        Call CopyMemory(lIdx, ByVal lPtr, LenB(lIdx))
         cOutput.Add pvToStringA(lIdx)
     Case "x"
-        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_OCTET_STRING, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, 4) = 0 Then
+        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_OCTET_STRING, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, LenB(lPtr)) = 0 Then
             GoTo QH
         End If
         Call CopyMemory(uBlob, ByVal lPtr, LenB(uBlob))
@@ -3502,7 +3507,7 @@ Private Function pvPkiAsn1Parse(uInput As CRYPT_DATA_BLOB, sFormat As String, cO
         End If
         cOutput.Add baBuffer
     Case "i"
-        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_INTEGER, ByVal uInput.pbData, uInput.cbData, 0, 0, lIdx, 4) = 0 Then
+        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_INTEGER, ByVal uInput.pbData, uInput.cbData, 0, 0, lIdx, LenB(lIdx)) = 0 Then
             GoTo QH
         End If
         cOutput.Add lIdx
@@ -3575,7 +3580,7 @@ Private Property Get pvArraySize(baArray() As Byte) As Long
     Dim lPtr            As Long
 
     '--- peek long at ArrPtr(baArray)
-    Call CopyMemory(lPtr, ByVal ArrPtr(baArray), 4)
+    Call CopyMemory(lPtr, ByVal ArrPtr(baArray), LenB(lPtr))
     If lPtr <> 0 Then
         pvArraySize = UBound(baArray) + 1
     End If
@@ -3596,7 +3601,7 @@ Private Function pvWriteBuffer(baBuffer() As Byte, ByVal lPos As Long, ByVal lPt
     Dim lBufPtr         As Long
     
     '--- peek long at ArrPtr(baBuffer)
-    Call CopyMemory(lBufPtr, ByVal ArrPtr(baBuffer), 4)
+    Call CopyMemory(lBufPtr, ByVal ArrPtr(baBuffer), LenB(lBufPtr))
     If lBufPtr = 0 Then
         pvArrayAllocate baBuffer, lPos + lSize, FUNC_NAME & ".baBuffer"
     ElseIf UBound(baBuffer) < lPos + lSize - 1 Then
@@ -3655,7 +3660,7 @@ Private Property Get OsVersion() As UcsOsVersionEnum
     Dim aVer(0 To 69)   As Long
     
     If lVersion = 0 Then
-        aVer(0) = 4 * UBound(aVer)              '--- [0] = dwOSVersionInfoSize
+        aVer(0) = LenB(aVer(0)) * UBound(aVer)  '--- [0] = dwOSVersionInfoSize
         If GetVersionEx(aVer(0)) <> 0 Then
             lVersion = aVer(1) * 100 + aVer(2)  '--- [1] = dwMajorVersion, [2] = dwMinorVersion
         End If
