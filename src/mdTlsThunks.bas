@@ -1178,7 +1178,7 @@ Private Sub pvTlsBuildClientHello(uCtx As UcsTlsContext, uOutput As UcsBuffer)
                                 End If
                             pvBufferWriteBlockEnd uOutput
                         pvBufferWriteBlockEnd uOutput
-                        If .HelloRetryRequest Then
+                        If .HelloRetryRequest And SearchCollection(.RemoteExtensions, "#" & TLS_EXTENSION_COOKIE) Then
                             '--- Extension - Cookie
                             pvBufferWriteLong uOutput, TLS_EXTENSION_COOKIE, Size:=2
                             pvBufferWriteBlockStart uOutput, Size:=2
