@@ -13,7 +13,7 @@ Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
 '
-' VbAsyncSocket Project (c) 2018-2022 by wqweto@gmail.com
+' VbAsyncSocket Project (c) 2018-2023 by wqweto@gmail.com
 '
 ' Simple and thin WinSock API wrappers for VB6
 '
@@ -482,7 +482,7 @@ Public Sub Send(Optional ByVal Body As Variant)
                 eCodePage = ucsScpUtf8
                 If Not .Headers.Exists(HDR_CONTENT_TYPE) Then
                     SetRequestHeader HDR_CONTENT_TYPE, DEF_CONTENT_TYPE & "; " & DEF_CHARSET
-                Else
+                ElseIf LCase$(.Headers.Item(HDR_CONTENT_TYPE)) <> "application/json" Then
                     sCharset = pvParseHeaderAttribs(.Headers.Item(HDR_CONTENT_TYPE)).Item("charset")
                     If LenB(sCharset) <> 0 Then
                         eCodePage = pvMapCharset(sCharset)
@@ -1487,22 +1487,25 @@ Private Function pvParseHeaderAttribs(ByVal sHeader As String) As Object
     vSplit = Split(sHeader, ";")
     If UBound(vSplit) > 0 Then
         For Each vElem In vSplit
-            pvParseHeaderAttribs.Item(lIdx) = Trim$(vElem)
-            vElem = Split(Trim$(vElem), "=", Limit:=2)
-            sKey = Trim$(vElem(0))
-            If Left$(sKey, 1) = """" And Right$(sKey, 1) = """" And Len(sKey) > 1 Then
-                sKey = Trim$(Mid$(sKey, 2, Len(sKey) - 2))
-            End If
-            If UBound(vElem) > 0 Then
-                sValue = Trim$(vElem(1))
-                If Left$(sValue, 1) = """" And Right$(sValue, 1) = """" And Len(sValue) > 1 Then
-                    sValue = Trim$(Mid$(sValue, 2, Len(sValue) - 2))
+            vElem = Trim$(vElem)
+            pvParseHeaderAttribs.Item(lIdx) = vElem
+            If LenB(vElem) <> 0 Then
+                vElem = Split(vElem, "=", Limit:=2)
+                sKey = Trim$(vElem(0))
+                If Left$(sKey, 1) = """" And Right$(sKey, 1) = """" And Len(sKey) > 1 Then
+                    sKey = Trim$(Mid$(sKey, 2, Len(sKey) - 2))
                 End If
-            Else
-                sValue = vbNullString
-            End If
-            If Not pvParseHeaderAttribs.Exists(sKey) Then
-                pvParseHeaderAttribs.Item(sKey) = sValue
+                If UBound(vElem) > 0 Then
+                    sValue = Trim$(vElem(1))
+                    If Left$(sValue, 1) = """" And Right$(sValue, 1) = """" And Len(sValue) > 1 Then
+                        sValue = Trim$(Mid$(sValue, 2, Len(sValue) - 2))
+                    End If
+                Else
+                    sValue = vbNullString
+                End If
+                If Not pvParseHeaderAttribs.Exists(sKey) Then
+                    pvParseHeaderAttribs.Item(sKey) = sValue
+                End If
             End If
             lIdx = lIdx + 1
         Next
