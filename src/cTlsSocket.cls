@@ -160,7 +160,6 @@ Private Const NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG        As Long = &H2
 '--- errors
 Private Const WSAENOTCONN                               As Long = 10057
 Private Const ERR_TIMEOUT                               As Long = &H800705B4
-Private Const INVALID_SOCKET                            As Long = -1
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
@@ -552,7 +551,7 @@ Public Property Get IsClosed() As Boolean
     If m_bUseTls Then
         IsClosed = TlsIsClosed(m_uCtx) Or TlsIsShutdown(m_uCtx)
     Else
-        IsClosed = (m_oSocket.SocketHandle = INVALID_SOCKET)
+        IsClosed = m_oSocket.IsClosed
     End If
 End Property
 
@@ -1097,6 +1096,11 @@ Public Function Create( _
             Optional ByVal SocketType As UcsAsyncSocketTypeEnum = ucsSckStream, _
             Optional ByVal EventMask As UcsAsyncSocketEventMaskEnum = ucsSfdAll, _
             Optional SocketAddress As String) As Boolean
+    If m_bUseTls Then
+        If IsClosed And Not m_oSocket.IsClosed Then
+            m_oSocket.Close_
+        End If
+    End If
     Create = m_oSocket.Create(SocketPort, SocketType, EventMask, SocketAddress)
 End Function
 
