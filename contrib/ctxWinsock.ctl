@@ -37,7 +37,7 @@ Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
 '
-' VbAsyncSocket Project (c) 2018-2022 by wqweto@gmail.com
+' VbAsyncSocket Project (c) 2018-2023 by wqweto@gmail.com
 '
 ' Simple and thin WinSock API wrappers for VB6
 '
@@ -330,8 +330,10 @@ End Property
 
 Private Property Let pvState(ByVal eValue As UcsStateConstants)
     m_eState = eValue
-    m_baRecvBuffer = vbNullString
-    m_baSendBuffer = vbNullString
+    If eValue <> sckClosing Then
+        m_baRecvBuffer = vbNullString
+        m_baSendBuffer = vbNullString
+    End If
 End Property
 
 Property Get LocalHostName() As String
@@ -690,10 +692,18 @@ Private Sub m_oSocket_OnResolve(IpAddress As String)
 End Sub
 
 Private Sub m_oSocket_OnReceive()
+    Const FUNC_NAME     As String = "m_oSocket_OnReceive"
+    Dim baBuffer()      As Byte
+    
+    On Error GoTo EH
     If m_eState = 0 Then
         m_oSocket_OnConnect
     End If
     RaiseEvent DataArrival(pvSocket.AvailableBytes)
+    PeekData baBuffer
+    Exit Sub
+EH:
+    PrintError FUNC_NAME
 End Sub
 
 Private Sub m_oSocket_OnSend()
@@ -746,8 +756,7 @@ End Sub
 
 Private Sub UserControl_Resize()
     '--- note: skip error handler not to clear Err object
-    Width = ScaleX(32, vbPixels)
-    Height = ScaleX(32, vbPixels)
+    Size ScaleX(32, vbPixels), ScaleX(32, vbPixels)
     labLogo.Move 0, (ScaleHeight - labLogo.Height) / 2, ScaleWidth
 End Sub
 
