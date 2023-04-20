@@ -658,7 +658,6 @@ Private Sub m_oSocket_OnClose()
         m_oSocket.Close_
         Set m_oSocket = Nothing
     End If
-    pvState = sckClosed
     Exit Sub
 EH:
     PrintError FUNC_NAME
