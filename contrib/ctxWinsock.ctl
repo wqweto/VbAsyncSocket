@@ -468,10 +468,12 @@ Public Sub Listen( _
             Optional Password As String, _
             Optional CertSubject As String, _
             Optional Certificates As Collection, _
-            Optional PrivateKey As Collection)
+            Optional PrivateKey As Collection, _
+            Optional AlpnProtocols As String, _
+            Optional ByVal LocalFeatures As UcsSckLocalFeaturesEnum)
     On Error GoTo EH
     If m_eProtocol = sckTLSProtocol Then
-        If Not pvSocket.InitServerTls(CertFile, Password, CertSubject, Certificates, PrivateKey) Then
+        If Not pvSocket.InitServerTls(CertFile, Password, CertSubject, Certificates, PrivateKey, AlpnProtocols, LocalFeatures) Then
             On Error GoTo 0
             pvSetError LastError:=m_oSocket.LastError, RaiseError:=True
         End If
