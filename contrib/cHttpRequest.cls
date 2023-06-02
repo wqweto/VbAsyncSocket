@@ -881,7 +881,7 @@ Private Function pvRecvHeaders(baData() As Byte, uResponse As UcsResponseType, u
                     End If
                     If pvIsEqual(CStr(vElem(0)), HDR_SET_COOKIE) Then
                         With pvParseHeaderAttribs(vElem(1))
-                            pvSetCookie .Item("domain"), .Item("path"), .Item(0)
+                            SetCookie .Item("domain"), .Item("path"), .Item(0)
                         End With
                     End If
                 Else
@@ -1730,7 +1730,7 @@ Private Function pvToStringAndFree(ByVal lPtr As Long) As Variant
     End If
 End Function
 
-Private Function pvSetCookie(ByVal sDomain As String, ByVal sPath As String, ByVal sValue As String)
+Public Function SetCookie(ByVal sDomain As String, ByVal sPath As String, ByVal sValue As String)
     Dim oCol            As Collection
     
     If Left$(sDomain, 1) = "." Then
