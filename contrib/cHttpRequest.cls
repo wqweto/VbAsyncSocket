@@ -557,10 +557,16 @@ End Sub
 
 Public Function WaitForResponse(Optional ByVal Timeout As Variant) As Boolean
     Const FUNC_NAME     As String = "WaitForResponse"
+    Dim lTimeoutMs      As Long
     
     On Error GoTo EH
     m_vLastError = Empty
-    If Not pvWaitForState(ucsWaitRecvBody, IIf(Not IsMissing(Timeout), Timeout, -1)) Then
+    If Not IsMissing(Timeout) Then
+        lTimeoutMs = IIf(Timeout < 100, Timeout * 1000, Timeout)
+    Else
+        lTimeoutMs = -1
+    End If
+    If Not pvWaitForState(ucsWaitRecvBody, lTimeoutMs) Then
         GoTo QH
     End If
     '--- success
