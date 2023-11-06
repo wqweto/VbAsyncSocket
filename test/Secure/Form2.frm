@@ -144,7 +144,7 @@ Private Sub Form_Load()
     If txtResult.Font.Name = "Arial" Then
         txtResult.Font.Name = "Courier New"
     End If
-    For Each vElem In Split("www.howsmyssl.com/a/check|clienttest.ssllabs.com:8443/ssltest/viewMyClient.html|client.tlsfingerprint.io:8443|tls13.1d.pw|localhost:44330/renegcert|websocket.org|www.mikestoolbox.org|swifttls.org|rsa8192.badssl.com|rsa4096.badssl.com|rsa2048.badssl.com|ecc384.badssl.com|ecc256.badssl.com|dir.bg|host.bg|bgdev.org|cnn.com|gmail.com|google.com|saas.bg|saas.bg:465|www.cloudflare.com|devblogs.microsoft.com|www.brentozar.com|ayende.com/blog|www.nerds2nerds.com|robert.ocallahan.org|distrowatch.com|server.cryptomix.com|www.integralblue.com/testhandshake/|tlshello.agwa.name|client.badssl.com", "|")
+    For Each vElem In Split("www.howsmyssl.com/a/check|tls.peet.ws/api/all|clienttest.ssllabs.com:8443/ssltest/viewMyClient.html|client.tlsfingerprint.io:8443|tls13.1d.pw|localhost:44330/renegcert|websocket.org|www.mikestoolbox.org|swifttls.org|rsa8192.badssl.com|rsa4096.badssl.com|rsa2048.badssl.com|ecc384.badssl.com|ecc256.badssl.com|dir.bg|host.bg|bgdev.org|cnn.com|gmail.com|google.com|saas.bg|saas.bg:465|www.cloudflare.com|devblogs.microsoft.com|www.brentozar.com|ayende.com/blog|www.nerds2nerds.com|robert.ocallahan.org|distrowatch.com|server.cryptomix.com|www.integralblue.com/testhandshake/|tlshello.agwa.name|client.badssl.com", "|")
         cobUrl.AddItem vElem
     Next
     sAddr = GetSetting(App.Title, "Form1", "Url", cobUrl.Text)
@@ -158,10 +158,10 @@ Private Sub Form_Load()
         Set m_oServerSocket = New cTlsSocket
         ChDir App.Path
         If Not m_oServerSocket.InitServerTls(STR_CERTFILE, STR_PASSWORD) Then
-            MsgBox "Error starting TLS server on localhost:10443" & vbCrLf & vbCrLf & "No private key found!", vbExclamation
+            MsgBox "Error starting TLS server on localhost:10443" & vbCrLf & vbCrLf & m_oServerSocket.LastError.Description, vbExclamation
             GoTo QH
         End If
-        If Not m_oServerSocket.Create(SocketPort:=10443, SocketAddress:="localhost") Then
+        If Not m_oServerSocket.Create(SocketPort:=10443, SocketAddress:="0.0.0.0") Then
             GoTo QH
         End If
         If Not m_oServerSocket.Listen() Then

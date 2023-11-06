@@ -91,6 +91,7 @@ Private Const CERT_STORE_CREATE_NEW_FLAG                As Long = &H2000
 Private Const CERT_STORE_ADD_USE_EXISTING               As Long = 2
 '--- for CryptAcquireContext
 Private Const PROV_RSA_FULL                             As Long = 1
+Private Const PROV_RSA_SCHANNEL                         As Long = 12
 Private Const CRYPT_NEWKEYSET                           As Long = &H8
 Private Const CRYPT_DELETEKEYSET                        As Long = &H10
 Private Const AT_KEYEXCHANGE                            As Long = 1
@@ -571,6 +572,7 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
     Dim uCipherInfo     As SecPkgContext_CipherInfo
     Dim baAlpnBuffer()  As Byte
     Dim uAppProtocol    As SecPkgContext_ApplicationProtocol
+    Dim eVersion        As UcsOsVersionEnum
     
     On Error GoTo EH
     With uCtx
@@ -616,19 +618,21 @@ RetryCredentials:
                     .ContextReq = .ContextReq Or ISC_REQ_USE_SUPPLIED_CREDS     ' Schannel must not attempt to supply credentials for the client automatically.
                 End If
             End If
-            If RealOsVersion(BuildNo:=lIdx) = ucsOsvWin10 And lIdx >= 20348 Then   '--- 20348 = Windows Server 2022
-                '--- use new credentials struct for TLS 1.3 support
-                uNewCred.dwVersion = SCH_CREDENTIALS_VERSION
-                uNewCred.cCreds = uCred.cCreds
-                uNewCred.paCred = uCred.paCred
-                uNewCred.dwFlags = uCred.dwFlags Or SCH_USE_STRONG_CRYPTO
-                uNewCred.cTlsParameters = 1
-                uNewCred.pTlsParameters = VarPtr(uNewParams)
-                uNewParams.grbitDisabledProtocols = Not (uCred.grbitEnabledProtocols Or _
-                    IIf((.LocalFeatures And ucsTlsSupportTls13) <> 0, SP_PROT_TLS1_3, 0))
-                hResult = AcquireCredentialsHandle(0, StrPtr(UNISP_NAME), IIf(.IsServer, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND), 0, uNewCred, 0, 0, .hTlsCredentials, 0)
-            Else
-                hResult = -1
+            hResult = -1
+            If (.LocalFeatures And ucsTlsSupportTls13) <> 0 Then
+                eVersion = RealOsVersion(BuildNo:=lIdx)
+                If eVersion > ucsOsvWin10 Or (eVersion = ucsOsvWin10 And lIdx >= 20348) Then   '--- 20348 = Windows Server 2022
+                    '--- use new credentials struct for TLS 1.3 support
+                    uNewCred.dwVersion = SCH_CREDENTIALS_VERSION
+                    uNewCred.cCreds = uCred.cCreds
+                    uNewCred.paCred = uCred.paCred
+                    uNewCred.dwFlags = uCred.dwFlags Or SCH_USE_STRONG_CRYPTO
+                    uNewCred.cTlsParameters = 1
+                    uNewCred.pTlsParameters = VarPtr(uNewParams)
+                    uNewParams.grbitDisabledProtocols = Not (uCred.grbitEnabledProtocols Or _
+                        IIf((.LocalFeatures And ucsTlsSupportTls13) <> 0, SP_PROT_TLS1_3, 0))
+                    hResult = AcquireCredentialsHandle(0, StrPtr(UNISP_NAME), IIf(.IsServer, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND), 0, uNewCred, 0, 0, .hTlsCredentials, 0)
+                End If
             End If
             If hResult < 0 Then
                 hResult = AcquireCredentialsHandle(0, StrPtr(UNISP_NAME), IIf(.IsServer, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND), 0, uCred, 0, 0, .hTlsCredentials, 0)
@@ -1378,7 +1382,7 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
             Select Case pvToStringA(uPublicKeyInfo.Algorithm.pszObjId)
             Case szOID_RSA_RSA
                 uProvInfo.pwszContainerName = StrPtr(sKeyName)
-                uProvInfo.dwProvType = PROV_RSA_FULL
+                uProvInfo.dwProvType = PROV_RSA_SCHANNEL '--- note: PROV_RSA_FULL fails on WinXP
                 uProvInfo.dwKeySpec = AT_KEYEXCHANGE
                 If CryptAcquireContext(hProv, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags) = 0 Then
                     If CryptAcquireContext(hProv, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags Or CRYPT_NEWKEYSET) = 0 Then

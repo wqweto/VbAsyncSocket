@@ -2317,7 +2317,7 @@ Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As 
     End If
     uBlob.cbData = UBound(baPfx) + 1
     uBlob.pbData = VarPtr(baPfx(0))
-    dwFlags = CRYPT_EXPORTABLE Or IIf(OsVersion < ucsOsvXp, 0, PKCS12_NO_PERSIST_KEY)
+    dwFlags = CRYPT_EXPORTABLE Or IIf(OsVersion <= ucsOsvXp, 0, PKCS12_NO_PERSIST_KEY)
     hPfxStore = PFXImportCertStore(uBlob, StrPtr(sPassword), dwFlags)
     If hPfxStore = 0 And Err.LastDllError <> NTE_BAD_ALGID Then
         hPfxStore = PFXImportCertStore(baPfx(0), 0, dwFlags)
