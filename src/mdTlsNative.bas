@@ -91,13 +91,14 @@ Private Const CERT_STORE_CREATE_NEW_FLAG                As Long = &H2000
 Private Const CERT_STORE_ADD_USE_EXISTING               As Long = 2
 '--- for CryptAcquireContext
 Private Const PROV_RSA_FULL                             As Long = 1
-Private Const PROV_RSA_SCHANNEL                         As Long = 12
 Private Const CRYPT_NEWKEYSET                           As Long = &H8
 Private Const CRYPT_DELETEKEYSET                        As Long = &H10
 Private Const AT_KEYEXCHANGE                            As Long = 1
 '--- for CertGetCertificateContextProperty
 Private Const CERT_KEY_PROV_INFO_PROP_ID                As Long = 2
 Private Const CERT_OCSP_RESPONSE_PROP_ID                As Long = 70
+'--- for CryptGetDefaultProviderW
+Private Const CRYPT_USER_DEFAULT                        As Long = 2
 '--- for ALPN
 Private Const SecApplicationProtocolNegotiationExt_ALPN As Long = 2
 Private Const SecApplicationProtocolNegotiationStatus_Success As Long = 1
@@ -154,6 +155,7 @@ Private Declare Function CryptAcquireContext Lib "advapi32" Alias "CryptAcquireC
 Private Declare Function CryptReleaseContext Lib "advapi32" (ByVal hProv As Long, ByVal dwFlags As Long) As Long
 Private Declare Function CryptImportKey Lib "advapi32" (ByVal hProv As Long, pbData As Any, ByVal dwDataLen As Long, ByVal hPubKey As Long, ByVal dwFlags As Long, phKey As Long) As Long
 Private Declare Function CryptDestroyKey Lib "advapi32" (ByVal hKey As Long) As Long
+Private Declare Function CryptGetDefaultProviderW Lib "advapi32" (ByVal dwProvType As Long, ByVal pdwReserved As Long, ByVal dwFlags As Long, pszProvName As Any, pcbProvName As Long) As Long
 Private Declare Function RtlGenRandom Lib "advapi32" Alias "SystemFunction036" (RandomBuffer As Any, ByVal RandomBufferLength As Long) As Long
 '--- ncrypt
 Private Declare Function NCryptOpenStorageProvider Lib "ncrypt" (phProvider As Long, ByVal pszProviderName As Long, ByVal dwFlags As Long) As Long
@@ -1382,8 +1384,17 @@ Private Function pvTlsImportToCertStore(cCerts As Collection, cPrivKey As Collec
             Select Case pvToStringA(uPublicKeyInfo.Algorithm.pszObjId)
             Case szOID_RSA_RSA
                 uProvInfo.pwszContainerName = StrPtr(sKeyName)
-                uProvInfo.dwProvType = PROV_RSA_SCHANNEL '--- note: PROV_RSA_FULL fails on WinXP
+                uProvInfo.dwProvType = PROV_RSA_FULL
                 uProvInfo.dwKeySpec = AT_KEYEXCHANGE
+                '--- note: XP requires pwszProvName populated
+                Call CryptGetDefaultProviderW(uProvInfo.dwProvType, 0, CRYPT_USER_DEFAULT, ByVal 0, lIdx)
+                sProvName = String$(lIdx, 0)
+                If CryptGetDefaultProviderW(uProvInfo.dwProvType, 0, CRYPT_USER_DEFAULT, ByVal StrPtr(sProvName), lIdx) = 0 Then
+                    hResult = Err.LastDllError
+                    sApiSource = "CryptGetDefaultProviderW"
+                    GoTo QH
+                End If
+                uProvInfo.pwszProvName = StrPtr(sProvName)
                 If CryptAcquireContext(hProv, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags) = 0 Then
                     If CryptAcquireContext(hProv, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags Or CRYPT_NEWKEYSET) = 0 Then
                         hResult = Err.LastDllError

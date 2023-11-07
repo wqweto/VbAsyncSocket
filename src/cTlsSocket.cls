@@ -1674,10 +1674,12 @@ Private Sub pvFireOnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsyncSo
     Dim oCallback       As Object
     
     With m_oSocket.LastError
-        '--- ToDo: use TlsSetLastError
-        m_uCtx.LastErrNumber = .Number
-        m_uCtx.LastErrSource = .Source
-        m_uCtx.LastError = .Description
+        If .Number <> 0 Then
+            '--- ToDo: use TlsSetLastError
+            m_uCtx.LastErrNumber = .Number
+            m_uCtx.LastErrSource = .Source
+            m_uCtx.LastError = .Description
+        End If
     End With
     Set oCallback = CallbackWeakRef
     RaiseEvent OnError(ErrorCode, EventMask)
