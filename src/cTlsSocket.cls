@@ -1237,6 +1237,7 @@ Public Function SyncReceiveText( _
     Dim baRecv()        As Byte
     Dim lPos            As Long
     Dim baBuffer()      As Byte
+    Dim bResult         As Boolean
     
     On Error GoTo EH
     If m_bUseTls Then
@@ -1245,6 +1246,7 @@ Public Function SyncReceiveText( _
         End If
         baBuffer = vbNullString
         dblTimer = TimerEx
+        bResult = True
         Do
             If NeedLen = 0 Then
                 If Not ReceiveArray(baBuffer) Then
@@ -1269,9 +1271,10 @@ Public Function SyncReceiveText( _
                     GoTo QH
                 End If
             End If
-            If Not SyncWaitForEvent(Timeout - lElapsed, ucsSfdRead) Then
+            If Not bResult Then
                 GoTo QH
             End If
+            bResult = SyncWaitForEvent(Timeout - lElapsed, ucsSfdRead)
         Loop
     Else
         SyncReceiveText = m_oSocket.SyncReceiveText(NeedLen:=NeedLen, Timeout:=Timeout, CodePage:=CodePage)
@@ -1291,6 +1294,7 @@ Public Function SyncReceiveArray( _
     Dim dblTimer        As Double
     Dim baRecv()        As Byte
     Dim lPos            As Long
+    Dim bResult         As Boolean
     
     On Error GoTo EH
     If m_bUseTls Then
@@ -1299,6 +1303,7 @@ Public Function SyncReceiveArray( _
         End If
         Buffer = vbNullString
         dblTimer = TimerEx
+        bResult = True
         Do
             If NeedLen = 0 Then
                 If Not ReceiveArray(Buffer) Then
@@ -1322,9 +1327,10 @@ Public Function SyncReceiveArray( _
                     GoTo QH
                 End If
             End If
-            If Not SyncWaitForEvent(Timeout - lElapsed, ucsSfdRead) Then
+            If Not bResult Then
                 GoTo QH
             End If
+            bResult = SyncWaitForEvent(Timeout - lElapsed, ucsSfdRead)
         Loop
         '--- success
         SyncReceiveArray = True

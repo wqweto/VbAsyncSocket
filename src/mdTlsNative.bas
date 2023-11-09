@@ -33,7 +33,6 @@ Private Const SCH_CREDENTIALS_VERSION                   As Long = 5
 Private Const SP_PROT_TLS1_0                            As Long = &H40 Or &H80
 Private Const SP_PROT_TLS1_1                            As Long = &H100 Or &H200
 Private Const SP_PROT_TLS1_2                            As Long = &H400 Or &H800
-Private Const SP_PROT_TLS1_3                            As Long = &H1000 Or &H2000
 Private Const SCH_CRED_MANUAL_CRED_VALIDATION           As Long = 8
 Private Const SCH_CRED_NO_DEFAULT_CREDS                 As Long = &H10
 Private Const SCH_CRED_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT As Long = &H400
@@ -553,6 +552,7 @@ End Function
 
 Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize As Long, baOutput() As Byte, lOutputPos As Long) As Boolean
     Const FUNC_NAME     As String = "TlsHandshake"
+    Const ucsTlsSupportAllTo12 As Long = ucsTlsSupportTls10 Or ucsTlsSupportTls11 Or ucsTlsSupportTls12
     Dim uCred           As SCHANNEL_CRED
     Dim uNewCred        As SCH_CREDENTIALS
     Dim uNewParams      As TLS_PARAMETERS
@@ -606,9 +606,11 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
 RetryCredentials:
         If .hTlsCredentials = 0 Then
             uCred.dwVersion = SCHANNEL_CRED_VERSION
-            uCred.grbitEnabledProtocols = IIf((.LocalFeatures And ucsTlsSupportTls10) <> 0, SP_PROT_TLS1_0, 0) Or _
-                IIf((.LocalFeatures And ucsTlsSupportTls11) <> 0, SP_PROT_TLS1_1, 0) Or _
-                IIf((.LocalFeatures And ucsTlsSupportTls12) <> 0, SP_PROT_TLS1_2, 0)
+            If (.LocalFeatures And ucsTlsSupportAllTo12) <> ucsTlsSupportAllTo12 Then
+                uCred.grbitEnabledProtocols = IIf((.LocalFeatures And ucsTlsSupportTls10) <> 0, SP_PROT_TLS1_0, 0) Or _
+                    IIf((.LocalFeatures And ucsTlsSupportTls11) <> 0, SP_PROT_TLS1_1, 0) Or _
+                    IIf((.LocalFeatures And ucsTlsSupportTls12) <> 0, SP_PROT_TLS1_2, 0)
+            End If
             uCred.dwFlags = uCred.dwFlags Or SCH_CRED_MANUAL_CRED_VALIDATION    ' Prevent Schannel from validating the received server certificate chain.
             uCred.dwFlags = uCred.dwFlags Or SCH_CRED_NO_DEFAULT_CREDS          ' Prevent Schannel from attempting to automatically supply a certificate chain for client authentication.
             uCred.dwFlags = uCred.dwFlags Or SCH_CRED_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT ' Force TLS certificate status request extension (commonly known as OCSP stapling) to be sent on Vista or later
@@ -631,8 +633,9 @@ RetryCredentials:
                     uNewCred.dwFlags = uCred.dwFlags Or SCH_USE_STRONG_CRYPTO
                     uNewCred.cTlsParameters = 1
                     uNewCred.pTlsParameters = VarPtr(uNewParams)
-                    uNewParams.grbitDisabledProtocols = Not (uCred.grbitEnabledProtocols Or _
-                        IIf((.LocalFeatures And ucsTlsSupportTls13) <> 0, SP_PROT_TLS1_3, 0))
+                    If uCred.grbitEnabledProtocols <> 0 Then
+                        uNewParams.grbitDisabledProtocols = Not uCred.grbitEnabledProtocols
+                    End If
                     hResult = AcquireCredentialsHandle(0, StrPtr(UNISP_NAME), IIf(.IsServer, SECPKG_CRED_INBOUND, SECPKG_CRED_OUTBOUND), 0, uNewCred, 0, 0, .hTlsCredentials, 0)
                 End If
             End If
@@ -853,7 +856,7 @@ Public Function TlsReceive(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSize
     
     On Error GoTo EH
     With uCtx
-        If .State = ucsTlsStateClosed Then
+        If .State = ucsTlsStateClosed Or .hTlsContext = 0 Then
             pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_CONNECTION_CLOSED
             GoTo QH
         End If
@@ -954,7 +957,7 @@ Public Function TlsSend(uCtx As UcsTlsContext, baPlainText() As Byte, ByVal lSiz
     
     On Error GoTo EH
     With uCtx
-        If .State = ucsTlsStateClosed Then
+        If .State = ucsTlsStateClosed Or .hTlsContext = 0 Then
             pvTlsSetLastError uCtx, vbObjectError, MODULE_NAME & "." & FUNC_NAME, ERR_CONNECTION_CLOSED
             GoTo QH
         End If
@@ -1179,6 +1182,8 @@ End Function
 #If ImplUseDebugLog Then
 Private Function pvTlsGetAlgName(ByVal lAlgId As Long) As String
     Select Case lAlgId
+    Case &H8&
+        pvTlsGetAlgName = "SSL2_CLIENT"
     Case &H20&
         pvTlsGetAlgName = "SSL3_CLIENT"
     Case &H80&
@@ -1189,6 +1194,8 @@ Private Function pvTlsGetAlgName(ByVal lAlgId As Long) As String
         pvTlsGetAlgName = "TLS1_2_CLIENT"
     Case &H2000&
         pvTlsGetAlgName = "TLS1_3_CLIENT"
+    Case &H4&
+        pvTlsGetAlgName = "SSL2_SERVER"
     Case &H10&
         pvTlsGetAlgName = "SSL3_SERVER"
     Case &H40&

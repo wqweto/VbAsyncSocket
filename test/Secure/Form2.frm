@@ -157,7 +157,7 @@ Private Sub Form_Load()
         m_oRootCa.ImportPemRootCaCertStore App.Path & "\ca-bundle.pem"
         Set m_oServerSocket = New cTlsSocket
         ChDir App.Path
-        If Not m_oServerSocket.InitServerTls(STR_CERTFILE, STR_PASSWORD) Then
+        If Not m_oServerSocket.InitServerTls(STR_CERTFILE, STR_PASSWORD, CertSubject:=Environ$("_UCS_CERTSUBJECT")) Then
             MsgBox "Error starting TLS server on localhost:10443" & vbCrLf & vbCrLf & m_oServerSocket.LastError.Description, vbExclamation
             GoTo QH
         End If
@@ -339,6 +339,10 @@ Private Function pvIsKnownBadCertificate(sHost As String) As Boolean
     Const STR_HOSTS     As String = "mikestoolbox.org|localhost|client.tlsfingerprint.io"
     Dim vElem           As Variant
     
+    If Not (sHost Like "*[!0-9.]*") Then
+        pvIsKnownBadCertificate = True
+        Exit Function
+    End If
     For Each vElem In Split(STR_HOSTS, "|")
         If Right$(LCase$(sHost), Len(vElem)) = vElem Then
             pvIsKnownBadCertificate = True
@@ -424,6 +428,10 @@ End Sub
 
 Friend Sub frRemoveHandler(sKey As String)
     RemoveCollection m_cRequestHandlers, sKey
+End Sub
+
+Friend Sub frLogError(sKey As String, oErr As VBA.ErrObject)
+    pvAppendLogText txtResult, "Error: " & oErr.Description & " (" & sKey & ")" & vbCrLf
 End Sub
 
 Private Function pvSetVisible(oCtl As Object, ByVal bValue As Boolean) As Boolean

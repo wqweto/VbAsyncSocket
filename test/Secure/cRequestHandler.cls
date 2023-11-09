@@ -127,6 +127,7 @@ Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsy
             #Else
                 Debug.Print "Error: " & .Description & " &H" & Hex$(.Number) & " [" & MODULE_NAME & "." & FUNC_NAME & ", " & Replace(.Source, vbCrLf, ", ") & "]"
             #End If
+            Parent.frLogError m_sKey, m_oSocket.LastError
         End If
     End With
     Parent.frRemoveHandler m_sKey
