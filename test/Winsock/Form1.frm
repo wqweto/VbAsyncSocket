@@ -63,18 +63,18 @@ Attribute VB_Exposed = False
 Option Explicit
 
 Private Sub Command1_Click()
-    ctxWinsock.Protocol = sckTCPProtocol
+    ctxWinsock.Protocol = UcsProtocolConstants.sckTCPProtocol
     ctxWinsock.Connect "bgdev.org", 80
 End Sub
 
 Private Sub Command3_Click()
-    ctxWinsock.Protocol = sckTLSProtocol
+    ctxWinsock.Protocol = UcsProtocolConstants.sckTLSProtocol
     ctxWinsock.Connect "bgdev.org", 443
 End Sub
 
 Private Sub Command2_Click()
     ctxServer(0).Close_
-    ctxServer(0).Protocol = sckTCPProtocol
+    ctxServer(0).Protocol = UcsProtocolConstants.sckTCPProtocol
     ctxServer(0).Bind 8088, "127.0.0.1"
     ctxServer(0).Listen
     Shell "cmd /c start http://localhost:8088/"
@@ -82,7 +82,7 @@ End Sub
 
 Private Sub Command4_Click()
     ctxServer(0).Close_
-    ctxServer(0).Protocol = sckTLSProtocol
+    ctxServer(0).Protocol = UcsProtocolConstants.sckTLSProtocol
     ctxServer(0).Bind 8088, "127.0.0.1"
     ctxServer(0).Listen ' CertSubject:="68b5220077de8bbeaed8e1c2540fec6c16b418a8"
     Shell "cmd /c start https://localhost:8088/"
