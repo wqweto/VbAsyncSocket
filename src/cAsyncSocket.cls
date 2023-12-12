@@ -203,35 +203,35 @@ Private Declare Function SetWindowLong Lib "user32" Alias "SetWindowLongW" (ByVa
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
 Private Declare Function GetCurrentProcessId Lib "kernel32" () As Long
 Private Declare Function LoadLibrary Lib "kernel32" Alias "LoadLibraryW" (ByVal lpLibFileName As Long) As Long
-Private Declare Function GetAdaptersInfo Lib "iphlpapi" (AdapterInfo As Any, OutBufLen As Long) As Long
+Private Declare Function GetAdaptersInfo Lib "iphlpapi" (lpAdapterInfo As Any, lpSize As Long) As Long
 Private Declare Function GetIpForwardTable Lib "iphlpapi" (pIpForwardTable As Any, pdwSize As Long, ByVal bOrder As Long) As Long
 Private Declare Function WSAStartup Lib "ws2_32" (ByVal wVersionRequired As Long, lpWSAData As Any) As Long
 Private Declare Function WSACleanup Lib "ws2_32" () As Long
-Private Declare Function WSAAsyncGetHostByName Lib "ws2_32" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal strHostName As String, lpBuf As Any, ByVal BufLen As Long) As Long
-Private Declare Function WSAAsyncSelect Lib "ws2_32" (ByVal s As Long, ByVal hWnd As Long, ByVal wMsg As Long, ByVal lEvent As Long) As Long
+Private Declare Function WSAAsyncGetHostByName Lib "ws2_32" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal strHostName As String, lpBuf As Any, ByVal lBufLen As Long) As Long
+Private Declare Function WSAAsyncSelect Lib "ws2_32" (ByVal lSocket As Long, ByVal hWnd As Long, ByVal wMsg As Long, ByVal lEvent As Long) As Long
 Private Declare Function WSACancelAsyncRequest Lib "ws2_32" (ByVal hAsyncTaskHandle As Long) As Long
-Private Declare Function ws_connect Lib "ws2_32" Alias "connect" (ByVal s As Long, ByRef Name As SOCKADDR_IN, ByVal namelen As Long) As Long
-Private Declare Function ws_socket Lib "ws2_32" Alias "socket" (ByVal af As Long, ByVal s_type As Long, ByVal Protocol As Long) As Long
-Private Declare Function ws_bind Lib "ws2_32" Alias "bind" (ByVal s As Long, ByRef Name As SOCKADDR_IN, ByRef namelen As Long) As Long
-Private Declare Function ws_htonl Lib "ws2_32" Alias "htonl" (ByVal hostlong As Long) As Long
-Private Declare Function ws_htons Lib "ws2_32" Alias "htons" (ByVal hostshort As Long) As Integer
-Private Declare Function ws_ntohs Lib "ws2_32" Alias "ntohs" (ByVal netshort As Long) As Integer
-Private Declare Function ws_inet_ntoa Lib "ws2_32" Alias "inet_ntoa" (ByVal inn As Long) As Long
-Private Declare Function ws_recv Lib "ws2_32" Alias "recv" (ByVal s As Long, ByRef buf As Any, ByVal BufLen As Long, ByVal Flags As Long) As Long
-Private Declare Function ws_recvfrom Lib "ws2_32" Alias "recvfrom" (ByVal s As Long, ByRef buf As Any, ByVal BufLen As Long, ByVal Flags As Long, ByRef from As SOCKADDR_IN, ByRef fromlen As Long) As Long
-Private Declare Function ws_send Lib "ws2_32" Alias "send" (ByVal s As Long, ByRef buf As Any, ByVal BufLen As Long, ByVal Flags As Long) As Long
-Private Declare Function ws_sendto Lib "ws2_32" Alias "sendto" (ByVal s As Long, ByRef buf As Any, ByVal BufLen As Long, ByVal Flags As Long, ByRef toaddr As SOCKADDR_IN, ByVal tolen As Long) As Long
-Private Declare Function ws_getpeername Lib "ws2_32" Alias "getpeername" (ByVal s As Long, ByRef Name As SOCKADDR_IN, ByRef namelen As Long) As Long
-Private Declare Function ws_getsockname Lib "ws2_32" Alias "getsockname" (ByVal s As Long, ByRef Name As SOCKADDR_IN, ByRef namelen As Long) As Long
-Private Declare Function ws_shutdown Lib "ws2_32" Alias "shutdown" (ByVal s As Long, ByVal How As Long) As Long
-Private Declare Function ws_listen Lib "ws2_32" Alias "listen" (ByVal s As Long, ByVal backlog As Long) As Long
-Private Declare Function ws_accept Lib "ws2_32" Alias "accept" (ByVal s As Long, Addr As Any, addrlen As Any) As Long
-Private Declare Function ws_ioctlsocket Lib "ws2_32" Alias "ioctlsocket" (ByVal s As Long, ByVal cmd As Long, argp As Long) As Long
-Private Declare Function ws_getsockopt Lib "ws2_32" Alias "getsockopt" (ByVal s As Long, ByVal Level As Long, ByVal optname As Long, optval As Any, optlen As Long) As Long
-Private Declare Function ws_setsockopt Lib "ws2_32" Alias "setsockopt" (ByVal s As Long, ByVal Level As Long, ByVal optname As Long, optval As Any, ByVal optlen As Long) As Long
-Private Declare Function ws_inet_addr Lib "ws2_32" Alias "inet_addr" (ByVal cp As String) As Long
-Private Declare Function ws_gethostbyname Lib "ws2_32" Alias "gethostbyname" (ByVal host_name As String) As Long
-Private Declare Function ws_gethostname Lib "ws2_32" Alias "gethostname" (ByVal host_name As String, ByVal namelen As Long) As Long
+Private Declare Function WSASocket Lib "ws2_32" Alias "WSASocketW" (ByVal lAf As Long, ByVal lType As Long, ByVal lProtocol As Long, ByVal lpProtocolInfo As Long, ByVal lGroup As Long, ByVal dwFlags As Long) As Long
+Private Declare Function ws_connect Lib "ws2_32" Alias "connect" (ByVal lSocket As Long, uName As SOCKADDR_IN, ByVal lNameLen As Long) As Long
+Private Declare Function ws_bind Lib "ws2_32" Alias "bind" (ByVal lSocket As Long, uName As SOCKADDR_IN, ByVal lNameLen As Long) As Long
+Private Declare Function ws_htonl Lib "ws2_32" Alias "htonl" (ByVal lHostLong As Long) As Long
+Private Declare Function ws_htons Lib "ws2_32" Alias "htons" (ByVal lHostShort As Long) As Integer
+Private Declare Function ws_ntohs Lib "ws2_32" Alias "ntohs" (ByVal lNetShort As Long) As Integer
+Private Declare Function ws_inet_ntoa Lib "ws2_32" Alias "inet_ntoa" (ByVal lIn As Long) As Long
+Private Declare Function ws_recv Lib "ws2_32" Alias "recv" (ByVal lSocket As Long, lpBuf As Any, ByVal lBufLen As Long, ByVal dwFlags As Long) As Long
+Private Declare Function ws_recvfrom Lib "ws2_32" Alias "recvfrom" (ByVal lSocket As Long, lpBuf As Any, ByVal lBufLen As Long, ByVal dwFlags As Long, uFrom As SOCKADDR_IN, lpFromLen As Long) As Long
+Private Declare Function ws_send Lib "ws2_32" Alias "send" (ByVal lSocket As Long, lpBuf As Any, ByVal lBufLen As Long, ByVal dwFlags As Long) As Long
+Private Declare Function ws_sendto Lib "ws2_32" Alias "sendto" (ByVal lSocket As Long, lpBuf As Any, ByVal lBufLen As Long, ByVal dwFlags As Long, uTo As SOCKADDR_IN, ByVal lToLen As Long) As Long
+Private Declare Function ws_getpeername Lib "ws2_32" Alias "getpeername" (ByVal lSocket As Long, uName As SOCKADDR_IN, lpNameLen As Long) As Long
+Private Declare Function ws_getsockname Lib "ws2_32" Alias "getsockname" (ByVal lSocket As Long, uName As SOCKADDR_IN, lpNameLen As Long) As Long
+Private Declare Function ws_shutdown Lib "ws2_32" Alias "shutdown" (ByVal lSocket As Long, ByVal lHow As Long) As Long
+Private Declare Function ws_listen Lib "ws2_32" Alias "listen" (ByVal lSocket As Long, ByVal lBackLog As Long) As Long
+Private Declare Function ws_accept Lib "ws2_32" Alias "accept" (ByVal lSocket As Long, lpAddr As Any, lpAddrLen As Any) As Long
+Private Declare Function ws_ioctlsocket Lib "ws2_32" Alias "ioctlsocket" (ByVal lSocket As Long, ByVal lCmd As Long, lpArg As Long) As Long
+Private Declare Function ws_getsockopt Lib "ws2_32" Alias "getsockopt" (ByVal lSocket As Long, ByVal lLevel As Long, ByVal lOptName As Long, lpOptVal As Any, lpOptLen As Long) As Long
+Private Declare Function ws_setsockopt Lib "ws2_32" Alias "setsockopt" (ByVal lSocket As Long, ByVal lLevel As Long, ByVal lOptName As Long, lpOptVal As Any, ByVal lOptLen As Long) As Long
+Private Declare Function ws_inet_addr Lib "ws2_32" Alias "inet_addr" (ByVal sAddr As String) As Long
+Private Declare Function ws_gethostbyname Lib "ws2_32" Alias "gethostbyname" (ByVal sHostName As String) As Long
+Private Declare Function ws_gethostname Lib "ws2_32" Alias "gethostname" (ByVal sHostName As String, ByVal lNameLen As Long) As Long
 #If ImplSync Then
     Private Declare Function PeekMessage Lib "user32" Alias "PeekMessageW" (lpMsg As APIMSG, ByVal hWnd As Long, ByVal wMsgFilterMin As Long, ByVal wMsgFilterMax As Long, ByVal wRemoveMsg As Long) As Long
     Private Declare Function DispatchMessage Lib "user32" Alias "DispatchMessageW" (lpMsg As APIMSG) As Long
@@ -245,7 +245,7 @@ Private Declare Function ws_gethostname Lib "ws2_32" Alias "gethostname" (ByVal 
     Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
     '--- for Modern Subclassing Thunk (MST)
     Private Declare Function VirtualAlloc Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As Long
-    Private Declare Function CallWindowProc Lib "user32" Alias "CallWindowProcW" (ByVal lpPrevWndFunc As Long, ByVal hWnd As Long, ByVal Msg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
+    Private Declare Function CallWindowProc Lib "user32" Alias "CallWindowProcW" (ByVal lpPrevWndFunc As Long, ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
     Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleW" (ByVal lpModuleName As Long) As Long
     Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
     Private Declare Function GetProcByOrdinal Lib "kernel32" Alias "GetProcAddress" (ByVal hModule As Long, ByVal lpProcOrdinal As Long) As Long
@@ -456,6 +456,7 @@ Public Function Create( _
             Optional SocketAddress As String, _
             Optional ByVal SocketProtocol As UcsAsyncSocketProtocolEnum) As Boolean
     Const FUNC_NAME     As String = "Create"
+    Const WSA_FLAG_NO_HANDLE_INHERIT As Long = &H80
     
     On Error GoTo EH
     If m_hSocket <> INVALID_SOCKET Then
@@ -466,7 +467,7 @@ Public Function Create( _
         m_lLastError = WSANOTINITIALISED
         GoTo QH
     End If
-    m_hSocket = ws_socket(AF_INET, SocketType, SocketProtocol)
+    m_hSocket = WSASocket(AF_INET, SocketType, SocketProtocol, 0, 0, WSA_FLAG_NO_HANDLE_INHERIT)
     If m_hSocket = INVALID_SOCKET Then
         m_lLastError = Err.LastDllError
         GoTo QH
