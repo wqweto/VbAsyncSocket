@@ -579,6 +579,10 @@ Public Property Get HasPendingEvent() As Boolean
     HasPendingEvent = m_oSocket.HasPendingEvent
 End Property
 
+Public Property Get UseTls() As Boolean
+    UseTls = m_bUseTls
+End Property
+
 Public Property Get IsServer() As Boolean
     IsServer = m_bIsServer
 End Property

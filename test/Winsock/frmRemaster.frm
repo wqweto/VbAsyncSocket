@@ -58,19 +58,19 @@ Attribute m_cConnPool.VB_VarHelpID = -1
 
 Private Sub Command1_Click()
     Set m_oClient = New cTlsRemaster
-    m_oClient.Protocol = UcsProtocolConstants.sckTCPProtocol
+    m_oClient.Protocol = RemasterProtocolConstants.sckTCPProtocol
     m_oClient.Connect "bgdev.org", 80
 End Sub
 
 Private Sub Command3_Click()
     Set m_oClient = New cTlsRemaster
-    m_oClient.Protocol = UcsProtocolConstants.sckTLSProtocol
+    m_oClient.Protocol = RemasterProtocolConstants.sckTLSProtocol
     m_oClient.Connect "bgdev.org", 443
 End Sub
 
 Private Sub Command2_Click()
     Set m_oServer = New cTlsRemaster
-    m_oServer.Protocol = UcsProtocolConstants.sckTCPProtocol
+    m_oServer.Protocol = RemasterProtocolConstants.sckTCPProtocol
     m_oServer.Bind 8088, "127.0.0.1"
     m_oServer.Listen
     Shell "cmd /c start http://localhost:8088/"
@@ -78,7 +78,7 @@ End Sub
 
 Private Sub Command4_Click()
     Set m_oServer = New cTlsRemaster
-    m_oServer.Protocol = UcsProtocolConstants.sckTLSProtocol
+    m_oServer.Protocol = RemasterProtocolConstants.sckTLSProtocol
     m_oServer.Bind 8088, "127.0.0.1"
     m_oServer.Listen ' CertSubject:="68b5220077de8bbeaed8e1c2540fec6c16b418a8"
     Shell "cmd /c start https://localhost:8088/"
@@ -106,16 +106,16 @@ Private Sub m_oClient_DataArrival(ByVal bytesTotal As Long)
 End Sub
 
 Private Sub m_oServer_ConnectionRequest(ByVal requestID As Long)
-    Debug.Print "m_oServer_ConnectionRequest, requestID=" & requestID & ", RemoteHostIP=" & m_oServer.RemoteHostIP & ", RemotePort=" & m_oServer.RemotePort, Timer
     Dim oCallback           As cClientCallback
     
+    Debug.Print "m_oServer_ConnectionRequest, requestID=" & requestID & ", RemoteHostIP=" & m_oServer.RemoteHostIP & ", RemotePort=" & m_oServer.RemotePort, Timer
     Set oCallback = New cClientCallback
     m_cConnPool.Add oCallback
     oCallback.Index = m_cConnPool.Count
     Set oCallback.Parent = Me
     Set oCallback.Socket = New cTlsRemaster
-    oCallback.Socket.Protocol = m_oServer.Protocol
     oCallback.Socket.Accept requestID
+    Debug.Print "oCallback.Socket.Protocol=" & oCallback.Socket.Protocol
 End Sub
 
 Public Sub OnDataArrival(Index As Long, ByVal bytesTotal As Long)

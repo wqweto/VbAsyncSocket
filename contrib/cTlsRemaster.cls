@@ -45,7 +45,7 @@ Public Event CloseSck()
 Public Event Connect()
 Public Event ConnectionRequest(ByVal requestID As Long)
 Public Event DataArrival(ByVal bytesTotal As Long)
-Public Event Error(ByVal Number As Integer, Description As String, ByVal sCode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
+Public Event Error(ByVal Number As Integer, Description As String, ByVal Scode As Long, ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
 Public Event SendComplete()
 Public Event SendProgress(ByVal bytesSent As Long, ByVal bytesRemaining As Long)
 
@@ -229,19 +229,28 @@ Public Sub Accept(requestID As Long)
     If Not g_oRequestSocket Is Nothing Then
         If g_oRequestSocket.SocketHandle = requestID Then
             Set m_oSocket = g_oRequestSocket
+            If m_oSocket.UseTls Then
+                m_eProtocol = sckTLSProtocol
+            Else
+                m_eProtocol = m_oSocket.SockOpt(ucsSsoType)
+            End If
         End If
     End If
     If m_oSocket Is Nothing Then
         If DuplicateHandle(GetCurrentProcess(), requestID, GetCurrentProcess(), hDuplicate, 0, 0, DUPLICATE_SAME_ACCESS) = 0 Then
             On Error GoTo 0
             pvSetError LastDllError:=Err.LastDllError, RaiseError:=True
+            GoTo QH
         End If
         Set m_oSocket = New cTlsSocket
         If Not m_oSocket.Attach(hDuplicate) Then
             On Error GoTo 0
             pvSetError LastError:=m_oSocket.LastError, RaiseError:=True
+            GoTo QH
         End If
+        m_eProtocol = m_oSocket.SockOpt(ucsSsoType)
     End If
+QH:
     Exit Sub
 EH:
     pvSetError LastError:=Err, RaiseError:=True
@@ -256,8 +265,10 @@ Public Sub Bind(Optional LocalPort As Variant, Optional LocalIP As Variant)
     If Not pvSocket.Bind(LocalIP & vbNullString, m_lLocalPort) Then
         On Error GoTo 0
         pvSetError LastError:=m_oSocket.LastError, RaiseError:=True
+        GoTo QH
     End If
     pvState = sckOpen
+QH:
     Exit Sub
 EH:
     pvSetError LastError:=Err, RaiseError:=True
@@ -292,8 +303,10 @@ Public Sub Connect(Optional RemoteHost As Variant, Optional RemotePort As Varian
     If Not pvSocket.Connect(m_sRemoteHost, m_lRemotePort, UseTls:=(m_eProtocol = sckTLSProtocol), LocalFeatures:=LocalFeatures) Then
         On Error GoTo 0
         pvSetError LastError:=m_oSocket.LastError, RaiseError:=True
+        GoTo QH
     End If
     pvState = sckConnected
+QH:
     Exit Sub
 EH:
     pvSetError LastError:=Err, RaiseError:=True
@@ -365,13 +378,16 @@ Public Sub Listen( _
         If Not pvSocket.InitServerTls(CertFile, Password, CertSubject, Certificates, PrivateKey, AlpnProtocols, LocalFeatures) Then
             On Error GoTo 0
             pvSetError LastError:=m_oSocket.LastError, RaiseError:=True
+            GoTo QH
         End If
     End If
     If Not pvSocket.Listen() Then
         On Error GoTo 0
         pvSetError LastError:=m_oSocket.LastError, RaiseError:=True
+        GoTo QH
     End If
     pvState = sckListening
+QH:
     Exit Sub
 EH:
     pvSetError LastError:=Err, RaiseError:=True

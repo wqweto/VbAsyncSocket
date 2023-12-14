@@ -116,8 +116,8 @@ End Sub
 Private Sub ctxServer_ConnectionRequest(Index As Integer, ByVal requestID As Long)
     Debug.Print "ctxServer(" & Index & ")_ConnectionRequest, requestID=" & requestID & ", RemoteHostIP=" & ctxServer(Index).RemoteHostIP & ", RemotePort=" & ctxServer(Index).RemotePort, Timer
     Load ctxServer(ctxServer.UBound + 1)
-    ctxServer(ctxServer.UBound).Protocol = ctxServer(Index).Protocol
     ctxServer(ctxServer.UBound).Accept requestID
+    Debug.Print "ctxServer(" & ctxServer.UBound & ").Protocol=" & ctxServer(ctxServer.UBound).Protocol
 End Sub
 
 Private Sub ctxServer_DataArrival(Index As Integer, ByVal bytesTotal As Long)
