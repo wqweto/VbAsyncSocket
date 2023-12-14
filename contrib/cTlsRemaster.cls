@@ -21,6 +21,7 @@ Private Const MODULE_NAME As String = "cTlsRemaster"
 Public Enum RemasterProtocolConstants
     sckTCPProtocol = 0
     sckUDPProtocol = 1
+    sckTLSProtocol = 2
 End Enum
 
 Public Enum RemasterSockState
@@ -119,7 +120,6 @@ End Property
 Public Property Let LocalPort(ByVal lValue As Long)
     If m_lLocalPort <> lValue Then
         CloseSck
-        pvState = sckClosed
         m_lLocalPort = lValue
     End If
 End Property
@@ -131,7 +131,6 @@ End Property
 Public Property Let Protocol(ByVal eValue As RemasterProtocolConstants)
     If m_eProtocol <> eValue Then
         CloseSck
-        pvState = sckClosed
         m_eProtocol = eValue
     End If
 End Property
@@ -210,7 +209,7 @@ EH:
     PrintError FUNC_NAME
 End Property
 
-Private Property Let pvState(ByVal eValue As UcsStateConstants)
+Private Property Let pvState(ByVal eValue As RemasterSockState)
     m_eState = eValue
     If eValue <> sckClosing Then
         m_baRecvBuffer = vbNullString
@@ -360,7 +359,7 @@ Public Sub Listen( _
             Optional Certificates As Collection, _
             Optional PrivateKey As Collection, _
             Optional AlpnProtocols As String, _
-            Optional ByVal LocalFeatures As UcsSckLocalFeaturesEnum)
+            Optional ByVal LocalFeatures As Long)
     On Error GoTo EH
     If m_eProtocol = sckTLSProtocol Then
         If Not pvSocket.InitServerTls(CertFile, Password, CertSubject, Certificates, PrivateKey, AlpnProtocols, LocalFeatures) Then
@@ -518,8 +517,8 @@ Private Sub m_oSocket_OnAccept()
     RaiseEvent ConnectionRequest(oTemp.SocketHandle)
     Set m_oRequestSocket = Nothing
     Set g_oRequestSocket = Nothing
-    pvState = sckListening
 QH:
+    pvState = sckListening
     Exit Sub
 EH:
     PrintError FUNC_NAME

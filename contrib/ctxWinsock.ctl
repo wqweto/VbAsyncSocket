@@ -260,7 +260,6 @@ End Property
 Property Let LocalPort(ByVal lValue As Long)
     If m_lLocalPort <> lValue Then
         Close_
-        pvState = sckClosed
         m_lLocalPort = lValue
         PropertyChanged
     End If
@@ -273,7 +272,6 @@ End Property
 Property Let Protocol(ByVal eValue As UcsProtocolConstants)
     If m_eProtocol <> eValue Then
         Close_
-        pvState = sckClosed
         m_eProtocol = eValue
         PropertyChanged
     End If
@@ -681,8 +679,8 @@ Private Sub m_oSocket_OnAccept()
     RaiseEvent ConnectionRequest(oTemp.SocketHandle)
     Set m_oRequestSocket = Nothing
     Set g_oRequestSocket = Nothing
-    pvState = sckListening
 QH:
+    pvState = sckListening
     Exit Sub
 EH:
     PrintError FUNC_NAME
