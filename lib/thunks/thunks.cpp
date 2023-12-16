@@ -289,8 +289,84 @@ typedef struct _RSA_PUBLIC_KEY_XX
     BYTE RsaModulus[ANYSIZE_ARRAY];
 } RSA_PUBLIC_KEY_XX;
 
+#pragma code_seg(push, r1, ".mygf128mul")
+
+static int my_gf128_mul(const cf_gf128 x, const cf_gf128 y)
+{
+	if (x == 0) {
+		int CPUInfo[4];
+		__cpuid(CPUInfo, 1);
+		return (CPUInfo[2] & (1 << 1));
+	}
+	const char shuffle_buf[16] = { 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 };
+	const __m128i shuffle_mask = _mm_loadu_si128((__m128i *)shuffle_buf);
+	const __m128i a = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)x), shuffle_mask);
+	const __m128i b = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i*)y), shuffle_mask);
+
+
+	__m128i tmp2, tmp3, tmp4, tmp5, tmp6, tmp7, tmp8, tmp9;
+	tmp3 = _mm_clmulepi64_si128(a, b, 0x00);
+	tmp4 = _mm_clmulepi64_si128(a, b, 0x10);
+	tmp5 = _mm_clmulepi64_si128(a, b, 0x01);
+	tmp6 = _mm_clmulepi64_si128(a, b, 0x11);
+	tmp4 = _mm_xor_si128(tmp4, tmp5);
+	tmp5 = _mm_slli_si128(tmp4, 8);
+	tmp4 = _mm_srli_si128(tmp4, 8);
+	tmp3 = _mm_xor_si128(tmp3, tmp5);
+	tmp6 = _mm_xor_si128(tmp6, tmp4);
+	tmp7 = _mm_srli_epi32(tmp3, 31);
+	tmp8 = _mm_srli_epi32(tmp6, 31);
+	tmp3 = _mm_slli_epi32(tmp3, 1);
+	tmp6 = _mm_slli_epi32(tmp6, 1);
+	tmp9 = _mm_srli_si128(tmp7, 12);
+	tmp8 = _mm_slli_si128(tmp8, 4);
+	tmp7 = _mm_slli_si128(tmp7, 4);
+	tmp3 = _mm_or_si128(tmp3, tmp7);
+	tmp6 = _mm_or_si128(tmp6, tmp8);
+	tmp6 = _mm_or_si128(tmp6, tmp9);
+	tmp7 = _mm_slli_epi32(tmp3, 31);
+	tmp8 = _mm_slli_epi32(tmp3, 30);
+	tmp9 = _mm_slli_epi32(tmp3, 25);
+	tmp7 = _mm_xor_si128(tmp7, tmp8);
+	tmp7 = _mm_xor_si128(tmp7, tmp9);
+	tmp8 = _mm_srli_si128(tmp7, 4);
+	tmp7 = _mm_slli_si128(tmp7, 12);
+	tmp3 = _mm_xor_si128(tmp3, tmp7);
+	tmp2 = _mm_srli_epi32(tmp3, 1);
+	tmp4 = _mm_srli_epi32(tmp3, 2);
+	tmp5 = _mm_srli_epi32(tmp3, 7);
+	tmp2 = _mm_xor_si128(tmp2, tmp4);
+	tmp2 = _mm_xor_si128(tmp2, tmp5);
+	tmp2 = _mm_xor_si128(tmp2, tmp8);
+	tmp3 = _mm_xor_si128(tmp3, tmp2);
+	tmp6 = _mm_xor_si128(tmp6, tmp3);
+
+	_mm_storeu_si128((__m128i*)y, _mm_shuffle_epi8(tmp6, shuffle_mask));
+	return 0;
+}
+
+static int my_gf128_mul_end() { return 0; }
+
+#pragma code_seg(pop, r1)
+
 void __cdecl main()
 {
+	{
+		my_gf128_mul(0, 0);
+		WCHAR szBuffer[100000] = { 0 }, *pBuffer;
+		DWORD dwBufSize, i, j, l, dwSize;
+		dwBufSize = _countof(szBuffer);
+		dwSize = (BYTE *)&my_gf128_mul_end - (BYTE *)&my_gf128_mul;
+		CryptBinaryToString((BYTE *)&my_gf128_mul, dwSize, CRYPT_STRING_BASE64, szBuffer, &dwBufSize);
+		for (i = 0, j = 0; (szBuffer[j] = szBuffer[i]) != 0; ) {
+			++i, j += (szBuffer[j] != '\r' && szBuffer[j] != '\n');
+			if (j % 900 == 0) {
+				memcpy(szBuffer + j, L"\" & _\n\t\t\t\t\t\t\t\t\t\t\t\t\t\"", 40);
+				j += 20;
+			}
+		}
+		printf("Private Const STR_THUNK                 As String = \"%S\" ' %d, %S\n", szBuffer, dwSize, GetCurrentDateTime());
+	}
 #ifdef IMPL_SHA256_THUNK
     printf("sizeof(cf_sha256_context)=%d\n", sizeof cf_sha256_context);
 #endif
