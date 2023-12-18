@@ -1,0 +1,1 @@
+openssl s_client -connect 127.0.0.1:10443 -curves P-521:P-384 -state -tls1_3

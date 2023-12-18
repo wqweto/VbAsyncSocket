@@ -1,0 +1,3 @@
+VBGROUP 5.0
+StartupProject=Project3.vbp
+Project=..\..\contrib\dll\WinsockTls.vbp
