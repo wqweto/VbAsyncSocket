@@ -5,12 +5,17 @@
 *.log
 *.scc
 *.zip
+*.7z
 *.exp
 *.lib
 *.obj
 *.dll
 *.exe
 *.pdb
+*.ocx
+*.oca
+*.tmp
+*.twinproj
 **/_del/*
 **/SodiumTest - Copy/*
 ~*
@@ -42,3 +47,5 @@ ipch/
 *.cachefile
 *.VC.db
 *.VC.VC.opendb
+*.suo
+*.user
