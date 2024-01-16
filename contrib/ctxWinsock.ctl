@@ -625,7 +625,7 @@ Public Sub SendData(data As Variant)
         End If
     End If
     If UBound(m_baSendBuffer) >= 0 Then
-        m_oSocket_OnSend
+        m_oSocket.PostEvent ucsSfdWrite
     End If
     Exit Sub
 EH:
