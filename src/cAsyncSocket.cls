@@ -335,7 +335,7 @@ Private Const DEF_TIMEOUT           As Long = 5000
 Private Const MAX_SOCKETS           As Long = &HC000& - WM_SOCKET_NOTIFY
 
 Private m_hSocket               As Long
-Private m_pCleanup              As IUnknown
+Private m_pCleanup              As Object
 Private m_oHelperWindow         As cAsyncSocket
 Private m_lIndex                As Long
 Private m_lLastError            As Long
@@ -355,8 +355,8 @@ End Type
 
 Private Type UcsHelperWindowStateType
     hWnd                As Long
-    Notify              As IUnknown
-    Cleanup             As IUnknown
+    Notify              As Object
+    Cleanup             As Object
     SocketPtr()         As Long
     Pos                 As Long
     Count               As Long
@@ -1922,7 +1922,7 @@ Private Function InitAddressOfMethod(pObj As Object, ByVal MethodParamCount As L
     Debug.Assert lSize = THUNK_SIZE
 End Function
 
-Private Function InitAsyncSelectNotifyThunk(ByVal hWnd As Long, pObj As Object, ByVal pfnCallback As Long) As IUnknown
+Private Function InitAsyncSelectNotifyThunk(ByVal hWnd As Long, pObj As Object, ByVal pfnCallback As Long) As Object
     Dim STR_THUNK       As String: STR_THUNK = "6AAAAABageplEEQAV1aLdCQUg8YIgz4AdDeL+oHHBBNEAIvCBQgRRACri8IFRBFEAKuLwgVUEUQAq4vCBYARRACri8IFgBJEAKu5CQAAAPOlgcIEE0QAi/qDxziLwqu4AQAAAKszwKuLRCQMqzPAq4t0JBSlpTPAq6urq4PvLGoAV/9yDP93DP9SFItEJBiJOF5fuGgTRAAtYBBEAAUAMAAAwhAADx8Ai0QkCIM4AHUqg3gEAHUkgXgIwAAAAHUbgXgMAAAARnUSi1QkBP9CBItEJAyJEDPAwgwAuAJAAIDCDACQi1QkBP9CBItCBMIEAA8fAItUJAT/SgSLQgR1GlKLClL/cQz/cgz/URhaiwr/chBqAP9RJDPAwgQADx8AVYvsi1UY/0IE/0IoUosK/3UU/3UQ/3UM/3UI/1EcWlCLQiBAJf8DAAA7Qhx0GlBWV416LItCII08x408h411DKWlpV9ej0Igi0IkhcAPhZ4AAACLQhCFwA+FkwAAAIsKi0EwhcB0MFL/0FqJQgiD+AF3a4sKi0E0hcB0CFL/0FqFwHVaiwpSavD/cSj/USxaqQAAAAh1R4tCKDtCBHRSi0IUhcB0S8dCJAEAAAD/ciBSM8BQVP9yIP9yHGgABAAAjUIsUP9yFP9SGFhax0IkAAAAAFiJQhw7QiB0Feu5UosK/3EQagBqAGoA/1EgWolCEP9KKFLo2v7//1hdwhgAkOgAAAAAWoHqhRJEAIHCPBNEAP9CBP9CKIsKi0EwhcB0DFL/0FqJQgiD+AF3SlKLCv9yEGoA/1EkWotCKDtCBHQvi0IUhcB0KP9yIFIzwFBU/3Ig/3IcaAAEAACNQixQ/3IU/1IYWFpYiUIcO0IgdcnHQhAAAAAA/0ooUuhU/v//whAAkI1EQAGNREAB" ' 27.6.2020 20:49:42
     Const THUNK_SIZE    As Long = 13064
     Static hThunk       As Long
@@ -1955,7 +1955,7 @@ Private Function InitAsyncSelectNotifyThunk(ByVal hWnd As Long, pObj As Object, 
     Debug.Assert lSize = THUNK_SIZE
 End Function
 
-Private Function InitCleanupThunk(ByVal hHandle As Long, sModuleName As String, sProcName As String) As IUnknown
+Private Function InitCleanupThunk(ByVal hHandle As Long, sModuleName As String, sProcName As String) As Object
     Const STR_THUNK     As String = "6AAAAABag+oFgepQEDwBV1aLdCQUgz4AdCeL+oHHPBE8AYvCBcwQPAGri8IFCBE8AauLwgUYETwBq7kCAAAA86WBwjwRPAFSahD/Ugxai/iLwqu4AQAAAKuLRCQMq4tEJBCrg+8Qi0QkGIk4Xl+4UBE8AS1QEDwBwhAAkItEJAiDOAB1KoN4BAB1JIF4CMAAAAB1G4F4DAAAAEZ1EotUJAT/QgSLRCQMiRAzwMIMALgCQACAwgwAkItUJAT/QgSLQgTCBAAPHwCLVCQE/0oEi0IEdRL/cgj/UgyLVCQEiwpS/1EQM8DCBAAPHwA=" ' 25.3.2019 14:03:56
     Const THUNK_SIZE    As Long = 256
     Static hThunk       As Long
@@ -1979,7 +1979,7 @@ Private Function InitCleanupThunk(ByVal hHandle As Long, sModuleName As String, 
     End If
 End Function
 
-Private Property Get ThunkPrivateData(pThunk As IUnknown, Optional ByVal Index As Long) As Long
+Private Property Get ThunkPrivateData(pThunk As Object, Optional ByVal Index As Long) As Long
     Dim lPtr            As Long
     
     lPtr = ObjPtr(pThunk)
@@ -1989,7 +1989,7 @@ Private Property Get ThunkPrivateData(pThunk As IUnknown, Optional ByVal Index A
     End If
 End Property
 
-Private Property Let ThunkPrivateData(pThunk As IUnknown, Optional ByVal Index As Long, ByVal lValue As Long)
+Private Property Let ThunkPrivateData(pThunk As Object, Optional ByVal Index As Long, ByVal lValue As Long)
     Dim lPtr            As Long
     
     lPtr = ObjPtr(pThunk)

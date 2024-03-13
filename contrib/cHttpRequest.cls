@@ -125,7 +125,7 @@ Private Declare Function lstrlenW Lib "kernel32" (ByVal lpString As Long) As Lon
 Private Declare Function DispCallFunc Lib "oleaut32" (ByVal pvInstance As Long, ByVal oVft As Long, ByVal lCc As Long, ByVal vtReturn As VbVarType, ByVal cActuals As Long, prgVt As Any, prgpVarg As Any, pvargResult As Variant) As Long
 Private Declare Function WinHttpGetDefaultProxyConfiguration Lib "winhttp" (pProxyInfo As Any) As Long
 '--- shlwapi
-Private Declare Function SHCreateMemStream Lib "shlwapi" Alias "#12" (pInit As Any, ByVal cbInit As Long) As stdole.IUnknown
+Private Declare Function SHCreateMemStream Lib "shlwapi" Alias "#12" (pInit As Any, ByVal cbInit As Long) As Object
 Private Declare Function UrlEscape Lib "shlwapi" Alias "UrlEscapeW" (ByVal pszURL As Long, ByVal pszEscaped As Long, pcchEscaped As Long, ByVal dwFlags As Long) As Long
 '--- libarchive
 Private Declare Function archive_read_new Lib "archiveint" Alias "_archive_read_new@0" () As Long
@@ -229,7 +229,7 @@ Private Type UcsRequestType
     Async               As Boolean
     Headers             As Object
     NumOfRedirects      As Long
-    SendStream          As IUnknown
+    SendStream          As Object
     SendBuffer          As UcsBuffer
 End Type
 
@@ -238,7 +238,7 @@ Private Type UcsResponseType
     StatusText          As String
     AllHeaders          As String
     Headers             As Object
-    RecvStream          As IUnknown
+    RecvStream          As Object
     Text                As String
     BytesProgress       As Double
     ContentLength       As Double
@@ -1032,7 +1032,7 @@ Private Function pvRecvBody(baData() As Byte, uResponse As UcsResponseType, Opti
     Dim lSize           As Long
     Dim lIdx            As Long
     Dim uChunk          As UcsBuffer
-    Dim pOutput         As IUnknown
+    Dim pOutput         As Object
     
     On Error GoTo EH
     With uResponse
@@ -1584,7 +1584,7 @@ Private Function pvMapCharset(sCharset As String) As UcsAsyncSocketCodePageEnum
     End Select
 End Function
 
-Private Function pvUngzipStream(pInput As IUnknown, pOutput As IUnknown) As Boolean
+Private Function pvUngzipStream(pInput As Object, pOutput As Object) As Boolean
     Const FUNC_NAME     As String = "pvUngzipStream"
     Const BUFF_SIZE     As Long = 65536
     Dim baData()        As Byte
@@ -1663,7 +1663,7 @@ EH:
     PrintError FUNC_NAME
 End Function
 
-Public Function ArchiveReaderCallback(ByVal hArchive As Long, ByVal pInput As IUnknown, lBufferPtr As Long) As Long
+Public Function ArchiveReaderCallback(ByVal hArchive As Long, ByVal pInput As Object, lBufferPtr As Long) As Long
 Attribute ArchiveReaderCallback.VB_MemberFlags = "40"
     Const FUNC_NAME     As String = "ArchiveReaderCallback"
     Dim hResult         As Long
@@ -1806,7 +1806,7 @@ End Function
 
 '= buffers ===============================================================
 
-Private Function AsIStream(ByVal pUnk As IUnknown) As IUnknown
+Private Function AsIStream(ByVal pUnk As Object) As Object
     Const IDX_QueryInterface As Long = 0
     Static IID_IStream(0 To 3) As Long
     Dim hResult         As Long
@@ -1823,19 +1823,19 @@ Private Function AsIStream(ByVal pUnk As IUnknown) As IUnknown
     End If
 End Function
 
-Private Function IStream_Read(pStm As IUnknown, baData() As Byte, Optional BytesRead As Long) As Long
+Private Function IStream_Read(pStm As Object, baData() As Byte, Optional BytesRead As Long) As Long
     If Not pStm Is Nothing And UBound(baData) >= 0 Then
         IStream_Read = DispCallByVtbl(pStm, 3, VarPtr(baData(0)), UBound(baData) + 1, VarPtr(BytesRead))
     End If
 End Function
 
-Private Function IStream_Write(pStm As IUnknown, baData() As Byte, Optional BytesWritten As Long) As Long
+Private Function IStream_Write(pStm As Object, baData() As Byte, Optional BytesWritten As Long) As Long
     If Not pStm Is Nothing And UBound(baData) >= 0 Then
         IStream_Write = DispCallByVtbl(pStm, 4, VarPtr(baData(0)), UBound(baData) + 1, VarPtr(BytesWritten))
     End If
 End Function
 
-Private Function IStream_Seek(pStm As stdole.IUnknown, ByVal cMove As Currency, ByVal dwOrigin As Long, Optional NewPosition As Currency) As Long
+Private Function IStream_Seek(pStm As Object, ByVal cMove As Currency, ByVal dwOrigin As Long, Optional NewPosition As Currency) As Long
     If Not pStm Is Nothing Then
         IStream_Seek = DispCallByVtbl(pStm, 5, cMove, dwOrigin, VarPtr(NewPosition))
     Else
@@ -1843,7 +1843,7 @@ Private Function IStream_Seek(pStm As stdole.IUnknown, ByVal cMove As Currency, 
     End If
 End Function
 
-Private Function IStream_GetSize(pStream As IUnknown) As Double
+Private Function IStream_GetSize(pStream As Object) As Double
     Dim hResult         As Long
     Dim cPos            As Currency
     
@@ -1860,7 +1860,7 @@ Private Function IStream_GetSize(pStream As IUnknown) As Double
     IStream_GetSize = CDbl(cPos) * 10000#
 End Function
 
-Private Function DispCallByVtbl(pUnk As IUnknown, ByVal lIndex As Long, ParamArray A() As Variant) As Variant
+Private Function DispCallByVtbl(pUnk As Object, ByVal lIndex As Long, ParamArray A() As Variant) As Variant
     Const CC_STDCALL    As Long = 4
     Dim lIdx            As Long
     Dim vParam()        As Variant

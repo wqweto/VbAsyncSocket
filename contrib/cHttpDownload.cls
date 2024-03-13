@@ -49,7 +49,7 @@ Private Const STGM_CREATE                   As Long = &H1000
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
-Private Declare Function SHCreateStreamOnFile Lib "shlwapi" Alias "SHCreateStreamOnFileW" (ByVal pszFile As Long, ByVal grfMode As Long, ppstm As IUnknown) As Long
+Private Declare Function SHCreateStreamOnFile Lib "shlwapi" Alias "SHCreateStreamOnFileW" (ByVal pszFile As Long, ByVal grfMode As Long, ppstm As Object) As Long
 Private Declare Function DispCallFunc Lib "oleaut32" (ByVal pvInstance As Long, ByVal oVft As Long, ByVal lCc As Long, ByVal vtReturn As VbVarType, ByVal cActuals As Long, prgVt As Any, prgpVarg As Any, pvargResult As Variant) As Long
 
 '=========================================================================
@@ -75,7 +75,7 @@ Attribute m_oSocket.VB_VarHelpID = -1
 Private m_uRemote               As UcsParsedUrl
 Private m_sLocalFileName        As String
 Private m_lStreamFlags          As Long
-Private m_pFileStream           As IUnknown
+Private m_pFileStream           As Object
 Private m_dStartDate            As Date
 Private m_lCallbackPtr          As Long
 Private m_eState                As UcsStateEnum
@@ -523,19 +523,19 @@ Private Function pvIsProtocolSecure(sProtocol As String) As Boolean
     pvIsProtocolSecure = (LCase$(sProtocol) = "https")
 End Function
 
-Private Function IStream_Read(pStm As IUnknown, baBuffer() As Byte, Optional BytesRead As Long) As Long
+Private Function IStream_Read(pStm As Object, baBuffer() As Byte, Optional BytesRead As Long) As Long
     If Not pStm Is Nothing And UBound(baBuffer) >= 0 Then
         IStream_Read = DispCallByVtbl(pStm, 3, VarPtr(baBuffer(0)), UBound(baBuffer) + 1, VarPtr(BytesRead))
     End If
 End Function
 
-Private Function IStream_Write(pStm As IUnknown, baBuffer() As Byte, Optional BytesWritten As Long) As Long
+Private Function IStream_Write(pStm As Object, baBuffer() As Byte, Optional BytesWritten As Long) As Long
     If Not pStm Is Nothing And UBound(baBuffer) >= 0 Then
         IStream_Write = DispCallByVtbl(pStm, 4, VarPtr(baBuffer(0)), UBound(baBuffer) + 1, VarPtr(BytesWritten))
     End If
 End Function
 
-Private Function DispCallByVtbl(pUnk As IUnknown, ByVal lIndex As Long, ParamArray A() As Variant) As Variant
+Private Function DispCallByVtbl(pUnk As Object, ByVal lIndex As Long, ParamArray A() As Variant) As Variant
     Const CC_STDCALL    As Long = 4
     Dim lIdx            As Long
     Dim vParam()        As Variant
