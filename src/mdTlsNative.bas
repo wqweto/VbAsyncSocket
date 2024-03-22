@@ -125,9 +125,6 @@ Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
 Private Declare Function FormatMessage Lib "kernel32" Alias "FormatMessageW" (ByVal dwFlags As Long, ByVal lpSource As Long, ByVal dwMessageId As Long, ByVal dwLanguageId As Long, ByVal lpBuffer As Long, ByVal nSize As Long, ByVal Args As Long) As Long
 '--- msvbvm60
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
-'--- version
-Private Declare Function GetFileVersionInfo Lib "version" Alias "GetFileVersionInfoW" (ByVal lptstrFilename As Long, ByVal dwHandle As Long, ByVal dwLen As Long, lpData As Any) As Long
-Private Declare Function VerQueryValue Lib "version" Alias "VerQueryValueW" (pBlock As Any, ByVal lpSubBlock As Long, lpBuffer As Any, puLen As Long) As Long
 '--- security
 Private Declare Function AcquireCredentialsHandle Lib "security" Alias "AcquireCredentialsHandleW" (ByVal pszPrincipal As Long, ByVal pszPackage As Long, ByVal fCredentialUse As Long, ByVal pvLogonId As Long, pAuthData As Any, ByVal pGetKeyFn As Long, ByVal pvGetKeyArgument As Long, phCredential As Currency, ByVal ptsExpiry As Long) As Long
 Private Declare Function FreeCredentialsHandle Lib "security" (phContext As Currency) As Long
@@ -1864,23 +1861,12 @@ Private Function SplitOrReindex(Expression As String, Delimiter As String) As Va
 End Function
 
 Private Property Get RealOsVersion(Optional BuildNo As Long) As UcsOsVersionEnum
-    Static lVersion     As Long
-    Static lBuildNo     As Long
-    Dim baBuffer()      As Byte
-    Dim lPtr            As Long
-    Dim lSize           As Long
-    Dim aVer(0 To 9)    As Integer
+    Const KUSER_SHARED_DATA As Long = &H7FFE0000
+    Dim aBuffer(0 To 4) As Long
     
-    If lVersion = 0 Then
-        ReDim baBuffer(0 To 8192) As Byte
-        Call GetFileVersionInfo(StrPtr("kernel32.dll"), 0, UBound(baBuffer), baBuffer(0))
-        Call VerQueryValue(baBuffer(0), StrPtr("\"), lPtr, lSize)
-        Call CopyMemory(aVer(0), ByVal lPtr, 20)
-        lVersion = aVer(9) * 100 + aVer(8)
-        lBuildNo = aVer(7)
-    End If
-    RealOsVersion = lVersion
-    BuildNo = lBuildNo
+    Call CopyMemory(aBuffer(0), ByVal KUSER_SHARED_DATA + &H260, 20)
+    BuildNo = aBuffer(0)
+    RealOsVersion = aBuffer(3) * 100 + aBuffer(4)
 End Property
 
 Private Function GetSystemMessage(ByVal lLastDllError As Long) As String
