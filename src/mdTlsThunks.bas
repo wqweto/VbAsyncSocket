@@ -1915,7 +1915,7 @@ Unencrypted:
                 End If
                 If .MessBuffer.Size > 0 Then
                     pvBufferWriteBlob .MessBuffer, VarPtr(uInput.Data(uInput.Pos)), lEnd - uInput.Pos
-                    If Not pvTlsParseHandshake(uCtx, .MessBuffer, .MessBuffer.Size, lRecordProtocol, sError, eAlertCode) Then
+                    If Not pvTlsParseHandshake(uCtx, .MessBuffer, .MessBuffer.Size, sError, eAlertCode) Then
                         GoTo QH
                     End If
                     If .MessBuffer.Pos >= .MessBuffer.Size Then
@@ -1924,7 +1924,7 @@ Unencrypted:
                         .MessBuffer.Pos = 0
                     End If
                 Else
-                    If Not pvTlsParseHandshake(uCtx, uInput, lEnd, lRecordProtocol, sError, eAlertCode) Then
+                    If Not pvTlsParseHandshake(uCtx, uInput, lEnd, sError, eAlertCode) Then
                         GoTo QH
                     End If
                     If uInput.Pos < lEnd Then
@@ -1976,7 +1976,7 @@ EH:
     Resume QH
 End Function
 
-Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer, ByVal lInputEnd As Long, ByVal lRecordProtocol As Long, sError As String, eAlertCode As UcsTlsAlertDescriptionsEnum) As Boolean
+Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer, ByVal lInputEnd As Long, sError As String, eAlertCode As UcsTlsAlertDescriptionsEnum) As Boolean
     Const FUNC_NAME     As String = "pvTlsParseHandshake"
     Dim lMessagePos     As Long
     Dim lMessageSize    As Long
@@ -2028,7 +2028,7 @@ Private Function pvTlsParseHandshake(uCtx As UcsTlsContext, uInput As UcsBuffer,
             Case ucsTlsStateExpectServerHello
                 Select Case lMessageType
                 Case TLS_HANDSHAKE_SERVER_HELLO
-                    If Not pvTlsParseHandshakeServerHello(uCtx, uInput, uInput.Pos + lMessageSize, lRecordProtocol, sError, eAlertCode) Then
+                    If Not pvTlsParseHandshakeServerHello(uCtx, uInput, uInput.Pos + lMessageSize, sError, eAlertCode) Then
                         GoTo QH
                     End If
                     If .HelloRetryRequest Then
@@ -2630,7 +2630,7 @@ EH:
     Resume QH
 End Function
 
-Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As UcsBuffer, ByVal lInputEnd As Long, ByVal lRecordProtocol As Long, sError As String, eAlertCode As UcsTlsAlertDescriptionsEnum) As Boolean
+Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As UcsBuffer, ByVal lInputEnd As Long, sError As String, eAlertCode As UcsTlsAlertDescriptionsEnum) As Boolean
     Const FUNC_NAME     As String = "pvTlsParseHandshakeServerHello"
     Dim lBlockSize      As Long
     Dim lBlockEnd       As Long
@@ -2650,8 +2650,11 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
         pvTlsGetHelloRetryRandom m_baHelloRetryRandom
     End If
     With uCtx
-        .ProtocolVersion = IIf(lRecordProtocol <= TLS_PROTOCOL_VERSION_TLS12, TLS_PROTOCOL_VERSION_TLS12, TLS_PROTOCOL_VERSION_TLS13)
         pvBufferReadLong uInput, .RemoteProtocolVersion, Size:=2
+        If .RemoteProtocolVersion < TLS_PROTOCOL_VERSION_TLS12 Then
+            GoTo UnsupportedProtocol
+        End If
+        .ProtocolVersion = IIf(.RemoteProtocolVersion <= TLS_PROTOCOL_VERSION_TLS12, TLS_PROTOCOL_VERSION_TLS12, TLS_PROTOCOL_VERSION_TLS13)
         pvBufferReadArray uInput, .RemoteExchRandom, TLS_HELLO_RANDOM_SIZE
         If .HelloRetryRequest Then
             '--- clear HelloRetryRequest
@@ -2719,10 +2722,11 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
                             If lExtSize <> 2 Then
                                 GoTo InvalidSize
                             End If
-                            pvBufferReadLong uInput, .ProtocolVersion, Size:=2
-                            If .ProtocolVersion <> TLS_PROTOCOL_VERSION_TLS12 And .ProtocolVersion <> TLS_PROTOCOL_VERSION_TLS13 Then
+                            pvBufferReadLong uInput, .RemoteProtocolVersion, Size:=2
+                            If .RemoteProtocolVersion <> TLS_PROTOCOL_VERSION_TLS12 And .RemoteProtocolVersion <> TLS_PROTOCOL_VERSION_TLS13 Then
                                 GoTo UnsupportedProtocol
                             End If
+                            .ProtocolVersion = .RemoteProtocolVersion
                         Case IIf((.LocalFeatures And ucsTlsSupportTls13) <> 0, TLS_EXTENSION_COOKIE, -1)
                             If Not .HelloRetryRequest Then
                                 GoTo UnexpectedExtension
@@ -2789,8 +2793,8 @@ InvalidRemoteKey:
     eAlertCode = uscTlsAlertIllegalParameter
     GoTo QH
 UnsupportedProtocol:
-    sError = Replace(ERR_UNSUPPORTED_PROTOCOL, "%1", "&H" & Hex$(uCtx.ProtocolVersion))
-    eAlertCode = uscTlsAlertIllegalParameter
+    sError = Replace(ERR_UNSUPPORTED_PROTOCOL, "%1", "&H" & Hex$(uCtx.RemoteProtocolVersion))
+    eAlertCode = uscTlsAlertProtocolVersion
     GoTo QH
 EH:
     sError = Err.Description & " [" & Err.Source & "]"
