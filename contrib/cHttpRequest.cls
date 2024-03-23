@@ -528,19 +528,15 @@ Public Sub Send(Optional ByVal Body As Variant)
         '--- handle synchronous mode
         If Not .Async Then
             If Not pvWaitForState(ucsWaitResolve, .ResolveTimeout) Then
-                pvSetError ERROR_WINHTTP_TIMEOUT
                 GoTo QH
             End If
             If Not pvWaitForState(ucsWaitConnect, .ConnectTimeout) Then
-                pvSetError ERROR_WINHTTP_TIMEOUT
                 GoTo QH
             End If
             If Not pvWaitForState(ucsWaitSendBody, .SendTimeout) Then
-                pvSetError ERROR_WINHTTP_TIMEOUT
                 GoTo QH
             End If
             If Not pvWaitForState(ucsWaitRecvBody, .ReceiveTimeout) Then
-                pvSetError ERROR_WINHTTP_TIMEOUT
                 GoTo QH
             End If
         End If
@@ -1312,6 +1308,7 @@ Private Function pvWaitForState(ByVal eState As UcsStateEnum, ByVal Timeout As L
         If Timeout >= 0 Then
             lRemaining = Timeout - Int((TimerEx - dblTimerEx) * 1000)
             If lRemaining <= 0 Then
+                pvSetError ERROR_WINHTTP_TIMEOUT
                 GoTo QH
             End If
         End If
@@ -1327,11 +1324,20 @@ Private Function pvWaitForState(ByVal eState As UcsStateEnum, ByVal Timeout As L
                 End If
             End If
             .SyncProcessMsgQueue
+            If .LastError.Number <> 0 Then
+                GoTo QH
+            End If
         End With
     Loop
     '--- success
     pvWaitForState = True
 QH:
+    With pvGetBaseSocket.LastError
+        If .Number <> 0 Then
+            pvSetError .Number, .Source, .Description
+            pvWaitForState = False
+        End If
+    End With
 End Function
 
 Private Sub pvResetResponse(uResponse As UcsResponseType)
