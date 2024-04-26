@@ -1742,7 +1742,7 @@ Private Function pvToStringAndFree(ByVal lPtr As Long) As Variant
     End If
 End Function
 
-Public Function SetCookie(ByVal sDomain As String, ByVal sPath As String, ByVal sValue As String)
+Public Sub SetCookie(ByVal sDomain As String, ByVal sPath As String, ByVal sValue As String)
     Dim oCol            As Collection
     
     If Left$(sDomain, 1) = "." Then
@@ -1767,7 +1767,7 @@ Public Function SetCookie(ByVal sDomain As String, ByVal sPath As String, ByVal 
         Set m_oCookies.Item(sDomain) = oCol
     End If
     oCol.Add sPath & Chr$(1) & sValue
-End Function
+End Sub
 
 Private Function pvGetAllCookies(ByVal sDomain As String, ByVal sPath As String) As String
     Dim vRetVal         As Variant

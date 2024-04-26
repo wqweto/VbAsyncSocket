@@ -3018,6 +3018,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                         If .HelloRetryRequest And lExchGroup <> .HelloRetryExchGroup Then
                                             lExchGroup = 0
                                         End If
+                                        eExchAlgo = 0
                                         Select Case lExchGroup
                                         Case TLS_GROUP_X25519
                                             eExchAlgo = ucsTlsAlgoExchX25519
@@ -3025,19 +3026,17 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                             eExchAlgo = ucsTlsAlgoExchSecp256r1
                                         Case TLS_GROUP_SECP384R1
                                             eExchAlgo = ucsTlsAlgoExchSecp384r1
-                                        Case TLS_GROUP_X448, TLS_GROUP_SECP521R1
-                                            eExchAlgo = 0
+                                        Case TLS_GROUP_SECP521R1, TLS_GROUP_X448
+                                            '--- unsupported ecc curves
                                         Case TLS_GROUP_FFDHE_FIRST To TLS_GROUP_FFDHE_LAST
-                                            eExchAlgo = 0
-                                        Case TLS_GROUP_FFDHE_PRIVATE_USE_FIRST To TLS_GROUP_FFDHE_PRIVATE_USE_LAST
-                                            eExchAlgo = 0
-                                        Case TLS_GROUP_ECDHE_PRIVATE_USE_FIRST To TLS_GROUP_ECDHE_PRIVATE_USE_LAST
-                                            eExchAlgo = 0
+                                            '--- ffdhe
+                                        Case TLS_GROUP_FFDHE_PRIVATE_USE_FIRST To TLS_GROUP_FFDHE_PRIVATE_USE_LAST, TLS_GROUP_ECDHE_PRIVATE_USE_FIRST To TLS_GROUP_ECDHE_PRIVATE_USE_LAST
+                                            '--- private use
                                         Case Else
                                             If (lExchGroup And &HFF) = lExchGroup \ &H100 And (lExchGroup And &HF) = &HA Then
-                                                eExchAlgo = 0 '--- grease from RFC8701
+                                                '--- grease from RFC8701
                                             Else
-                                                GoTo UnsupportedExchGroup
+                                                'GoTo UnsupportedExchGroup
                                             End If
                                         End Select
                                         Select Case True
@@ -3106,7 +3105,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                             If (lExchGroup And &HFF) = lExchGroup \ &H100 And (lExchGroup And &HF) = &HA Then
                                                 '--- grease from RFC8701
                                             Else
-                                                GoTo UnsupportedExchGroup
+                                                'GoTo UnsupportedExchGroup
                                             End If
                                         End Select
                                     End If
