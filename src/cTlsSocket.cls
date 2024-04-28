@@ -2244,7 +2244,8 @@ QH:
         Call BCryptCloseAlgorithmProvider(hAlg, 0)
     End If
     If lEncrPtr <> 0 Then
-        Call LocalFree(lEncrPtr)
+        lEncrPtr = LocalFree(lEncrPtr)
+        Debug.Assert lEncrPtr = 0
     End If
     If LenB(sApiSource) <> 0 Then
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
@@ -2708,8 +2709,8 @@ Private Function pvPkiCertGetSubjectAltName2(ByVal pCertContext As Long, ByVal l
             vRetVal(UBound(vRetVal)) = pvToStringW(uEntry.pwszDNSName)
         End If
     Next
-    Call LocalFree(lAltInfoPtr)
-    lAltInfoPtr = 0
+    lAltInfoPtr = LocalFree(lAltInfoPtr)
+    Debug.Assert lAltInfoPtr = 0
 QH:
     pvPkiCertGetSubjectAltName2 = vRetVal
 End Function
@@ -3391,7 +3392,8 @@ Private Function pvPkiIssuerToCertRdn(vIssuer As Variant, uOutput As CERT_RDN) A
 QH:
     On Error GoTo 0
     If lPtr <> 0 Then
-        Call LocalFree(lPtr)
+        lPtr = LocalFree(lPtr)
+        Debug.Assert lPtr = 0
     End If
     If IsArray(vErr) Then
         ErrRaise vErr(0), vErr(1), vErr(2)
@@ -3466,7 +3468,7 @@ Private Function pvPkiAsn1Parse(uInput As CRYPT_DATA_BLOB, sFormat As String, cO
     Select Case Left$(sFormat, 1)
     Case "("
         sFormat = Mid$(sFormat, 2)
-        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_SEQUENCE_OF_ANY, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, LenB(lPtr)) <> 0 Then
+        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_SEQUENCE_OF_ANY, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, 0) <> 0 Then
             Call CopyMemory(uBlob, ByVal lPtr, LenB(uBlob))
             If uBlob.cbData > 0 Then
                 ReDim uDers(0 To uBlob.cbData - 1) As CRYPT_DATA_BLOB
@@ -3511,13 +3513,13 @@ Private Function pvPkiAsn1Parse(uInput As CRYPT_DATA_BLOB, sFormat As String, cO
             End Select
         Loop
     Case "o"
-        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_OBJECT_IDENTIFIER, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, LenB(lPtr)) = 0 Then
+        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_OBJECT_IDENTIFIER, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, 0) = 0 Then
             GoTo QH
         End If
         Call CopyMemory(lIdx, ByVal lPtr, LenB(lIdx))
         cOutput.Add pvToStringA(lIdx)
     Case "x"
-        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_OCTET_STRING, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, LenB(lPtr)) = 0 Then
+        If CryptDecodeObjectEx(X509_ASN_ENCODING, X509_OCTET_STRING, ByVal uInput.pbData, uInput.cbData, CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG, 0, lPtr, 0) = 0 Then
             GoTo QH
         End If
         Call CopyMemory(uBlob, ByVal lPtr, LenB(uBlob))
@@ -3537,6 +3539,10 @@ Private Function pvPkiAsn1Parse(uInput As CRYPT_DATA_BLOB, sFormat As String, cO
     '--- success
     pvPkiAsn1Parse = True
 QH:
+    If lPtr <> 0 Then
+        lPtr = LocalFree(lPtr)
+        Debug.Assert lPtr = 0
+    End If
 End Function
 #End If
 

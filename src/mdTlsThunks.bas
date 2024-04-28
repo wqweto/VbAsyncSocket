@@ -5776,10 +5776,12 @@ DecodeRsa:
     pvAsn1DecodePrivateKey = True
 QH:
     If lKeyPtr <> 0 Then
-        Call LocalFree(lKeyPtr)
+        lKeyPtr = LocalFree(lKeyPtr)
+        Debug.Assert lKeyPtr = 0
     End If
     If lPkiPtr <> 0 Then
-        Call LocalFree(lPkiPtr)
+        lPkiPtr = LocalFree(lPkiPtr)
+        Debug.Assert lPkiPtr = 0
     End If
     If hProv <> 0 Then
         Call CryptReleaseContext(hProv, 0)
