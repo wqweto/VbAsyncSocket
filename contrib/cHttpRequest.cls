@@ -8,7 +8,7 @@ BEGIN
 END
 Attribute VB_Name = "cHttpRequest"
 Attribute VB_GlobalNameSpace = False
-Attribute VB_Creatable = True
+Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
@@ -1300,6 +1300,7 @@ Private Sub pvDrainKeepAlive()
 End Sub
 
 Private Function pvWaitForState(ByVal eState As UcsStateEnum, ByVal Timeout As Long) As Boolean
+    Const WSAEWOULDBLOCK As Long = 10035
     Dim dblTimerEx      As Double
     Dim lRemaining      As Long
     
@@ -1324,7 +1325,7 @@ Private Function pvWaitForState(ByVal eState As UcsStateEnum, ByVal Timeout As L
                 End If
             End If
             .SyncProcessMsgQueue
-            If .LastError.Number <> 0 Then
+            If .LastError.Number <> 0 And .LastError.Number <> WSAEWOULDBLOCK Then
                 GoTo QH
             End If
         End With
@@ -1333,7 +1334,7 @@ Private Function pvWaitForState(ByVal eState As UcsStateEnum, ByVal Timeout As L
     pvWaitForState = True
 QH:
     With pvGetBaseSocket.LastError
-        If .Number <> 0 Then
+        If .Number <> 0 And .Number <> WSAEWOULDBLOCK Then
             pvSetError .Number, .Source, .Description
             pvWaitForState = False
         End If
