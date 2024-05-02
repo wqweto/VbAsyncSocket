@@ -1496,7 +1496,7 @@ Private Function pvParseHeaderAttribs(ByVal sHeader As String) As Object
     
     '--- TODO: need regex parser for semi-colons in quoted values
     Set pvParseHeaderAttribs = CreateObject("Scripting.Dictionary")
-    m_uRequest.Headers.CompareMode = vbTextCompare
+    pvParseHeaderAttribs.CompareMode = vbTextCompare
     vSplit = Split(sHeader, ";")
     If UBound(vSplit) > 0 Then
         For Each vElem In vSplit
