@@ -488,6 +488,12 @@ Public Function Create( _
             GoTo QH
         End If
     End If
+    '--- disable Nagle algorithm
+    If ws_setsockopt(m_hSocket, ucsSolTCP, ucsSsoNoDelay, 1&, 4) <> 0 Then
+        m_lLastError = Err.LastDllError
+        pvClose
+        GoTo QH
+    End If
     '--- success
     m_lLastError = 0
     Create = True
