@@ -95,6 +95,7 @@ Private Const PKCS12_NO_PERSIST_KEY                     As Long = &H8000&
 Private Const PRIVATEKEYBLOB                            As Long = 7
 '--- for CryptAcquireCertificatePrivateKey
 Private Const CRYPT_ACQUIRE_CACHE_FLAG                  As Long = &H1
+Private Const CRYPT_ACQUIRE_SILENT_FLAG                 As Long = &H40
 Private Const CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG       As Long = &H10000
 Private Const CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG      As Long = &H20000
 '--- for NCryptImportKey
@@ -2371,6 +2372,7 @@ Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Var
     Dim hCertStore      As Long
     Dim vElem           As Variant
     Dim uCertRdn        As CERT_RDN
+    Dim lCertRdnPtr     As Long
     Dim pCertContext    As Long
     Dim lStoreFlags     As Long
     Dim sStoreName      As String
@@ -2392,10 +2394,15 @@ Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Var
             GoTo QH
         End If
         For Each vElem In SubjectOrIssuers
-            If pvPkiIssuerToCertRdn(vElem, uCertRdn) Then
+            If pvPkiIssuerToCertRdn(vElem, uCertRdn, lCertRdnPtr) Then
                 dwFindType = CERT_FIND_ISSUER_ATTR
                 pvFindPara = VarPtr(uCertRdn)
                 pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, 0)
+                lCertRdnPtr = LocalFree(lCertRdnPtr)
+                Debug.Assert lCertRdnPtr = 0
+                If pCertContext <> 0 Then
+                    Exit For
+                End If
             End If
         Next
     Else
@@ -2930,15 +2937,17 @@ Private Function pvPkiAppendCertContext(ByVal pCertContext As Long, cCerts As Co
         End If
         cCerts.Add baBuffer
     End If
-    If pvPkiExportPrivateKey(pCertContext, DeleteKeyset, cPrivKey) Then
-        If cCerts.Count > 1 Then
-            '--- move certificate w/ private key to the beginning of the collection
-            baBuffer = cCerts.Item(cCerts.Count)
-            cCerts.Remove cCerts.Count
-            cCerts.Add baBuffer, Before:=1
+    If pvCollectionCount(cPrivKey) = 0 Then
+        If pvPkiExportPrivateKey(pCertContext, DeleteKeyset, cPrivKey) Then
+            If cCerts.Count > 1 Then
+                '--- move certificate w/ private key to the beginning of the collection
+                baBuffer = cCerts.Item(cCerts.Count)
+                cCerts.Remove cCerts.Count
+                cCerts.Add baBuffer, Before:=1
+            End If
+            '--- success
+            pvPkiAppendCertContext = True
         End If
-        '--- success
-        pvPkiAppendCertContext = True
     End If
 End Function
 
@@ -2962,9 +2971,9 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
     Dim vErr            As Variant
 
     On Error GoTo EH
-    dwFlags = CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG Or CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG
+    dwFlags = CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG Or CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG Or CRYPT_ACQUIRE_SILENT_FLAG
     If CryptAcquireCertificatePrivateKey(pCertContext, dwFlags, 0, hProv, lKeySpec, lFree) = 0 Then
-        dwFlags = dwFlags Or CRYPT_ACQUIRE_CACHE_FLAG
+        dwFlags = (dwFlags Or CRYPT_ACQUIRE_CACHE_FLAG) And Not CRYPT_ACQUIRE_SILENT_FLAG
         If CryptAcquireCertificatePrivateKey(pCertContext, dwFlags, 0, hProv, lKeySpec, lFree) = 0 Then
             pvSetLastError Err.LastDllError, MODULE_NAME & "." & FUNC_NAME
             GoTo QH
@@ -2974,7 +2983,6 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
     If lKeySpec < 0 Then
         hNKey = pvPkiCloneKeyWithExportPolicy(hProv, NCRYPT_ALLOW_EXPORT_FLAG Or NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG)
         If hNKey = 0 Then
-            Debug.Assert (dwFlags And CRYPT_ACQUIRE_CACHE_FLAG) = 0
             cPrivKey.Add pvNCryptGetStringProperty(hProv, "Name")
             hResult = NCryptGetProperty(hProv, StrPtr("Provider Handle"), hNProv, LenB(hNProv), 0, 0)
             Debug.Assert Not hResult < 0
@@ -3347,10 +3355,9 @@ EH:
     Resume QH
 End Function
 
-Private Function pvPkiIssuerToCertRdn(vIssuer As Variant, uOutput As CERT_RDN) As Boolean
+Private Function pvPkiIssuerToCertRdn(vIssuer As Variant, uOutput As CERT_RDN, lOutputPtr As Long) As Boolean
     Const FUNC_NAME     As String = "pvPkiIssuerToCertRdn"
     Dim baRDN()         As Byte
-    Dim lPtr            As Long
     Dim uNameInfo       As CRYPT_DATA_BLOB
     Dim uCertRdn()      As CRYPT_DATA_BLOB
     Dim lIdx            As Long
@@ -3363,11 +3370,11 @@ Private Function pvPkiIssuerToCertRdn(vIssuer As Variant, uOutput As CERT_RDN) A
     End If
     baRDN = vIssuer
     If CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, X509_NAME, baRDN(0), UBound(baRDN) + 1, _
-            CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG Or CRYPT_DECODE_SHARE_OID_STRING_FLAG, 0, lPtr, 0) = 0 Then
+            CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG Or CRYPT_DECODE_SHARE_OID_STRING_FLAG, 0, lOutputPtr, 0) = 0 Then
         GoTo QH
     End If
-    Debug.Assert lPtr <> 0
-    Call CopyMemory(uNameInfo, ByVal lPtr, LenB(uNameInfo))
+    Debug.Assert lOutputPtr <> 0
+    Call CopyMemory(uNameInfo, ByVal lOutputPtr, LenB(uNameInfo))
     If uNameInfo.cbData > 0 Then
         ReDim uCertRdn(0 To uNameInfo.cbData - 1) As CRYPT_DATA_BLOB
         Debug.Assert uNameInfo.pbData <> 0
@@ -3391,10 +3398,6 @@ Private Function pvPkiIssuerToCertRdn(vIssuer As Variant, uOutput As CERT_RDN) A
     End If
 QH:
     On Error GoTo 0
-    If lPtr <> 0 Then
-        lPtr = LocalFree(lPtr)
-        Debug.Assert lPtr = 0
-    End If
     If IsArray(vErr) Then
         ErrRaise vErr(0), vErr(1), vErr(2)
     End If

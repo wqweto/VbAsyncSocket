@@ -3358,7 +3358,7 @@ Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, uI
                             End If
                             pvBufferReadBlockStart uInput, Size:=2, BlockSize:=lBlockSize
                                 lBlockEnd = uInput.Pos + lBlockSize
-                                If lBlockEnd <> lExtEnd Or lBlockSize = 0 Or lBlockSize Mod 2 <> 0 Then
+                                If lBlockEnd <> lExtEnd Or lBlockSize = 0 Then
                                     GoTo InvalidSize
                                 End If
                                 Set .CertRequestCaDn = New Collection
