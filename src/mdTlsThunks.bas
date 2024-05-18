@@ -3432,8 +3432,9 @@ Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, uI
                     Exit Do
                 End If
             Loop
-            bConfirmed = False
-            If .CertRequestSignatureScheme = -1 And .ClientCertCallback <> 0 Then
+            If bConfirmed Then
+                bConfirmed = False
+            ElseIf .CertRequestSignatureScheme = -1 And .ClientCertCallback <> 0 Then
                 Call vbaObjSetAddref(oCallback, .ClientCertCallback)
                 bConfirmed = oCallback.FireOnCertificate(.CertRequestCaDn)
             End If

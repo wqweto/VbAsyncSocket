@@ -76,7 +76,6 @@ Private Const PKCS_PRIVATE_KEY_INFO                     As Long = 44
 Private Const PKCS_ENCRYPTED_PRIVATE_KEY_INFO           As Long = 45
 Private Const X509_OBJECT_IDENTIFIER                    As Long = 73
 Private Const X509_ECC_PRIVATE_KEY                      As Long = 82
-Private Const CNG_RSA_PRIVATE_KEY_BLOB                  As Long = 83
 Private Const CRYPT_DECODE_NOCOPY_FLAG                  As Long = &H1
 Private Const CRYPT_DECODE_SHARE_OID_STRING_FLAG        As Long = &H4
 Private Const CRYPT_DECODE_ALLOC_FLAG                   As Long = &H8000
@@ -97,11 +96,7 @@ Private Const PRIVATEKEYBLOB                            As Long = 7
 Private Const CRYPT_ACQUIRE_CACHE_FLAG                  As Long = &H1
 Private Const CRYPT_ACQUIRE_SILENT_FLAG                 As Long = &H40
 Private Const CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG       As Long = &H10000
-'--- for NCryptImportKey
-Private Const NCRYPT_OVERWRITE_KEY_FLAG                 As Long = &H80
-Private Const NCRYPT_DO_NOT_FINALIZE_FLAG               As Long = &H400
-'--- for NCryptSetProperty
-Private Const NCRYPT_PERSIST_FLAG                       As Long = &H80000000
+Private Const CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG      As Long = &H20000
 '--- for CertStrToName
 Private Const CERT_OID_NAME_STR                         As Long = 2
 '--- for CertOpenStore
@@ -144,21 +139,12 @@ Private Const szOID_RSA_RSA                             As String = "1.2.840.113
 Private Const szOID_ECC_CURVE_P256                      As String = "1.2.840.10045.3.1.7"
 Private Const szOID_ECC_CURVE_P384                      As String = "1.3.132.0.34"
 Private Const szOID_ECC_CURVE_P521                      As String = "1.3.132.0.35"
-Private Const szOID_PKCS_12_pbeWithSHA1And3KeyTripleDES As String = "1.2.840.113549.1.12.1.3"
 Private Const szOID_SUBJECT_ALT_NAME2                   As String = "2.5.29.17"
 '--- BLOBs magic
 Private Const BCRYPT_RSAPRIVATE_MAGIC                   As Long = &H32415352
 Private Const BCRYPT_ECDH_PRIVATE_P256_MAGIC            As Long = &H324B4345
 Private Const BCRYPT_ECDH_PRIVATE_P384_MAGIC            As Long = &H344B4345
 Private Const BCRYPT_ECDH_PRIVATE_P521_MAGIC            As Long = &H364B4345
-'--- buffer types
-Private Const NCRYPTBUFFER_PKCS_ALG_OID                 As Long = 41
-Private Const NCRYPTBUFFER_PKCS_ALG_PARAM               As Long = 42
-Private Const NCRYPTBUFFER_PKCS_KEY_NAME                As Long = 45
-Private Const NCRYPTBUFFER_PKCS_SECRET                  As Long = 46
-'--- export policy flags
-Private Const NCRYPT_ALLOW_EXPORT_FLAG                  As Long = &H1
-Private Const NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG        As Long = &H2
 '--- errors
 Private Const WSAENOTCONN                               As Long = 10057
 Private Const ERR_TIMEOUT                               As Long = &H800705B4
@@ -204,12 +190,8 @@ Private Declare Function CertAddCertificateContextToStore Lib "crypt32" (ByVal h
 '--- cryptdlg
 Private Declare Function CertSelectCertificate Lib "cryptdlg" Alias "CertSelectCertificateW" (pCertSelectInfo As Any) As Long
 '--- NCrypt
-Private Declare Function NCryptImportKey Lib "ncrypt" (ByVal hProvider As Long, ByVal hImportKey As Long, ByVal pszBlobType As Long, pParameterList As Any, phKey As Long, pbData As Any, ByVal cbData As Long, ByVal dwFlags As Long) As Long
-Private Declare Function NCryptExportKey Lib "ncrypt" (ByVal hKey As Long, ByVal hExportKey As Long, ByVal pszBlobType As Long, pParameterList As Any, pbOutput As Any, ByVal cbOutput As Long, pcbResult As Any, ByVal dwFlags As Long) As Long
 Private Declare Function NCryptFreeObject Lib "ncrypt" (ByVal hKey As Long) As Long
 Private Declare Function NCryptGetProperty Lib "ncrypt" (ByVal hObject As Long, ByVal pszProperty As Long, pbOutput As Any, ByVal cbOutput As Long, pcbResult As Long, ByVal dwFlags As Long) As Long
-Private Declare Function NCryptSetProperty Lib "ncrypt" (ByVal hObject As Long, ByVal pszProperty As Long, pbInput As Any, ByVal cbInput As Long, ByVal dwFlags As Long) As Long
-Private Declare Function NCryptFinalizeKey Lib "ncrypt" (ByVal hKey As Long, ByVal dwFlags As Long) As Long
 '--- BCrypt
 #If ImplTlsServer And ImplEncryptedPrivateKey Then
     Private Declare Function BCryptOpenAlgorithmProvider Lib "bcrypt" (hAlgorithm As Long, ByVal pszAlgId As Long, ByVal pszImplementation As Long, ByVal dwFlags As Long) As Long
@@ -280,12 +262,6 @@ Private Type CRYPT_PRIVATE_KEY_INFO
     pAttributes         As Long
 End Type
 
-Private Type CRYPT_PKCS12_PBE_PARAMS
-    iIterations         As Long
-    cbSalt              As Long
-    SaltBuffer(0 To 31) As Byte
-End Type
-
 Private Type CERT_ALT_NAME_ENTRY
     dwAltNameChoice     As Long
     pwszDNSName         As Long
@@ -349,19 +325,6 @@ Private Type CERT_EXTENSION
     pszObjId            As Long
     fCritical           As Long
     Value               As CRYPT_DATA_BLOB
-End Type
-
-Private Type NCryptBuffer
-    cbBuffer            As Long
-    BufferType          As Long
-    pvBuffer            As Long
-End Type
-
-Private Type NCryptBufferDesc
-    ulVersion           As Long
-    cBuffers            As Long
-    pBuffers            As Long
-    Buffers()           As NCryptBuffer
 End Type
 
 Private Type CERT_CHAIN_ENGINE_CONFIG
@@ -447,7 +410,6 @@ Private Const ERR_TRUST_IS_PARTIAL_CHAIN                As String = "The certifi
 Private Const ERR_TRUST_IS_UNTRUSTED_ROOT               As String = "The certificate or certificate chain is based on an untrusted root"
 Private Const ERR_TRUST_IS_NOT_TIME_VALID               As String = "The certificate has expired"
 Private Const ERR_TRUST_REVOCATION_STATUS_UNKNOWN       As String = "The revocation status of the certificate or one of the certificates in the certificate chain is unknown"
-Private Const ERR_UNKNOWN_CNG_MAGIC                     As String = "Unknown CNG private key magic (%1)"
 Private Const ERR_UNKNOWN_CAPI_MAGIC                    As String = "Unknown CAPI private key magic (%1)"
 Private Const ERR_UNKNOWN_CERTIFICATECHAIN_ERROR_MASK   As String = "Unknown CertGetCertificateChain error mask (%1)"
 Private Const ERR_UNKNOWN_OID                           As String = "Unknown %1 OID (%2)"
@@ -2967,7 +2929,6 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
     Dim lKeySpec        As Long
     Dim lFree           As Long
     Dim hNProv          As Long
-    Dim hNKey           As Long
     Dim lSize           As Long
     Dim baBuffer()      As Byte
     Dim uProvInfo       As CRYPT_KEY_PROV_INFO
@@ -2979,7 +2940,7 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
     Dim vErr            As Variant
 
     On Error GoTo EH
-    dwFlags = CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG Or CRYPT_ACQUIRE_SILENT_FLAG
+    dwFlags = CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG Or CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG Or CRYPT_ACQUIRE_SILENT_FLAG
     If CryptAcquireCertificatePrivateKey(pCertContext, dwFlags, 0, hProv, lKeySpec, lFree) = 0 Then
         dwFlags = (dwFlags Or CRYPT_ACQUIRE_CACHE_FLAG) And Not CRYPT_ACQUIRE_SILENT_FLAG
         If CryptAcquireCertificatePrivateKey(pCertContext, dwFlags, 0, hProv, lKeySpec, lFree) = 0 Then
@@ -2989,58 +2950,10 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
     End If
     Set cPrivKey = New Collection
     If lKeySpec < 0 Then
-        hNKey = pvPkiCloneKeyWithExportPolicy(hProv, NCRYPT_ALLOW_EXPORT_FLAG Or NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG)
-        If hNKey = 0 Then
-            cPrivKey.Add pvNCryptGetStringProperty(hProv, "Name")
-            hResult = NCryptGetProperty(hProv, StrPtr("Provider Handle"), hNProv, LenB(hNProv), 0, 0)
-            Debug.Assert Not hResult < 0
-            cPrivKey.Add pvNCryptGetStringProperty(hNProv, "Name")
-        Else
-            hResult = NCryptExportKey(hNKey, 0, StrPtr("PRIVATEBLOB"), ByVal 0, ByVal 0, 0, lSize, 0)
-            If hResult < 0 Then
-                sApiSource = "NCryptExportKey(PRIVATEBLOB)"
-                GoTo QH
-            End If
-            pvArrayAllocate baBuffer, lSize, FUNC_NAME & ".baBuffer"
-            hResult = NCryptExportKey(hNKey, 0, StrPtr("PRIVATEBLOB"), ByVal 0, baBuffer(0), UBound(baBuffer) + 1, lSize, 0)
-            If hResult < 0 Then
-                sApiSource = "NCryptExportKey(PRIVATEBLOB)#2"
-                GoTo QH
-            End If
-            Debug.Assert UBound(baBuffer) + 1 >= LenB(lMagic)
-            Call CopyMemory(lMagic, baBuffer(0), LenB(lMagic))
-            Select Case lMagic
-            Case BCRYPT_RSAPRIVATE_MAGIC
-                hResult = NCryptExportKey(hNKey, 0, StrPtr("RSAFULLPRIVATEBLOB"), ByVal 0, ByVal 0, 0, lSize, 0)
-                If hResult < 0 Then
-                    sApiSource = "NCryptExportKey(RSAFULLPRIVATEBLOB)"
-                    GoTo QH
-                End If
-                pvArrayAllocate baBuffer, lSize, FUNC_NAME & ".baBuffer"
-                hResult = NCryptExportKey(hNKey, 0, StrPtr("RSAFULLPRIVATEBLOB"), ByVal 0, baBuffer(0), UBound(baBuffer) + 1, lSize, 0)
-                If hResult < 0 Then
-                    sApiSource = "NCryptExportKey(RSAFULLPRIVATEBLOB)#2"
-                    GoTo QH
-                End If
-                If Not pvPkiExportRsaPrivateKey(baPrivKey, baBuffer, CNG_RSA_PRIVATE_KEY_BLOB) Then
-                    GoTo QH
-                End If
-            Case BCRYPT_ECDH_PRIVATE_P256_MAGIC, BCRYPT_ECDH_PRIVATE_P384_MAGIC, BCRYPT_ECDH_PRIVATE_P521_MAGIC
-                Debug.Assert UBound(baBuffer) + 1 >= 8
-                Call CopyMemory(lSize, baBuffer(4), LenB(lSize))
-                Debug.Assert UBound(baBuffer) + 1 >= 8 + 3 * lSize
-                Call CopyMemory(baBuffer(0), baBuffer(8 + 2 * lSize), lSize)
-                pvArrayReallocate baBuffer, lSize, FUNC_NAME & ".baBuffer"
-                If Not pvPkiExportEccPrivateKey(baPrivKey, baBuffer, lMagic) Then
-                    GoTo QH
-                End If
-            Case Else
-                #If ImplUseDebugLog Then
-                    DebugLog MODULE_NAME, FUNC_NAME, Replace(ERR_UNKNOWN_CNG_MAGIC, "%1", "&H" & Hex$(lMagic)), vbLogEventTypeWarning
-                #End If
-            End Select
-            cPrivKey.Add baPrivKey
-        End If
+        cPrivKey.Add pvNCryptGetStringProperty(hProv, "Name")
+        hResult = NCryptGetProperty(hProv, StrPtr("Provider Handle"), hNProv, LenB(hNProv), 0, 0)
+        Debug.Assert Not hResult < 0
+        cPrivKey.Add pvNCryptGetStringProperty(hNProv, "Name")
    Else
         If CertGetCertificateContextProperty(pCertContext, CERT_KEY_PROV_INFO_PROP_ID, ByVal 0, lSize) = 0 Then
             '--- assume there is an ephemeral key in CERT_KEY_PROV_HANDLE_PROP_ID context property
@@ -3115,9 +3028,6 @@ QH:
     End If
     If hNProv <> 0 Then
         Call NCryptFreeObject(hNProv)
-    End If
-    If hNKey <> 0 Then
-        Call NCryptFreeObject(hNKey)
     End If
     If bDeleteKeyset And uProvInfo.pwszContainerName <> 0 Then
         Call CryptAcquireContext(0, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags Or CRYPT_DELETEKEYSET)
@@ -3225,131 +3135,6 @@ Private Function pvPkiExportEccPrivateKey(baRetVal() As Byte, baPrivBlob() As By
     pvPkiExportEccPrivateKey = True
 QH:
     On Error GoTo 0
-    If LenB(sApiSource) <> 0 Then
-        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
-    End If
-    If IsArray(vErr) Then
-        ErrRaise vErr(0), vErr(1), vErr(2)
-    End If
-    Exit Function
-EH:
-    vErr = Array(Err.Number, Err.Source, Err.Description)
-    PrintError FUNC_NAME
-    Resume QH
-End Function
-
-Private Function pvPkiCloneKeyWithExportPolicy(ByVal hKey As Long, ByVal lPolicy As Long) As Long
-    Const FUNC_NAME     As String = "pvPkiCloneKeyWithExportPolicy"
-    Const STR_PASSWORD  As String = "0000"
-    Dim baPkcs8()       As Byte
-    Dim uParams         As NCryptBufferDesc
-    Dim sSecret         As String
-    Dim sObjId          As String
-    Dim uPbeParams      As CRYPT_PKCS12_PBE_PARAMS
-    Dim lSize           As Long
-    Dim hProv           As Long
-    Dim sKeyName        As String
-    Dim hNewKey         As Long
-    Dim baBuffer()      As Byte
-    Dim hResult         As Long
-    Dim sApiSource      As String
-    Dim vErr            As Variant
-    
-    On Error GoTo EH
-    '--- export PKCS#8 password protected blob
-    ReDim uParams.Buffers(0 To 2) As NCryptBuffer
-    Debug.Assert RedimStats(MODULE_NAME & "." & FUNC_NAME & ".uParams.Buffers", 0)
-    uParams.cBuffers = UBound(uParams.Buffers) + 1
-    uParams.pBuffers = VarPtr(uParams.Buffers(0))
-    sSecret = STR_PASSWORD
-    With uParams.Buffers(0)
-        .BufferType = NCRYPTBUFFER_PKCS_SECRET
-        .pvBuffer = StrPtr(sSecret)
-        .cbBuffer = LenB(sSecret) + 2
-    End With
-    sObjId = StrConv(szOID_PKCS_12_pbeWithSHA1And3KeyTripleDES, vbFromUnicode)
-    With uParams.Buffers(1)
-        .BufferType = NCRYPTBUFFER_PKCS_ALG_OID
-        .pvBuffer = StrPtr(sObjId)
-        .cbBuffer = LenB(sObjId) + 1
-    End With
-    uPbeParams.cbSalt = 8
-    uPbeParams.iIterations = 2048
-    With uParams.Buffers(2)
-        .BufferType = NCRYPTBUFFER_PKCS_ALG_PARAM
-        .pvBuffer = VarPtr(uPbeParams)
-        .cbBuffer = 8 + uPbeParams.cbSalt
-    End With
-    hResult = NCryptExportKey(hKey, 0, StrPtr("PKCS8_PRIVATEKEY"), uParams, ByVal 0, 0, lSize, 0)
-    If hResult < 0 Then
-        GoTo QH
-    End If
-    pvArrayAllocate baPkcs8, lSize, FUNC_NAME & ".baPkcs8"
-    hResult = NCryptExportKey(hKey, 0, StrPtr("PKCS8_PRIVATEKEY"), uParams, baPkcs8(0), UBound(baPkcs8) + 1, lSize, 0)
-    If hResult < 0 Then
-        sApiSource = "NCryptExportKey(PKCS8_PRIVATEKEY)"
-        GoTo QH
-    End If
-    '--- retrieve more key props
-    hResult = NCryptGetProperty(hKey, StrPtr("Provider Handle"), hProv, LenB(hProv), 0, 0)
-    If hResult < 0 Then
-        sApiSource = "NCryptGetProperty(Provider Handle)"
-        GoTo QH
-    End If
-    hResult = NCryptGetProperty(hKey, StrPtr("Name"), ByVal 0, 0, lSize, 0)
-    If Not hResult < 0 Then
-        pvArrayAllocate baBuffer, lSize, FUNC_NAME & ".baBuffer"
-        hResult = NCryptGetProperty(hKey, StrPtr("Name"), baBuffer(0), UBound(baBuffer) + 1, lSize, 0)
-        If hResult < 0 Then
-            sApiSource = "NCryptGetProperty(Name)"
-            GoTo QH
-        End If
-        '--- remove trailing terminating zero too
-        sKeyName = Replace(CStr(baBuffer), vbNullChar, vbNullString)
-    End If
-    '--- import PKCS#8 blob and set Export Policy before finalizing
-    ReDim uParams.Buffers(0 To 1) As NCryptBuffer
-    Debug.Assert RedimStats(MODULE_NAME & "." & FUNC_NAME & ".uParams.Buffers", 0)
-    uParams.cBuffers = IIf(LenB(sKeyName) <> 0, 2, 1)
-    uParams.pBuffers = VarPtr(uParams.Buffers(0))
-    sSecret = STR_PASSWORD
-    With uParams.Buffers(0)
-        .BufferType = NCRYPTBUFFER_PKCS_SECRET
-        .pvBuffer = StrPtr(sSecret)
-        .cbBuffer = LenB(sSecret) + 2
-    End With
-    If LenB(sKeyName) <> 0 Then
-        With uParams.Buffers(1)
-            .BufferType = NCRYPTBUFFER_PKCS_KEY_NAME
-            .pvBuffer = StrPtr(sKeyName)
-            .cbBuffer = LenB(sKeyName) + 2
-        End With
-    End If
-    hResult = NCryptImportKey(hProv, 0, StrPtr("PKCS8_PRIVATEKEY"), uParams, hNewKey, baPkcs8(0), UBound(baPkcs8) + 1, NCRYPT_OVERWRITE_KEY_FLAG Or NCRYPT_DO_NOT_FINALIZE_FLAG)
-    If hResult < 0 Then
-        sApiSource = "NCryptImportKey(PKCS8_PRIVATEKEY)"
-        GoTo QH
-    End If
-    hResult = NCryptSetProperty(hNewKey, StrPtr("Export Policy"), lPolicy, LenB(lPolicy), NCRYPT_PERSIST_FLAG)
-    If hResult < 0 Then
-        sApiSource = "NCryptSetProperty(Export Policy)"
-        GoTo QH
-    End If
-    hResult = NCryptFinalizeKey(hNewKey, 0)
-    If hResult < 0 Then
-        sApiSource = "NCryptFinalizeKey"
-        GoTo QH
-    End If
-    pvPkiCloneKeyWithExportPolicy = hNewKey
-    hNewKey = 0
-QH:
-    On Error GoTo 0
-    If hNewKey <> 0 Then
-        Call NCryptFreeObject(hNewKey)
-    End If
-    If hProv <> 0 Then
-        Call NCryptFreeObject(hProv)
-    End If
     If LenB(sApiSource) <> 0 Then
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
