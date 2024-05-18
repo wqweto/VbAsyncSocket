@@ -118,6 +118,7 @@ Private Const CERT_SYSTEM_STORE_USERS                   As Long = &H60000
 Private Const CERT_STORE_ADD_USE_EXISTING               As Long = 2
 '--- for CertGetCertificateChain
 Private Const CERT_CHAIN_REVOCATION_CHECK_CHAIN         As Long = &H20000000
+Private Const CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT As Long = &H40000000
 Private Const CERT_TRUST_IS_NOT_TIME_VALID              As Long = &H1
 Private Const CERT_TRUST_IS_NOT_TIME_NESTED             As Long = &H2
 Private Const CERT_TRUST_IS_REVOKED                     As Long = &H4
@@ -813,7 +814,7 @@ Public Function StartTls( _
     If (LocalFeatures And ucsTlsSupportAll) = 0 Then
         m_eLocalFeatures = LocalFeatures Or ucsTlsSupportAll _
             Or IIf(OsVersion < ucsOsvXp, ucsTlsIgnoreServerCertificateErrors, 0) _
-            Or IIf(OsVersion < ucsOsvWin7, ucsTlsIgnoreServerCertificateRevocation, 0)
+            Or IIf(OsVersion < ucsOsvWin8, ucsTlsIgnoreServerCertificateRevocation, 0)
     Else
         m_eLocalFeatures = LocalFeatures
     End If
@@ -2768,7 +2769,7 @@ Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hRootStor
     '--- for the matched server certificate try to build a chain of certificates from the ones in the in-memory certificate store
     '---    and check this chain for revokation, expiry or missing link to a trust anchor
     uChainParams.cbSize = LenB(uChainParams)
-    dwFlags = IIf((m_eLocalFeatures And ucsTlsIgnoreServerCertificateRevocation) <> 0, 0, CERT_CHAIN_REVOCATION_CHECK_CHAIN)
+    dwFlags = IIf((m_eLocalFeatures And ucsTlsIgnoreServerCertificateRevocation) <> 0, 0, CERT_CHAIN_REVOCATION_CHECK_CHAIN Or CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT)
     If CertGetCertificateChain(hChainEngine, pCertContext, 0, 0, uChainParams, dwFlags, 0, pChainContext) = 0 Then
         hResult = Err.LastDllError
         sApiSource = "CertGetCertificateChain"
