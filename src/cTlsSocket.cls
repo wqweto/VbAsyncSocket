@@ -97,7 +97,6 @@ Private Const PRIVATEKEYBLOB                            As Long = 7
 Private Const CRYPT_ACQUIRE_CACHE_FLAG                  As Long = &H1
 Private Const CRYPT_ACQUIRE_SILENT_FLAG                 As Long = &H40
 Private Const CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG       As Long = &H10000
-Private Const CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG      As Long = &H20000
 '--- for NCryptImportKey
 Private Const NCRYPT_OVERWRITE_KEY_FLAG                 As Long = &H80
 Private Const NCRYPT_DO_NOT_FINALIZE_FLAG               As Long = &H400
@@ -108,6 +107,7 @@ Private Const CERT_OID_NAME_STR                         As Long = 2
 '--- for CertOpenStore
 Private Const CERT_STORE_PROV_MEMORY                    As Long = 2
 Private Const CERT_STORE_PROV_SYSTEM                    As Long = 10
+Private Const CERT_STORE_MAXIMUM_ALLOWED_FLAG           As Long = &H1000
 Private Const CERT_STORE_CREATE_NEW_FLAG                As Long = &H2000
 Private Const CERT_SYSTEM_STORE_CURRENT_USER            As Long = &H10000
 Private Const CERT_SYSTEM_STORE_LOCAL_MACHINE           As Long = &H20000
@@ -127,10 +127,10 @@ Private Const CERT_TRUST_REVOCATION_STATUS_UNKNOWN      As Long = &H40
 Private Const CERT_TRUST_IS_PARTIAL_CHAIN               As Long = &H10000
 '--- for CertFindCertificateInStore
 Private Const CERT_FIND_ANY                             As Long = 0
+Private Const CERT_FIND_HASH                            As Long = &H10000
 Private Const CERT_FIND_EXISTING                        As Long = &HD0000
 Private Const CERT_FIND_ISSUER_ATTR                     As Long = &H30004
 Private Const CERT_FIND_SUBJECT_STR                     As Long = &H80007
-Private Const CERT_FIND_HASH_STR                        As Long = &H140000
 '--- for CERT_ALT_NAME_ENTRY
 Private Const CERT_ALT_NAME_DNS_NAME                    As Long = 3
 '--- for CertCreateCertificateChainEngine
@@ -2379,6 +2379,8 @@ Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Var
     Dim sCertName       As String
     Dim dwFindType      As Long
     Dim pvFindPara      As Long
+    Dim baBuffer()      As Byte
+    Dim uHash           As CRYPT_DATA_BLOB
     Dim uSelect         As CERT_SELECT_STRUCT_W
     Dim lSize           As Long
     Dim hResult         As Long
@@ -2409,7 +2411,7 @@ Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Var
         If Not pvPkiParseSelectorString(SubjectOrIssuers, lStoreFlags, sStoreName, sCertName) Then
             GoTo QH
         End If
-        hCertStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0, lStoreFlags, StrPtr(sStoreName))
+        hCertStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0, lStoreFlags Or CERT_STORE_MAXIMUM_ALLOWED_FLAG, StrPtr(sStoreName))
         If hCertStore = 0 Then
             hResult = Err.LastDllError
             sApiSource = "CertOpenStore(&H" & Hex$(lStoreFlags) & ", " & sStoreName & ")"
@@ -2419,12 +2421,17 @@ Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Var
             dwFindType = CERT_FIND_ANY
             pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, 0)
         Else
-            pvFindPara = StrPtr(sCertName)
             dwFindType = CERT_FIND_SUBJECT_STR
+            pvFindPara = StrPtr(sCertName)
             pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, 0)
             If pCertContext = 0 Then
-                dwFindType = CERT_FIND_HASH_STR
-                pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, 0)
+                If pvFromHex(Replace(sCertName, " ", vbNullString), baBuffer) Then
+                    dwFindType = CERT_FIND_HASH
+                    uHash.pbData = VarPtr(baBuffer(0))
+                    uHash.cbData = UBound(baBuffer) + 1
+                    pvFindPara = VarPtr(uHash)
+                    pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, 0)
+                End If
             End If
         End If
     End If
@@ -2971,7 +2978,7 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
     Dim vErr            As Variant
 
     On Error GoTo EH
-    dwFlags = CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG Or CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG Or CRYPT_ACQUIRE_SILENT_FLAG
+    dwFlags = CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG Or CRYPT_ACQUIRE_SILENT_FLAG
     If CryptAcquireCertificatePrivateKey(pCertContext, dwFlags, 0, hProv, lKeySpec, lFree) = 0 Then
         dwFlags = (dwFlags Or CRYPT_ACQUIRE_CACHE_FLAG) And Not CRYPT_ACQUIRE_SILENT_FLAG
         If CryptAcquireCertificatePrivateKey(pCertContext, dwFlags, 0, hProv, lKeySpec, lFree) = 0 Then
@@ -3140,13 +3147,13 @@ Private Function pvPkiExportRsaPrivateKey(baRetVal() As Byte, baPrivBlob() As By
     On Error GoTo EH
     If CryptEncodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, lStructType, baPrivBlob(0), 0, 0, ByVal 0, lSize) = 0 Then
         hResult = Err.LastDllError
-        sApiSource = "CryptEncodeObjectEx"
+        sApiSource = "CryptEncodeObjectEx(" & lStructType & ")"
         GoTo QH
     End If
     pvArrayAllocate baRsaPrivKey, lSize, FUNC_NAME & ".baRsaPrivKey"
     If CryptEncodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, lStructType, baPrivBlob(0), 0, 0, baRsaPrivKey(0), lSize) = 0 Then
         hResult = Err.LastDllError
-        sApiSource = "CryptEncodeObjectEx#2"
+        sApiSource = "CryptEncodeObjectEx(" & lStructType & ")#2"
         GoTo QH
     End If
     sObjId = StrConv(szOID_RSA_RSA, vbFromUnicode)
@@ -3566,6 +3573,23 @@ Private Function pvNCryptGetStringProperty(ByVal hNKey As String, sPropName As S
     End If
     '--- remove trailing terminating zero too
     pvNCryptGetStringProperty = Replace(CStr(baBuffer), vbNullChar, vbNullString)
+QH:
+End Function
+
+Private Function pvFromHex(sText As String, baRetVal() As Byte) As Boolean
+    Dim lIdx            As Long
+    
+    On Error GoTo QH
+    If LenB(sText) = 0 Or sText Like "*[!0-9A-Fa-f]*" Then
+        GoTo QH
+    End If
+    ReDim baRetVal(0 To Len(sText) \ 2 - 1) As Byte
+    Debug.Assert RedimStats(MODULE_NAME & ".FromHex.baRetVal", UBound(baRetVal) + 1)
+    For lIdx = 1 To Len(sText) Step 2
+        baRetVal(lIdx \ 2) = "&H" & Mid$(sText, lIdx, 2)
+    Next
+    '--- success
+    pvFromHex = True
 QH:
 End Function
 
