@@ -2713,7 +2713,7 @@ Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hRootStor
     On Error GoTo EH
     '--- build custom chain engine that trusts the additional root CA certificates if provided
     If hRootStore <> 0 Then
-        If OsVersion <= ucsOsvWin7 Then
+        If OsVersion < ucsOsvWin8 Then
             uEngineConfig.cbSize = LenB(uEngineConfig) - 12
             uEngineConfig.cAdditionalStore = 1
             uEngineConfig.rghAdditionalStore = VarPtr(hRootStore)
@@ -2729,7 +2729,7 @@ Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hRootStor
         End If
     End If
     '--- for the matched server certificate try to build a chain of certificates from the ones in the in-memory certificate store
-    '---    and check this chain for revokation, expiry or missing link to a trust anchor
+    '---    and check this chain for revocation, expiry or missing link to a trust anchor
     uChainParams.cbSize = LenB(uChainParams)
     dwFlags = IIf((m_eLocalFeatures And ucsTlsIgnoreServerCertificateRevocation) <> 0, 0, CERT_CHAIN_REVOCATION_CHECK_CHAIN Or CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT)
     If CertGetCertificateChain(hChainEngine, pCertContext, 0, 0, uChainParams, dwFlags, 0, pChainContext) = 0 Then

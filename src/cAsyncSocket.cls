@@ -431,7 +431,8 @@ End Property
 
 '= helper window =========================================================
 
-Friend Property Get frMessageHWnd() As Long
+Public Property Get frMessageHWnd() As Long
+Attribute frMessageHWnd.VB_MemberFlags = "40"
     If Peek(ArrPtr(m_uWindowState)) <> 0 Then
         frMessageHWnd = m_uWindowState(0).hWnd
     End If
@@ -1764,7 +1765,8 @@ End Sub
 
 '= helper window =========================================================
 
-Friend Function frAddSocket(Socket As cAsyncSocket, Index As Long) As Boolean
+Public Function frAddSocket(Socket As cAsyncSocket, Index As Long) As Boolean
+Attribute frAddSocket.VB_MemberFlags = "40"
     Const FUNC_NAME     As String = "frAddSocket"
     Dim lSize           As Long
     Dim lIdx            As Long
@@ -1809,7 +1811,8 @@ EH:
     GoTo QH
 End Function
 
-Friend Function frRemoveSocket(Socket As cAsyncSocket, Index As Long) As Boolean
+Public Function frRemoveSocket(Socket As cAsyncSocket, Index As Long) As Boolean
+Attribute frRemoveSocket.VB_MemberFlags = "40"
     Const FUNC_NAME     As String = "frRemoveSocket"
     
     On Error GoTo EH
