@@ -1771,6 +1771,7 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                     GoTo RecordMacFailed
                 End If
                 lEnd = uInput.Pos + lRecordSize - .TagSize
+RetryDecrypt:
                 bResult = False
                 pvArrayXor baRemoteIV, .RemoteTrafficIV, .RemoteTrafficSeqNo
                 If .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13 Then
@@ -1799,6 +1800,11 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
                     bResult = pvTlsBulkDecrypt(.BulkAlgo, baRemoteIV, .RemoteTrafficKey, uAad.Data, 0, uAad.Size, uInput.Data, uInput.Pos, lEnd - uInput.Pos + .TagSize)
                 End If
                 If Not bResult Then
+                    If .RemoteTrafficSeqNo = 0 Then
+                        '--- note: TLS1_3_CLIENT sometimes sends close_notify during handshake (i.e. before TLS_HANDSHAKE_FINISHED) and drops first encrypted record
+                        .RemoteTrafficSeqNo = 1
+                        GoTo RetryDecrypt
+                    End If
                     GoTo DecryptionFailed
                 End If
                 #If (ImplCaptureTraffic And 1) <> 0 Then
