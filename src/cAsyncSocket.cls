@@ -470,8 +470,12 @@ Public Function Create( _
     End If
     m_hSocket = WSASocket(AF_INET, SocketType, SocketProtocol, 0, 0, WSA_FLAG_NO_HANDLE_INHERIT)
     If m_hSocket = INVALID_SOCKET Then
-        m_lLastError = Err.LastDllError
-        GoTo QH
+        '--- try w/o WSA_FLAG_NO_HANDLE_INHERIT flag which is supported on Win7+ only
+        m_hSocket = WSASocket(AF_INET, SocketType, SocketProtocol, 0, 0, 0)
+        If m_hSocket = INVALID_SOCKET Then
+            m_lLastError = Err.LastDllError
+            GoTo QH
+        End If
     End If
     Set m_pCleanup = InitCleanupThunk(m_hSocket, "ws2_32", "closesocket")
     If Not m_oHelperWindow.frAddSocket(Me, m_lIndex) Then
