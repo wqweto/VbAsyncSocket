@@ -12,6 +12,7 @@
 *.vbp        working-tree-encoding=CP1251 text eol=crlf
 *.vbr        working-tree-encoding=CP1251 text eol=crlf
 *.vbw        working-tree-encoding=CP1251 text eol=crlf
+*.vbs        working-tree-encoding=CP1251 text eol=crlf
  
 # Other source files (show diff + LF only in zip download)
 

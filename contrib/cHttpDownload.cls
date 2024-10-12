@@ -49,8 +49,10 @@ Private Const STGM_CREATE                   As Long = &H1000
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
-Private Declare Function SHCreateStreamOnFile Lib "shlwapi" Alias "SHCreateStreamOnFileW" (ByVal pszFile As Long, ByVal grfMode As Long, ppstm As IUnknown) As Long
+Private Declare Function SHCreateStreamOnFileW Lib "shlwapi" (ByVal pszFile As Long, ByVal grfMode As Long, ppstm As IUnknown) As Long
+Private Declare Function SHCreateStreamOnFileA Lib "shlwapi" (ByVal pszFile As String, ByVal grfMode As Long, ppstm As IUnknown) As Long
 Private Declare Function DispCallFunc Lib "oleaut32" (ByVal pvInstance As Long, ByVal oVft As Long, ByVal lCc As Long, ByVal vtReturn As VbVarType, ByVal cActuals As Long, prgVt As Any, prgpVarg As Any, pvargResult As Variant) As Long
+Private Declare Function GetVersion Lib "kernel32" () As Long
 
 '=========================================================================
 ' Constants and member variables
@@ -207,7 +209,11 @@ Private Sub pvInit(Url As String, LocalFileName As Variant, ByVal StreamFlags As
     Else
         m_sLocalFileName = LocalFileName
         m_lStreamFlags = StreamFlags
-        hResult = SHCreateStreamOnFile(StrPtr(m_sLocalFileName), m_lStreamFlags, m_pFileStream)
+        If IsNT Then
+            hResult = SHCreateStreamOnFileW(StrPtr(m_sLocalFileName), m_lStreamFlags, m_pFileStream)
+        Else
+            hResult = SHCreateStreamOnFileA(m_sLocalFileName, m_lStreamFlags, m_pFileStream)
+        End If
         If hResult < 0 Then
             On Error GoTo 0
             Err.Raise hResult
@@ -552,6 +558,10 @@ Private Function DispCallByVtbl(pUnk As IUnknown, ByVal lIndex As Long, ParamArr
     If hResult < 0 Then
         Err.Raise hResult, "DispCallFunc"
     End If
+End Function
+
+Private Function IsNT() As Boolean
+    IsNT = (GetVersion() >= 0)
 End Function
 
 '=========================================================================

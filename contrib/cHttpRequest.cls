@@ -122,11 +122,13 @@ Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal uc
 Private Declare Function VirtualProtect Lib "kernel32" (lpAddress As Any, ByVal dwSize As Long, ByVal flNewProtect As Long, lpflOldProtect As Long) As Long
 Private Declare Function GlobalFree Lib "kernel32" (ByVal hMem As Long) As Long
 Private Declare Function lstrlenW Lib "kernel32" (ByVal lpString As Long) As Long
+Private Declare Function GetVersion Lib "kernel32" () As Long
 Private Declare Function DispCallFunc Lib "oleaut32" (ByVal pvInstance As Long, ByVal oVft As Long, ByVal lCc As Long, ByVal vtReturn As VbVarType, ByVal cActuals As Long, prgVt As Any, prgpVarg As Any, pvargResult As Variant) As Long
 Private Declare Function WinHttpGetDefaultProxyConfiguration Lib "winhttp" (pProxyInfo As Any) As Long
 '--- shlwapi
 Private Declare Function SHCreateMemStream Lib "shlwapi" Alias "#12" (pInit As Any, ByVal cbInit As Long) As stdole.IUnknown
-Private Declare Function UrlEscape Lib "shlwapi" Alias "UrlEscapeW" (ByVal pszURL As Long, ByVal pszEscaped As Long, pcchEscaped As Long, ByVal dwFlags As Long) As Long
+Private Declare Function UrlEscapeW Lib "shlwapi" (ByVal pszURL As Long, ByVal pszEscaped As String, pcchEscaped As Long, ByVal dwFlags As Long) As Long
+Private Declare Function UrlEscapeA Lib "shlwapi" (ByVal pszURL As String, ByVal pszEscaped As String, pcchEscaped As Long, ByVal dwFlags As Long) As Long
 '--- libarchive
 Private Declare Function archive_read_new Lib "archiveint" Alias "_archive_read_new@0" () As Long
 Private Declare Function archive_read_free Lib "archiveint" Alias "_archive_read_free@4" (ByVal hArchive As Long) As Long
@@ -140,8 +142,8 @@ Private Declare Function archive_read_data Lib "archiveint" Alias "_archive_read
     Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
     '--- for Modern Subclassing Thunk (MST)
     Private Declare Function VirtualAlloc Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As Long
-    Private Declare Function CallWindowProc Lib "user32" Alias "CallWindowProcW" (ByVal lpPrevWndFunc As Long, ByVal hWnd As Long, ByVal Msg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
-    Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleW" (ByVal lpModuleName As Long) As Long
+    Private Declare Function CallWindowProc Lib "user32" Alias "CallWindowProcA" (ByVal lpPrevWndFunc As Long, ByVal hWnd As Long, ByVal Msg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
+    Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleA" (ByVal lpModuleName As String) As Long
     Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
     '--- end MST
 #End If
@@ -1143,10 +1145,18 @@ Private Function pvEscapePart(ByVal sPart As String, ByVal lFlags As Long) As St
     
     lSize = Len(sPart)
     sOutput = String$(lSize, 0)
-    hResult = UrlEscape(StrPtr(sPart), StrPtr(sOutput), lSize, lFlags)
+    If IsNT Then
+        hResult = UrlEscapeW(StrPtr(sPart), StrPtr(sOutput), lSize, lFlags)
+    Else
+        hResult = UrlEscapeA(sPart, sOutput, lSize, lFlags)
+    End If
     If hResult = E_POINTER Then
         sOutput = String$(lSize, 0)
-        hResult = UrlEscape(StrPtr(sPart), StrPtr(sOutput), lSize, lFlags)
+        If IsNT Then
+            hResult = UrlEscapeW(StrPtr(sPart), StrPtr(sOutput), lSize, lFlags)
+        Else
+            hResult = UrlEscapeA(sPart, sOutput, lSize, lFlags)
+        End If
     End If
     If hResult < 0 Then
         Err.Raise hResult, "UrlEscape", m_oSocket.GetErrorDescription(hResult)
@@ -1886,6 +1896,10 @@ Private Function DispCallByVtbl(pUnk As IUnknown, ByVal lIndex As Long, ParamArr
     End If
 End Function
 
+Private Function IsNT() As Boolean
+    IsNT = (GetVersion() >= 0)
+End Function
+
 Private Sub pvBufferWriteArray(uOutput As UcsBuffer, baSrc() As Byte)
     Dim lSize       As Long
     
@@ -1955,7 +1969,7 @@ Private Function InitAddressOfMethod(pObj As Object, ByVal MethodParamCount As L
     Dim lSize           As Long
     
     hThunk = pvThunkAllocate(STR_THUNK, THUNK_SIZE)
-    lSize = CallWindowProc(hThunk, ObjPtr(pObj), MethodParamCount, GetProcAddress(GetModuleHandle(StrPtr("kernel32")), "VirtualFree"), VarPtr(InitAddressOfMethod))
+    lSize = CallWindowProc(hThunk, ObjPtr(pObj), MethodParamCount, GetProcAddress(GetModuleHandle("kernel32"), "VirtualFree"), VarPtr(InitAddressOfMethod))
     Debug.Assert lSize = THUNK_SIZE
 End Function
 

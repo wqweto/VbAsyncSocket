@@ -151,16 +151,17 @@ Private Const ERR_TIMEOUT                               As Long = &H800705B4
 
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
-Private Declare Function GetFileAttributes Lib "kernel32" Alias "GetFileAttributesW" (ByVal lpFileName As Long) As Long
+Private Declare Function GetFileAttributes Lib "kernel32" Alias "GetFileAttributesA" (ByVal lpFileName As String) As Long
 Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
 Private Declare Function lstrlenA Lib "kernel32" (ByVal lpStr As Long) As Long
 Private Declare Function lstrlenW Lib "kernel32" (ByVal lpStr As Long) As Long
-Private Declare Function GetVersionEx Lib "kernel32" Alias "GetVersionExW" (lpVersionInformation As Any) As Long
+Private Declare Function GetVersionEx Lib "kernel32" Alias "GetVersionExA" (lpVersionInformation As Any) As Long
+Private Declare Function GetVersion Lib "kernel32" () As Long
 '--- msvbvm60
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
 '--- advapi32
-Private Declare Function CryptAcquireContext Lib "advapi32" Alias "CryptAcquireContextW" (phProv As Long, ByVal pszContainer As Long, ByVal pszProvider As Long, ByVal dwProvType As Long, ByVal dwFlags As Long) As Long
+Private Declare Function CryptAcquireContext Lib "advapi32" Alias "CryptAcquireContextA" (phProv As Long, pszContainer As Any, pszProvider As Any, ByVal dwProvType As Long, ByVal dwFlags As Long) As Long
 Private Declare Function CryptReleaseContext Lib "advapi32" (ByVal hProv As Long, ByVal dwFlags As Long) As Long
 Private Declare Function CryptGenKey Lib "advapi32" (ByVal hProv As Long, ByVal AlgId As Long, ByVal dwFlags As Long, phKey As Long) As Long
 Private Declare Function CryptDestroyKey Lib "advapi32" (ByVal hKey As Long) As Long
@@ -174,7 +175,8 @@ Private Declare Function PFXImportCertStore Lib "crypt32" (pPFX As Any, ByVal sz
 Private Declare Function CertFreeCertificateContext Lib "crypt32" (ByVal pCertContext As Long) As Long
 Private Declare Function CertEnumCertificatesInStore Lib "crypt32" (ByVal hCertStore As Long, ByVal pPrevCertContext As Long) As Long
 Private Declare Function CertGetCertificateContextProperty Lib "crypt32" (ByVal pCertContext As Long, ByVal dwPropId As Long, pvData As Any, pcbData As Long) As Long
-Private Declare Function CertStrToName Lib "crypt32" Alias "CertStrToNameW" (ByVal dwCertEncodingType As Long, ByVal pszX500 As Long, ByVal dwStrType As Long, ByVal pvReserved As Long, pbEncoded As Any, pcbEncoded As Long, ByVal ppszError As Long) As Long
+Private Declare Function CertStrToNameW Lib "crypt32" (ByVal dwCertEncodingType As Long, ByVal pszX500 As Long, ByVal dwStrType As Long, ByVal pvReserved As Long, pbEncoded As Any, pcbEncoded As Long, ByVal ppszError As Long) As Long
+Private Declare Function CertStrToNameA Lib "crypt32" (ByVal dwCertEncodingType As Long, ByVal pszX500 As String, ByVal dwStrType As Long, ByVal pvReserved As Long, pbEncoded As Any, pcbEncoded As Long, ByVal ppszError As Long) As Long
 Private Declare Function CertCreateSelfSignCertificate Lib "crypt32" (ByVal hCryptProvOrNCryptKey As Long, pSubjectIssuerBlob As Any, ByVal dwFlags As Long, pKeyProvInfo As Any, ByVal pSignatureAlgorithm As Long, pStartTime As Any, pEndTime As Any, ByVal pExtensions As Long) As Long
 Private Declare Function CertOpenStore Lib "crypt32" (ByVal lpszStoreProvider As Long, ByVal dwEncodingType As Long, ByVal hCryptProv As Long, ByVal dwFlags As Long, ByVal pvPara As Long) As Long
 Private Declare Function CertCloseStore Lib "crypt32" (ByVal hCertStore As Long, ByVal dwFlags As Long) As Long
@@ -188,7 +190,7 @@ Private Declare Function CertFindCertificateInStore Lib "crypt32" (ByVal hCertSt
 Private Declare Function CertSetCertificateContextProperty Lib "crypt32" (ByVal pCertContext As Long, ByVal dwPropId As Long, ByVal dwFlags As Long, pvData As Any) As Long
 Private Declare Function CertAddCertificateContextToStore Lib "crypt32" (ByVal hCertStore As Long, ByVal pCertContext As Long, ByVal dwAddDisposition As Long, ppStoreContext As Any) As Long
 '--- cryptdlg
-Private Declare Function CertSelectCertificate Lib "cryptdlg" Alias "CertSelectCertificateW" (pCertSelectInfo As Any) As Long
+Private Declare Function CertSelectCertificate Lib "cryptdlg" Alias "CertSelectCertificateA" (pCertSelectInfo As Any) As Long
 '--- NCrypt
 Private Declare Function NCryptFreeObject Lib "ncrypt" (ByVal hKey As Long) As Long
 Private Declare Function NCryptGetProperty Lib "ncrypt" (ByVal hObject As Long, ByVal pszProperty As Long, pbOutput As Any, ByVal cbOutput As Long, pcbResult As Long, ByVal dwFlags As Long) As Long
@@ -1050,6 +1052,10 @@ Public Sub PostEvent(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Optional By
         End Select
         pvFireAfterNotify EventMask
         If EventMask = ucsSfdRead And AvailableBytes = 0 Then
+            If m_oSocket.AvailableBytes > 0 Then
+                pvFireOnReceive
+                pvFireAfterNotify EventMask
+            End If
             m_oSocket.Receive 0, 0 '--- enable FD_READ notification
         End If
     Else
@@ -2309,6 +2315,7 @@ Private Function pvPkiPkcs12ImportCertificates(sPfxFile As String, sPassword As 
             Exit Do
         End If
         If pvPkiAppendCertContext(pCertContext, cCerts, cPrivKey, DeleteKeyset:=(dwFlags And PKCS12_NO_PERSIST_KEY) = 0) Then
+            pvSetLastError
             '--- success
             pvPkiPkcs12ImportCertificates = True
         End If
@@ -2363,6 +2370,10 @@ Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Var
                 dwFindType = CERT_FIND_ISSUER_ATTR
                 pvFindPara = VarPtr(uCertRdn)
                 pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, 0)
+                If pCertContext = 0 And hWndParent <> 0 Then
+                    uCertRdn.cRDNAttr = 1
+                    pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, 0)
+                End If
                 lCertRdnPtr = LocalFree(lCertRdnPtr)
                 Debug.Assert lCertRdnPtr = 0
                 If pCertContext <> 0 Then
@@ -2485,7 +2496,7 @@ Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey 
         .dwFlags = CRYPT_VERIFYCONTEXT
         .dwKeySpec = AT_KEYEXCHANGE
     End With
-    If CryptAcquireContext(hProv, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags) = 0 Then
+    If CryptAcquireContext(hProv, ByVal uProvInfo.pwszContainerName, ByVal uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags) = 0 Then
         hResult = Err.LastDllError
         sApiSource = "CryptAcquireContext"
         GoTo QH
@@ -2503,16 +2514,30 @@ Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey 
     Else
         sName = Subject
     End If
-    If CertStrToName(X509_ASN_ENCODING, StrPtr(sName), CERT_OID_NAME_STR, 0, ByVal 0, lSize, 0) = 0 Then
-        hResult = Err.LastDllError
-        sApiSource = "CertStrToName"
-        GoTo QH
-    End If
-    pvArrayAllocate baName, lSize, FUNC_NAME & ".baName"
-    If CertStrToName(X509_ASN_ENCODING, StrPtr(sName), CERT_OID_NAME_STR, 0, baName(0), lSize, 0) = 0 Then
-        hResult = Err.LastDllError
-        sApiSource = "CertStrToName#2"
-        GoTo QH
+    If IsNT Then
+        If CertStrToNameW(X509_ASN_ENCODING, StrPtr(sName), CERT_OID_NAME_STR, 0, ByVal 0, lSize, 0) = 0 Then
+            hResult = Err.LastDllError
+            sApiSource = "CertStrToNameW"
+            GoTo QH
+        End If
+        pvArrayAllocate baName, lSize, FUNC_NAME & ".baName"
+        If CertStrToNameW(X509_ASN_ENCODING, StrPtr(sName), CERT_OID_NAME_STR, 0, baName(0), lSize, 0) = 0 Then
+            hResult = Err.LastDllError
+            sApiSource = "CertStrToNameW#2"
+            GoTo QH
+        End If
+    Else
+        If CertStrToNameA(X509_ASN_ENCODING, sName, CERT_OID_NAME_STR, 0, ByVal 0, lSize, 0) = 0 Then
+            hResult = Err.LastDllError
+            sApiSource = "CertStrToNameA"
+            GoTo QH
+        End If
+        pvArrayAllocate baName, lSize, FUNC_NAME & ".baName"
+        If CertStrToNameA(X509_ASN_ENCODING, sName, CERT_OID_NAME_STR, 0, baName(0), lSize, 0) = 0 Then
+            hResult = Err.LastDllError
+            sApiSource = "CertStrToNameA#2"
+            GoTo QH
+        End If
     End If
     With uName
         .cbData = lSize
@@ -2555,6 +2580,10 @@ EH:
     Resume QH
 End Function
 #End If
+
+Private Function IsNT() As Boolean
+    IsNT = (GetVersion() >= 0)
+End Function
 
 Private Function pvPkiCertValidate(ByVal sHostName As String, cCerts As Collection, cStatuses As Collection, ByVal hRootStore As Long, sError As String) As Boolean
     Const FUNC_NAME     As String = "pvPkiCertValidate"
@@ -2930,10 +2959,11 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
     Dim lFree           As Long
     Dim hNProv          As Long
     Dim lSize           As Long
-    Dim baBuffer()      As Byte
+    Dim baInfo()        As Byte
     Dim uProvInfo       As CRYPT_KEY_PROV_INFO
     Dim hProvGetUserKey As Long
     Dim hKey            As Long
+    Dim baBuffer()      As Byte
     Dim lMagic          As Long
     Dim hResult         As Long
     Dim sApiSource      As String
@@ -2963,14 +2993,14 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
                 .dwKeySpec = lKeySpec
             End With
         Else
-            pvArrayAllocate baBuffer, lSize, FUNC_NAME & ".baBuffer"
-            If CertGetCertificateContextProperty(pCertContext, CERT_KEY_PROV_INFO_PROP_ID, baBuffer(0), lSize) = 0 Then
+            pvArrayAllocate baInfo, lSize, FUNC_NAME & ".baInfo"
+            If CertGetCertificateContextProperty(pCertContext, CERT_KEY_PROV_INFO_PROP_ID, baInfo(0), lSize) = 0 Then
                 hResult = Err.LastDllError
                 sApiSource = "CertGetCertificateContextProperty(CERT_KEY_PROV_INFO_PROP_ID)"
                 GoTo QH
             End If
-            Debug.Assert UBound(baBuffer) + 1 >= LenB(uProvInfo)
-            Call CopyMemory(uProvInfo, baBuffer(0), LenB(uProvInfo))
+            Debug.Assert UBound(baInfo) + 1 >= LenB(uProvInfo)
+            Call CopyMemory(uProvInfo, baInfo(0), LenB(uProvInfo))
         End If
         If CertGetCertificateContextProperty(pCertContext, CERT_KEY_PROV_HANDLE_PROP_ID, hProvGetUserKey, LenB(hProvGetUserKey)) = 0 Then
             hProvGetUserKey = hProv
@@ -3030,7 +3060,7 @@ QH:
         Call NCryptFreeObject(hNProv)
     End If
     If bDeleteKeyset And uProvInfo.pwszContainerName <> 0 Then
-        Call CryptAcquireContext(0, uProvInfo.pwszContainerName, uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags Or CRYPT_DELETEKEYSET)
+        Call CryptAcquireContext(0, ByVal uProvInfo.pwszContainerName, ByVal uProvInfo.pwszProvName, uProvInfo.dwProvType, uProvInfo.dwFlags Or CRYPT_DELETEKEYSET)
     End If
     If LenB(sApiSource) <> 0 Then
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
@@ -3484,7 +3514,7 @@ Private Function ReadBinaryFile(sFile As String) As Byte()
     Dim nFile           As Integer
     
     baBuffer = vbNullString
-    If GetFileAttributes(StrPtr(sFile)) <> -1 Then
+    If GetFileAttributes(sFile) <> -1 Then
         nFile = FreeFile
         Open sFile For Binary Access Read Shared As nFile
         If LOF(nFile) > 0 Then
@@ -3497,11 +3527,12 @@ Private Function ReadBinaryFile(sFile As String) As Byte()
 End Function
 
 Private Property Get OsVersion() As UcsOsVersionEnum
+    Const sizeof_OSVERSIONINFO As Long = 148
     Static lVersion     As Long
     Dim aVer(0 To 69)   As Long
     
     If lVersion = 0 Then
-        aVer(0) = LenB(aVer(0)) * UBound(aVer)  '--- [0] = dwOSVersionInfoSize
+        aVer(0) = sizeof_OSVERSIONINFO          '--- [0] = dwOSVersionInfoSize
         If GetVersionEx(aVer(0)) <> 0 Then
             lVersion = aVer(1) * 100 + aVer(2)  '--- [1] = dwMajorVersion, [2] = dwMinorVersion
         End If

@@ -172,8 +172,8 @@ Private Const INADDR_NONE                   As Long = -1
 Private Const WM_PAINT                      As Long = &HF
 Private Const WM_TIMER                      As Long = &H113
 Private Const WM_USER                       As Long = &H400
-Private Const WM_SOCKET_RESOLVE             As Long = WM_USER + 1
-Private Const WM_SOCKET_NOTIFY              As Long = WM_USER + 2
+Private Const WM_SOCKET_RESOLVE             As Long = WM_USER + 4
+Private Const WM_SOCKET_NOTIFY              As Long = WM_USER + 5
 '--- for Get/SetWindowLong
 Private Const GWL_USERDATA                  As Long = -21
 Private Const HWND_MESSAGE                  As Long = -3
@@ -192,17 +192,17 @@ Private Const SIGN_BIT                      As Long = &H80000000
 Private Declare Sub CopyMemory Lib "kernel32" Alias "RtlMoveMemory" (Destination As Any, Source As Any, ByVal Length As Long)
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
 Private Declare Function lstrlenA Lib "kernel32" (ByVal lpStr As Long) As Long
-Private Declare Function FindWindowEx Lib "user32" Alias "FindWindowExW" (ByVal hWndParent As Long, ByVal hWndChildAfter As Long, ByVal lpszClass As Long, ByVal lpszWindow As Long) As Long
-Private Declare Function GetWindowLong Lib "user32" Alias "GetWindowLongW" (ByVal hWnd As Long, ByVal nIndex As Long) As Long
-Private Declare Function FormatMessage Lib "kernel32" Alias "FormatMessageW" (ByVal dwFlags As Long, ByVal lpSource As Long, ByVal dwMessageId As Long, ByVal dwLanguageId As Long, ByVal lpBuffer As Long, ByVal nSize As Long, ByVal Args As Long) As Long
-Private Declare Function PostMessage Lib "user32" Alias "PostMessageW" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
+Private Declare Function FindWindowEx Lib "user32" Alias "FindWindowExA" (ByVal hWndParent As Long, ByVal hWndChildAfter As Long, ByVal lpszClass As String, ByVal lpszWindow As String) As Long
+Private Declare Function GetWindowLong Lib "user32" Alias "GetWindowLongA" (ByVal hWnd As Long, ByVal nIndex As Long) As Long
+Private Declare Function FormatMessage Lib "kernel32" Alias "FormatMessageA" (ByVal dwFlags As Long, ByVal lpSource As Long, ByVal dwMessageId As Long, ByVal dwLanguageId As Long, ByVal lpBuffer As String, ByVal nSize As Long, ByVal Args As Long) As Long
+Private Declare Function PostMessage Lib "user32" Alias "PostMessageA" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
 Private Declare Function WideCharToMultiByte Lib "kernel32" (ByVal CodePage As Long, ByVal dwFlags As Long, ByVal lpWideCharStr As Long, ByVal cchWideChar As Long, lpMultiByteStr As Any, ByVal cchMultiByte As Long, ByVal lpDefaultChar As Long, ByVal lpUsedDefaultChar As Long) As Long
 Private Declare Function MultiByteToWideChar Lib "kernel32" (ByVal CodePage As Long, ByVal dwFlags As Long, lpMultiByteStr As Any, ByVal cchMultiByte As Long, ByVal lpWideCharStr As Long, ByVal cchWideChar As Long) As Long
-Private Declare Function CreateWindowEx Lib "user32" Alias "CreateWindowExW" (ByVal dwExStyle As Long, ByVal lpClassName As Long, ByVal lpWindowName As Long, ByVal dwStyle As Long, ByVal lX As Long, ByVal lY As Long, ByVal nWidth As Long, ByVal nHeight As Long, ByVal hWndParent As Long, ByVal hMenu As Long, ByVal hInstance As Long, lpParam As Any) As Long
-Private Declare Function SetWindowLong Lib "user32" Alias "SetWindowLongW" (ByVal hWnd As Long, ByVal nIndex As Long, ByVal dwNewLong As Long) As Long
+Private Declare Function CreateWindowEx Lib "user32" Alias "CreateWindowExA" (ByVal dwExStyle As Long, ByVal lpClassName As String, ByVal lpWindowName As String, ByVal dwStyle As Long, ByVal lX As Long, ByVal lY As Long, ByVal nWidth As Long, ByVal nHeight As Long, ByVal hWndParent As Long, ByVal hMenu As Long, ByVal hInstance As Long, lpParam As Any) As Long
+Private Declare Function SetWindowLong Lib "user32" Alias "SetWindowLongA" (ByVal hWnd As Long, ByVal nIndex As Long, ByVal dwNewLong As Long) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
 Private Declare Function GetCurrentProcessId Lib "kernel32" () As Long
-Private Declare Function LoadLibrary Lib "kernel32" Alias "LoadLibraryW" (ByVal lpLibFileName As Long) As Long
+Private Declare Function LoadLibrary Lib "kernel32" Alias "LoadLibraryA" (ByVal lpLibFileName As String) As Long
 Private Declare Function GetAdaptersInfo Lib "iphlpapi" (lpAdapterInfo As Any, lpSize As Long) As Long
 Private Declare Function GetIpForwardTable Lib "iphlpapi" (pIpForwardTable As Any, pdwSize As Long, ByVal bOrder As Long) As Long
 Private Declare Function WSAStartup Lib "ws2_32" (ByVal wVersionRequired As Long, lpWSAData As Any) As Long
@@ -210,7 +210,7 @@ Private Declare Function WSACleanup Lib "ws2_32" () As Long
 Private Declare Function WSAAsyncGetHostByName Lib "ws2_32" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal strHostName As String, lpBuf As Any, ByVal lBufLen As Long) As Long
 Private Declare Function WSAAsyncSelect Lib "ws2_32" (ByVal lSocket As Long, ByVal hWnd As Long, ByVal wMsg As Long, ByVal lEvent As Long) As Long
 Private Declare Function WSACancelAsyncRequest Lib "ws2_32" (ByVal hAsyncTaskHandle As Long) As Long
-Private Declare Function WSASocket Lib "ws2_32" Alias "WSASocketW" (ByVal lAf As Long, ByVal lType As Long, ByVal lProtocol As Long, ByVal lpProtocolInfo As Long, ByVal lGroup As Long, ByVal dwFlags As Long) As Long
+Private Declare Function WSASocket Lib "ws2_32" Alias "WSASocketA" (ByVal lAf As Long, ByVal lType As Long, ByVal lProtocol As Long, ByVal lpProtocolInfo As Long, ByVal lGroup As Long, ByVal dwFlags As Long) As Long
 Private Declare Function ws_connect Lib "ws2_32" Alias "connect" (ByVal lSocket As Long, uName As SOCKADDR_IN, ByVal lNameLen As Long) As Long
 Private Declare Function ws_bind Lib "ws2_32" Alias "bind" (ByVal lSocket As Long, uName As SOCKADDR_IN, ByVal lNameLen As Long) As Long
 Private Declare Function ws_htonl Lib "ws2_32" Alias "htonl" (ByVal lHostLong As Long) As Long
@@ -233,8 +233,8 @@ Private Declare Function ws_inet_addr Lib "ws2_32" Alias "inet_addr" (ByVal sAdd
 Private Declare Function ws_gethostbyname Lib "ws2_32" Alias "gethostbyname" (ByVal sHostName As String) As Long
 Private Declare Function ws_gethostname Lib "ws2_32" Alias "gethostname" (ByVal sHostName As String, ByVal lNameLen As Long) As Long
 #If ImplSync Then
-    Private Declare Function PeekMessage Lib "user32" Alias "PeekMessageW" (lpMsg As APIMSG, ByVal hWnd As Long, ByVal wMsgFilterMin As Long, ByVal wMsgFilterMax As Long, ByVal wRemoveMsg As Long) As Long
-    Private Declare Function DispatchMessage Lib "user32" Alias "DispatchMessageW" (lpMsg As APIMSG) As Long
+    Private Declare Function PeekMessage Lib "user32" Alias "PeekMessageA" (lpMsg As APIMSG, ByVal hWnd As Long, ByVal wMsgFilterMin As Long, ByVal wMsgFilterMax As Long, ByVal wRemoveMsg As Long) As Long
+    Private Declare Function DispatchMessage Lib "user32" Alias "DispatchMessageA" (lpMsg As APIMSG) As Long
     Private Declare Function SetTimer Lib "user32" (ByVal hWnd As Long, ByVal nIDEvent As Long, ByVal uElapse As Long, ByVal lpTimerFunc As Long) As Long
     Private Declare Function KillTimer Lib "user32" (ByVal hWnd As Long, ByVal nIDEvent As Long) As Long
 '    Private Declare Function WaitMessage Lib "user32" () As Long
@@ -245,14 +245,14 @@ Private Declare Function ws_gethostname Lib "ws2_32" Alias "gethostname" (ByVal 
     Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
     '--- for Modern Subclassing Thunk (MST)
     Private Declare Function VirtualAlloc Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As Long
-    Private Declare Function CallWindowProc Lib "user32" Alias "CallWindowProcW" (ByVal lpPrevWndFunc As Long, ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
-    Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleW" (ByVal lpModuleName As Long) As Long
+    Private Declare Function CallWindowProc Lib "user32" Alias "CallWindowProcA" (ByVal lpPrevWndFunc As Long, ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
+    Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleA" (ByVal lpModuleName As String) As Long
     Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
     Private Declare Function GetProcByOrdinal Lib "kernel32" Alias "GetProcAddress" (ByVal hModule As Long, ByVal lpProcOrdinal As Long) As Long
     Private Declare Function DefSubclassProc Lib "comctl32" Alias "#413" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
     Private Declare Function GetWindowThreadProcessId Lib "user32" (ByVal hWnd As Long, lpdwProcessId As Long) As Long
-    Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableW" (ByVal lpName As Long, ByVal lpBuffer As Long, ByVal nSize As Long) As Long
-    Private Declare Function SetEnvironmentVariable Lib "kernel32" Alias "SetEnvironmentVariableW" (ByVal lpName As Long, ByVal lpValue As Long) As Long
+    Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableA" (ByVal lpName As String, ByVal lpBuffer As String, ByVal nSize As Long) As Long
+    Private Declare Function SetEnvironmentVariable Lib "kernel32" Alias "SetEnvironmentVariableA" (ByVal lpName As String, ByVal lpValue As String) As Long
     '--- end MST
 #End If
 
@@ -990,12 +990,16 @@ Public Function GetErrorDescription(ByVal ErrorCode As Long) As String
     
     On Error GoTo EH
     GetErrorDescription = String$(2000, 0)
-    lSize = FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM Or FORMAT_MESSAGE_IGNORE_INSERTS, 0, ErrorCode, 0, StrPtr(GetErrorDescription), Len(GetErrorDescription), 0)
+    lSize = FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM Or FORMAT_MESSAGE_IGNORE_INSERTS, 0, ErrorCode, 0, GetErrorDescription, Len(GetErrorDescription), 0)
     If lSize = 0 Then
-        lSize = FormatMessage(FORMAT_MESSAGE_FROM_HMODULE Or FORMAT_MESSAGE_IGNORE_INSERTS, LoadLibrary(StrPtr("mswsock")), ErrorCode And &HFFFF&, 0, StrPtr(GetErrorDescription), Len(GetErrorDescription), 0)
+        lSize = FormatMessage(FORMAT_MESSAGE_FROM_HMODULE Or FORMAT_MESSAGE_IGNORE_INSERTS, LoadLibrary("mswsock"), ErrorCode And &HFFFF&, 0, GetErrorDescription, Len(GetErrorDescription), 0)
     End If
     If lSize = 0 Then
-        lSize = FormatMessage(FORMAT_MESSAGE_FROM_HMODULE Or FORMAT_MESSAGE_IGNORE_INSERTS, LoadLibrary(StrPtr("winhttp")), ErrorCode And &HFFFF&, 0, StrPtr(GetErrorDescription), Len(GetErrorDescription), 0)
+        lSize = FormatMessage(FORMAT_MESSAGE_FROM_HMODULE Or FORMAT_MESSAGE_IGNORE_INSERTS, LoadLibrary("winhttp"), ErrorCode And &HFFFF&, 0, GetErrorDescription, Len(GetErrorDescription), 0)
+    End If
+    If lSize = 0 Then
+        GetErrorDescription = Replace("Unknown error (%1)", "%1", "&H" & Hex$(ErrorCode))
+        lSize = Len(GetErrorDescription)
     End If
     If lSize > 2 Then
         If Mid$(GetErrorDescription, lSize - 1, 2) = vbCrLf Then
@@ -1850,7 +1854,7 @@ Private Function pvHandleNotify(ByVal wMsg As Long, ByVal wParam As Long, ByVal 
     End If
     With m_uWindowState(0)
         Select Case wMsg
-        Case WM_SOCKET_NOTIFY - 1
+        Case WM_SOCKET_RESOLVE
             For lIdx = 0 To UBound(.SocketPtr)
                 If .SocketPtr(lIdx) <> 0 Then
                     If pvToSocket(.SocketPtr(lIdx)).frNotifyGetHostByName(wParam, lParam) Then
@@ -1931,7 +1935,7 @@ Private Function InitAddressOfMethod(pObj As Object, ByVal MethodParamCount As L
     Dim lSize           As Long
     
     hThunk = pvThunkAllocate(STR_THUNK, THUNK_SIZE)
-    lSize = CallWindowProc(hThunk, ObjPtr(pObj), MethodParamCount, GetProcAddress(GetModuleHandle(StrPtr("kernel32")), "VirtualFree"), VarPtr(InitAddressOfMethod))
+    lSize = CallWindowProc(hThunk, ObjPtr(pObj), MethodParamCount, GetProcAddress(GetModuleHandle("kernel32"), "VirtualFree"), VarPtr(InitAddressOfMethod))
     Debug.Assert lSize = THUNK_SIZE
 End Function
 
@@ -1950,17 +1954,17 @@ Private Function InitAsyncSelectNotifyThunk(ByVal hWnd As Long, pObj As Object, 
     If hThunk = 0 Then
         hThunk = pvThunkAllocate(STR_THUNK, THUNK_SIZE)
         Call DefSubclassProc(0, 0, 0, 0)                                            '--- load comctl32
-        aParams(2) = GetProcByOrdinal(GetModuleHandle(StrPtr("comctl32")), 410)      '--- 410 = SetWindowSubclass ordinal
-        aParams(3) = GetProcByOrdinal(GetModuleHandle(StrPtr("comctl32")), 412)      '--- 412 = RemoveWindowSubclass ordinal
-        aParams(4) = GetProcByOrdinal(GetModuleHandle(StrPtr("comctl32")), 413)      '--- 413 = DefSubclassProc ordinal
-        aParams(5) = GetProcAddress(GetModuleHandle(StrPtr("user32")), "SetTimer")
-        aParams(6) = GetProcAddress(GetModuleHandle(StrPtr("user32")), "KillTimer")
+        aParams(2) = GetProcByOrdinal(GetModuleHandle("comctl32"), 410)      '--- 410 = SetWindowSubclass ordinal
+        aParams(3) = GetProcByOrdinal(GetModuleHandle("comctl32"), 412)      '--- 412 = RemoveWindowSubclass ordinal
+        aParams(4) = GetProcByOrdinal(GetModuleHandle("comctl32"), 413)      '--- 413 = DefSubclassProc ordinal
+        aParams(5) = GetProcAddress(GetModuleHandle("user32"), "SetTimer")
+        aParams(6) = GetProcAddress(GetModuleHandle("user32"), "KillTimer")
         '--- for IDE protection
         Debug.Assert pvThunkIdeOwner(aParams(7))
         If aParams(7) <> 0 Then
-            aParams(8) = GetProcAddress(GetModuleHandle(StrPtr("user32")), "GetWindowLongA")
-            aParams(9) = GetProcAddress(GetModuleHandle(StrPtr("vba6")), "EbMode")
-            aParams(10) = GetProcAddress(GetModuleHandle(StrPtr("vba6")), "EbIsResetting")
+            aParams(8) = GetProcAddress(GetModuleHandle("user32"), "GetWindowLongA")
+            aParams(9) = GetProcAddress(GetModuleHandle("vba6"), "EbMode")
+            aParams(10) = GetProcAddress(GetModuleHandle("vba6"), "EbIsResetting")
         End If
         pvThunkGlobalData("InitAsyncSelectNotifyThunk" & App.ThreadID) = hThunk
     End If
@@ -1981,11 +1985,11 @@ Private Function InitCleanupThunk(ByVal hHandle As Long, sModuleName As String, 
     End If
     If hThunk = 0 Then
         hThunk = pvThunkAllocate(STR_THUNK, THUNK_SIZE)
-        aParams(0) = GetProcAddress(GetModuleHandle(StrPtr("ole32")), "CoTaskMemAlloc")
-        aParams(1) = GetProcAddress(GetModuleHandle(StrPtr("ole32")), "CoTaskMemFree")
+        aParams(0) = GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemAlloc")
+        aParams(1) = GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemFree")
         pvThunkGlobalData("InitCleanupThunk") = hThunk
     End If
-    pfnCleanup = GetProcAddress(GetModuleHandle(StrPtr(sModuleName)), sProcName)
+    pfnCleanup = GetProcAddress(GetModuleHandle(sModuleName), sProcName)
     If pfnCleanup <> 0 Then
         lSize = CallWindowProc(hThunk, hHandle, pfnCleanup, VarPtr(aParams(0)), VarPtr(InitCleanupThunk))
         Debug.Assert lSize = THUNK_SIZE
@@ -2017,7 +2021,7 @@ Private Function pvThunkIdeOwner(hIdeOwner As Long) As Boolean
         Dim lProcessId      As Long
         
         Do
-            hIdeOwner = FindWindowEx(0, hIdeOwner, StrPtr("IDEOwner"), 0)
+            hIdeOwner = FindWindowEx(0, hIdeOwner, "IDEOwner", vbNullString)
             Call GetWindowThreadProcessId(hIdeOwner, lProcessId)
         Loop While hIdeOwner <> 0 And lProcessId <> GetCurrentProcessId()
     #End If
@@ -2060,12 +2064,12 @@ Private Property Get pvThunkGlobalData(sKey As String) As Long
     Dim sBuffer     As String
     
     sBuffer = String$(50, 0)
-    Call GetEnvironmentVariable(StrPtr("_MST_GLOBAL" & GetCurrentProcessId() & "_" & sKey), StrPtr(sBuffer), Len(sBuffer) - 1)
+    Call GetEnvironmentVariable("_MST_GLOBAL" & GetCurrentProcessId() & "_" & sKey, sBuffer, Len(sBuffer) - 1)
     pvThunkGlobalData = Val(Left$(sBuffer, InStr(sBuffer, vbNullChar) - 1))
 End Property
 
 Private Property Let pvThunkGlobalData(sKey As String, ByVal lValue As Long)
-    Call SetEnvironmentVariable(StrPtr("_MST_GLOBAL" & GetCurrentProcessId() & "_" & sKey), StrPtr(lValue))
+    Call SetEnvironmentVariable("_MST_GLOBAL" & GetCurrentProcessId() & "_" & sKey, lValue)
 End Property
 #End If
 
@@ -2074,7 +2078,6 @@ End Property
 '=========================================================================
 
 Private Sub Class_Initialize()
-    Const ERR_INVALID_WINDOW_HANDLE As Long = 1400
     Dim sHelperName     As String
     Dim hWndParent      As Long
     Dim hWndHelper      As Long
@@ -2084,8 +2087,8 @@ Private Sub Class_Initialize()
     sHelperName = GetCurrentProcessId() & ":" & App.ThreadID & ":" & STR_HELPER_NAME
     hWndParent = HWND_MESSAGE
     Do
-        hWndHelper = FindWindowEx(hWndParent, 0, StrPtr(STR_HELPER_CLASS), StrPtr(sHelperName))
-        If hWndHelper = 0 And Err.LastDllError = ERR_INVALID_WINDOW_HANDLE Then
+        hWndHelper = FindWindowEx(hWndParent, 0, STR_HELPER_CLASS, sHelperName)
+        If hWndHelper = 0 And hWndParent <> 0 Then
             hWndParent = 0
         Else
             Exit Do
@@ -2094,7 +2097,7 @@ Private Sub Class_Initialize()
     lPtr = GetWindowLong(hWndHelper, GWL_USERDATA)
     If hWndHelper = 0 Or lPtr <> 0 Then
         If hWndHelper = 0 Then
-            hWndHelper = CreateWindowEx(0, StrPtr(STR_HELPER_CLASS), StrPtr(sHelperName), 0, 0, 0, 0, 0, hWndParent, 0, App.hInstance, ByVal 0)
+            hWndHelper = CreateWindowEx(0, STR_HELPER_CLASS, sHelperName, 0, 0, 0, 0, 0, hWndParent, 0, App.hInstance, ByVal 0)
         End If
         If lPtr <> 0 Then
             Set m_oHelperWindow = pvToSocket(lPtr)

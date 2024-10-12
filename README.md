@@ -14,7 +14,7 @@ Additionally there is a source-compatible `cTlsSocket` class for transparent TLS
 
 3. `mdTlsSodium` is a stripped down compact backend with dependency on libsodium for crypto primitives (no ASM thunking used) with a total compiled size of 64KB.
 
-The VB6 with thunks backend implementation auto-detects AES-NI and PCLMULQDQ instruction set availability on client machine and switches to [performance optimized implementation of AES](https://github.com/wqweto/VbAsyncSocket/blob/4b7f4d8bc650688e2b6ad5460c997ed1df26d2e0/lib/thunks/sshaes.c#L100-L240)[-GCM](https://github.com/wqweto/VbAsyncSocket/blob/4b7f4d8bc650688e2b6ad5460c997ed1df26d2e0/lib/thunks/gf128.c#L116-L165) which is even faster that OS native SSPI/Schannel implementation of this cipher suit. The VB6 with thunks backend and native backend support legacy OSes up to NT 4.0 while libsodium DLL is compiled with XP support only.
+The VB6 with thunks backend implementation auto-detects AES-NI and PCLMULQDQ instruction set availability on client machine and switches to [performance optimized implementation of AES](https://github.com/wqweto/VbAsyncSocket/blob/4b7f4d8bc650688e2b6ad5460c997ed1df26d2e0/lib/thunks/sshaes.c#L100-L240)[-GCM](https://github.com/wqweto/VbAsyncSocket/blob/4b7f4d8bc650688e2b6ad5460c997ed1df26d2e0/lib/thunks/gf128.c#L116-L165) which is even faster that OS native SSPI/Schannel implementation of this cipher suit. The VB6 with thunks backend and native backend support legacy OSes up to NT 4.0 and Windows 98 while libsodium DLL is compiled with XP support only.
 
 ### Usage
 
@@ -92,6 +92,12 @@ Cipher Suite | First&nbsp;In | Selection String | Notes
 <sub><sup>TLS_RSA_WITH_AES_256_CBC_SHA                    </sup></sub>|SSLv3|RSA+AES+SHA1|Weak, No FS, HMAC-SHA1
 
 Note that "exotic" cipher suites are included behind a conditional compilation flag only (off by default).
+
+### Legacy Support
+
+Screenshot from Windows 98 Second Edition running on Pentium II
+
+[<img src="https://dl.unicontsoft.com/upload/pix/ss_vbasyncsocket_win9x.png" width="250"/>](https://dl.unicontsoft.com/upload/pix/ss_vbasyncsocket_win9x.png)
 
 ### ToDo
 

@@ -95,17 +95,17 @@ Private Declare Sub FillMemory Lib "kernel32" Alias "RtlFillMemory" (Destination
 Private Declare Function IsBadReadPtr Lib "kernel32" (ByVal lp As Long, ByVal ucb As Long) As Long
 Private Declare Function VirtualAlloc Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As Long
 Private Declare Function VirtualProtect Lib "kernel32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flNewProtect As Long, lpflOldProtect As Long) As Long
-Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleW" (ByVal lpModuleName As Long) As Long
+Private Declare Function GetModuleHandle Lib "kernel32" Alias "GetModuleHandleA" (ByVal lpModuleName As String) As Long
 Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
 Private Declare Function lstrlenA Lib "kernel32" (ByVal lpStr As Long) As Long
 Private Declare Function LocalFree Lib "kernel32" (ByVal hMem As Long) As Long
-Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableW" (ByVal lpName As Long, ByVal lpBuffer As Long, ByVal nSize As Long) As Long
-Private Declare Function GetVersionEx Lib "kernel32" Alias "GetVersionExW" (lpVersionInformation As Any) As Long
+Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableA" (ByVal lpName As String, ByVal lpBuffer As String, ByVal nSize As Long) As Long
+Private Declare Function GetVersionEx Lib "kernel32" Alias "GetVersionExA" (lpVersionInformation As Any) As Long
 '--- msvbvm60
 Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
 '--- advapi32
-Private Declare Function CryptAcquireContext Lib "advapi32" Alias "CryptAcquireContextW" (phProv As Long, ByVal pszContainer As Long, ByVal pszProvider As Long, ByVal dwProvType As Long, ByVal dwFlags As Long) As Long
+Private Declare Function CryptAcquireContext Lib "advapi32" Alias "CryptAcquireContextA" (phProv As Long, ByVal pszContainer As String, ByVal pszProvider As String, ByVal dwProvType As Long, ByVal dwFlags As Long) As Long
 Private Declare Function CryptReleaseContext Lib "advapi32" (ByVal hProv As Long, ByVal dwFlags As Long) As Long
 Private Declare Function CryptGenRandom Lib "advapi32" (ByVal hProv As Long, ByVal dwLen As Long, ByVal pbBuffer As Long) As Long
 Private Declare Function CryptDestroyKey Lib "advapi32" (ByVal hKey As Long) As Long
@@ -116,7 +116,7 @@ Private Declare Function CryptHashData Lib "advapi32" (ByVal hHash As Long, pbDa
 Private Declare Function CryptGetHashParam Lib "advapi32" (ByVal hHash As Long, ByVal dwParam As Long, pbData As Any, pdwDataLen As Long, ByVal dwFlags As Long) As Long
 Private Declare Function CryptSetHashParam Lib "advapi32" (ByVal hHash As Long, ByVal dwParam As Long, pbData As Any, ByVal dwFlags As Long) As Long
 Private Declare Function CryptGetUserKey Lib "advapi32" (ByVal hProv As Long, ByVal dwKeySpec As Long, phUserKey As Long) As Long
-Private Declare Function CryptSignHash Lib "advapi32" Alias "CryptSignHashW" (ByVal hHash As Long, ByVal dwKeySpec As Long, ByVal szDescription As Long, ByVal dwFlags As Long, pbSignature As Any, pdwSigLen As Long) As Long
+Private Declare Function CryptSignHash Lib "advapi32" Alias "CryptSignHashA" (ByVal hHash As Long, ByVal dwKeySpec As Long, ByVal szDescription As String, ByVal dwFlags As Long, pbSignature As Any, pdwSigLen As Long) As Long
 Private Declare Function CryptDecrypt Lib "advapi32" (ByVal hKey As Long, ByVal hHash As Long, ByVal Final As Long, ByVal dwFlags As Long, pbData As Any, pdwDataLen As Long) As Long
 '--- Crypt32
 Private Declare Function CryptImportPublicKeyInfo Lib "crypt32" (ByVal hCryptProv As Long, ByVal dwCertEncodingType As Long, pInfo As Any, phKey As Long) As Long
@@ -4266,7 +4266,7 @@ Private Sub pvTlsLogSecret(uCtx As UcsTlsContext, sLabel As String, baSecret() A
     
     On Error GoTo EH
     sFileName = String$(1000, 0)
-    Call GetEnvironmentVariable(StrPtr("SSLKEYLOGFILE"), StrPtr(sFileName), Len(sFileName) + 1)
+    Call GetEnvironmentVariable("SSLKEYLOGFILE", sFileName, Len(sFileName) + 1)
     sFileName = Left$(sFileName, InStr(sFileName, vbNullChar) - 1)
     If LenB(sFileName) <> 0 Then
         If Size < 0 Then
@@ -4632,13 +4632,13 @@ Private Sub pvTlsSignatureSign(baRetVal() As Byte, cCerts As Collection, cPrivKe
             sApiSource = "CryptSetHashParam(HP_HASHVAL)"
             GoTo QH
         End If
-        If CryptSignHash(hHash, uKeyInfo.dwKeySpec, 0, 0, ByVal 0, lSize) = 0 Then
+        If CryptSignHash(hHash, uKeyInfo.dwKeySpec, vbNullString, 0, ByVal 0, lSize) = 0 Then
             hResult = Err.LastDllError
             sApiSource = "CryptSignHash"
             GoTo QH
         End If
         pvArrayAllocate baRetVal, lSize, FUNC_NAME & ".baRetVal"
-        If CryptSignHash(hHash, uKeyInfo.dwKeySpec, 0, 0, baRetVal(0), lSize) = 0 Then
+        If CryptSignHash(hHash, uKeyInfo.dwKeySpec, vbNullString, 0, baRetVal(0), lSize) = 0 Then
             hResult = Err.LastDllError
             sApiSource = "CryptSignHash#2"
             GoTo QH
@@ -5695,10 +5695,10 @@ Private Function pvAsn1DecodePrivateKey(cCerts As Collection, cPrivKey As Collec
             Else
                 If .Item(IDX_PROVTYPE) = PROV_RSA_FULL Then
                     '--- try using PROV_RSA_AES to have SHA-2 available in pvTlsSignatureSign
-                    Call CryptAcquireContext(hProv, StrPtr(.Item(IDX_KEYNAME)), 0, PROV_RSA_AES, 0)
+                    Call CryptAcquireContext(hProv, .Item(IDX_KEYNAME), vbNullString, PROV_RSA_AES, 0)
                 End If
                 If hProv = 0 Then
-                    If CryptAcquireContext(hProv, StrPtr(.Item(IDX_KEYNAME)), StrPtr(.Item(IDX_PROVNAME)), .Item(IDX_PROVTYPE), 0) = 0 Then
+                    If CryptAcquireContext(hProv, .Item(IDX_KEYNAME), .Item(IDX_PROVNAME), .Item(IDX_PROVTYPE), 0) = 0 Then
                         hResult = Err.LastDllError
                         sApiSource = "CryptAcquireContext"
                         GoTo QH
@@ -5826,7 +5826,7 @@ Private Function pvAsn1DecodeCertificate(baCert() As Byte, uRetVal As UcsKeyInfo
     pvArrayAllocate uRetVal.KeyBlob, uPublicKeyInfo.PublicKey.cbData, FUNC_NAME & ".uRetVal.KeyBlob"
     Call CopyMemory(uRetVal.KeyBlob(0), ByVal uPublicKeyInfo.PublicKey.pbData, uPublicKeyInfo.PublicKey.cbData)
     If uRetVal.AlgoObjId = szOID_RSA_RSA Then
-        If CryptAcquireContext(hProv, 0, 0, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT) = 0 Then
+        If CryptAcquireContext(hProv, vbNullString, vbNullString, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT) = 0 Then
             GoTo QH
         End If
         If CryptImportPublicKeyInfo(hProv, X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, ByVal lPtr, hKey) = 0 Then
@@ -6006,7 +6006,7 @@ Private Function pvCryptoInit() As Boolean
     
     With m_uData
         If .hRandomProv = 0 Then
-            If CryptAcquireContext(.hRandomProv, 0, 0, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT) = 0 Then
+            If CryptAcquireContext(.hRandomProv, vbNullString, vbNullString, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT) = 0 Then
                 hResult = Err.LastDllError
                 sApiSource = "CryptAcquireContext"
                 GoTo QH
@@ -6049,9 +6049,9 @@ Private Function pvCryptoInit() As Boolean
             Call pvPatchTrampoline(AddressOf pvCallRsaCrtModExp)
             '--- init thunk's first 4 bytes -> global data in C/C++
             Call CopyMemory(ByVal .Thunk, VarPtr(.Glob(0)), 4)
-            Call CopyMemory(.Glob(0), GetProcAddress(GetModuleHandle(StrPtr("ole32")), "CoTaskMemAlloc"), 4)
-            Call CopyMemory(.Glob(4), GetProcAddress(GetModuleHandle(StrPtr("ole32")), "CoTaskMemRealloc"), 4)
-            Call CopyMemory(.Glob(8), GetProcAddress(GetModuleHandle(StrPtr("ole32")), "CoTaskMemFree"), 4)
+            Call CopyMemory(.Glob(0), GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemAlloc"), 4)
+            Call CopyMemory(.Glob(4), GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemRealloc"), 4)
+            Call CopyMemory(.Glob(8), GetProcAddress(GetModuleHandle("ole32"), "CoTaskMemFree"), 4)
         End If
     End With
     '--- success
@@ -6892,11 +6892,12 @@ Private Function Clamp( _
 End Function
 
 Private Property Get OsVersion() As UcsOsVersionEnum
+    Const sizeof_OSVERSIONINFO As Long = 148
     Static lVersion     As Long
     Dim aVer(0 To 69)   As Long
     
     If lVersion = 0 Then
-        aVer(0) = LenB(aVer(0)) * UBound(aVer)  '--- [0] = dwOSVersionInfoSize
+        aVer(0) = sizeof_OSVERSIONINFO          '--- [0] = dwOSVersionInfoSize
         If GetVersionEx(aVer(0)) <> 0 Then
             lVersion = aVer(1) * 100 + aVer(2)  '--- [1] = dwMajorVersion, [2] = dwMinorVersion
         End If
