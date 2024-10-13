@@ -457,6 +457,7 @@ Public Function Create( _
             Optional SocketAddress As String, _
             Optional ByVal SocketProtocol As UcsAsyncSocketProtocolEnum) As Boolean
     Const FUNC_NAME     As String = "Create"
+    Const WSA_FLAG_OVERLAPPED As Long = 1
     Const WSA_FLAG_NO_HANDLE_INHERIT As Long = &H80
     
     On Error GoTo EH
@@ -468,10 +469,10 @@ Public Function Create( _
         m_lLastError = WSANOTINITIALISED
         GoTo QH
     End If
-    m_hSocket = WSASocket(AF_INET, SocketType, SocketProtocol, 0, 0, WSA_FLAG_NO_HANDLE_INHERIT)
+    m_hSocket = WSASocket(AF_INET, SocketType, SocketProtocol, 0, 0, WSA_FLAG_OVERLAPPED Or WSA_FLAG_NO_HANDLE_INHERIT)
     If m_hSocket = INVALID_SOCKET Then
         '--- try w/o WSA_FLAG_NO_HANDLE_INHERIT flag which is supported on Win7+ only
-        m_hSocket = WSASocket(AF_INET, SocketType, SocketProtocol, 0, 0, 0)
+        m_hSocket = WSASocket(AF_INET, SocketType, SocketProtocol, 0, 0, WSA_FLAG_OVERLAPPED)
         If m_hSocket = INVALID_SOCKET Then
             m_lLastError = Err.LastDllError
             GoTo QH
