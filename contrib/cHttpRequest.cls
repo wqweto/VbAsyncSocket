@@ -127,7 +127,7 @@ Private Declare Function DispCallFunc Lib "oleaut32" (ByVal pvInstance As Long, 
 Private Declare Function WinHttpGetDefaultProxyConfiguration Lib "winhttp" (pProxyInfo As Any) As Long
 '--- shlwapi
 Private Declare Function SHCreateMemStream Lib "shlwapi" Alias "#12" (pInit As Any, ByVal cbInit As Long) As stdole.IUnknown
-Private Declare Function UrlEscapeW Lib "shlwapi" (ByVal pszURL As Long, ByVal pszEscaped As String, pcchEscaped As Long, ByVal dwFlags As Long) As Long
+Private Declare Function UrlEscapeW Lib "shlwapi" (ByVal pszURL As Long, ByVal pszEscaped As Long, pcchEscaped As Long, ByVal dwFlags As Long) As Long
 Private Declare Function UrlEscapeA Lib "shlwapi" (ByVal pszURL As String, ByVal pszEscaped As String, pcchEscaped As Long, ByVal dwFlags As Long) As Long
 '--- libarchive
 Private Declare Function archive_read_new Lib "archiveint" Alias "_archive_read_new@0" () As Long
