@@ -1017,11 +1017,15 @@ Private Sub pvTlsBuildClientHello(uCtx As UcsTlsContext, uOutput As UcsBuffer)
             pvBufferWriteLong uOutput, TLS_HANDSHAKE_CLIENT_HELLO
             pvBufferWriteBlockStart uOutput, Size:=3
                 pvBufferWriteLong uOutput, TLS_LOCAL_LEGACY_VERSION, Size:=2
-                pvTlsGetRandom .LocalExchRandom, TLS_HELLO_RANDOM_SIZE
+                If pvArraySize(.LocalExchRandom) = 0 Then
+                    pvTlsGetRandom .LocalExchRandom, TLS_HELLO_RANDOM_SIZE
+                End If
                 pvBufferWriteArray uOutput, .LocalExchRandom
                 '--- Legacy Session ID
                 pvBufferWriteBlockStart uOutput
-                    If pvArraySize(.LocalSessionID) = 0 And (.LocalFeatures And ucsTlsSupportTls12) <> 0 Then
+                    If .HelloRetryRequest Then
+                        pvBufferWriteArray uOutput, .RemoteSessionID
+                    ElseIf pvArraySize(.LocalSessionID) = 0 And (.LocalFeatures And ucsTlsSupportTls12) <> 0 Then
                         '--- non-empty for TLS 1.2 compatibility
                         pvTlsGetRandom baTemp, TLS_HELLO_RANDOM_SIZE
                         pvBufferWriteArray uOutput, baTemp
@@ -1071,19 +1075,13 @@ Private Sub pvTlsBuildClientHello(uCtx As UcsTlsContext, uOutput As UcsBuffer)
                     pvBufferWriteBlockStart uOutput, Size:=2
                         pvBufferWriteBlockStart uOutput, Size:=2
                             If pvCryptoIsSupported(ucsTlsAlgoExchX25519) Then
-                                If .HelloRetryExchGroup = 0 Or .HelloRetryExchGroup = TLS_GROUP_X25519 Then
-                                    pvBufferWriteLong uOutput, TLS_GROUP_X25519, Size:=2
-                                End If
+                                pvBufferWriteLong uOutput, TLS_GROUP_X25519, Size:=2
                             End If
                             If pvCryptoIsSupported(ucsTlsAlgoExchSecp256r1) Then
-                                If .HelloRetryExchGroup = 0 Or .HelloRetryExchGroup = TLS_GROUP_SECP256R1 Then
-                                    pvBufferWriteLong uOutput, TLS_GROUP_SECP256R1, Size:=2
-                                End If
+                                pvBufferWriteLong uOutput, TLS_GROUP_SECP256R1, Size:=2
                             End If
                             If pvCryptoIsSupported(ucsTlsAlgoExchSecp384r1) Then
-                                If .HelloRetryExchGroup = 0 Or .HelloRetryExchGroup = TLS_GROUP_SECP384R1 Then
-                                    pvBufferWriteLong uOutput, TLS_GROUP_SECP384R1, Size:=2
-                                End If
+                                pvBufferWriteLong uOutput, TLS_GROUP_SECP384R1, Size:=2
                             End If
                         pvBufferWriteBlockEnd uOutput
                     pvBufferWriteBlockEnd uOutput
@@ -2704,7 +2702,9 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
                                 GoTo InvalidSize
                             End If
                             pvBufferReadLong uInput, lExchGroup, Size:=2
-                            pvTlsSetupExchGroup uCtx, lExchGroup
+                            If .ExchGroup <> lExchGroup Then
+                                pvTlsSetupExchGroup uCtx, lExchGroup
+                            End If
                             If .HelloRetryRequest Then
                                 .HelloRetryExchGroup = lExchGroup
                             Else
