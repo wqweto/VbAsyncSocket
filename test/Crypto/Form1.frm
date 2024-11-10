@@ -9,6 +9,24 @@ Begin VB.Form Form1
    ScaleHeight     =   3504
    ScaleWidth      =   5940
    StartUpPosition =   3  'Windows Default
+   Begin VB.TextBox Text1 
+      Height          =   1776
+      Left            =   420
+      MultiLine       =   -1  'True
+      ScrollBars      =   2  'Vertical
+      TabIndex        =   6
+      Text            =   "Form1.frx":0000
+      Top             =   1596
+      Width           =   5052
+   End
+   Begin VB.CommandButton Command6 
+      Caption         =   "Top Sites"
+      Height          =   516
+      Left            =   3864
+      TabIndex        =   5
+      Top             =   924
+      Width           =   1608
+   End
    Begin VB.CommandButton Command5 
       Caption         =   "ECDSA"
       Height          =   516
@@ -76,4 +94,26 @@ End Sub
 
 Private Sub Command5_Click()
     TestCryptoEcdsa JsonParseObject(ReadTextFile(App.Path & "\wycheproof\testvectors\ecdsa_test.json"))
+End Sub
+
+Private Sub Command6_Click()
+    Dim vElem       As Variant
+    Dim oSocket     As cTlsSocket
+        
+    Text1.Text = vbNullString
+    For Each vElem In JsonValue(JsonParseObject(ReadTextFile(App.Path & "\top-sites.json")), "*/rootDomain")
+        Set oSocket = New cTlsSocket
+        If Not oSocket.SyncConnect(CStr(vElem), 443, 5000) Then
+            Text1.Text = Text1.Text & vElem & vbTab & oSocket.LastError.Description & vbCrLf
+            Text1.SelStart = Len(Text1.Text)
+        End If
+'''        DoEvents
+    Next
+End Sub
+
+Private Sub Form_Resize()
+    On Error GoTo QH
+    Text1.Width = ScaleWidth - Text1.Left - Text1.Left
+    Text1.Height = ScaleHeight - Text1.Top - 240
+QH:
 End Sub
