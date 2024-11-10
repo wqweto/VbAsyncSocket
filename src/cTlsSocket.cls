@@ -2655,7 +2655,7 @@ Private Function pvPkiCertValidate(ByVal sHostName As String, cCerts As Collecti
             End If
         Next
         If bMatched Then
-            If pvPkiCertBuildChain(pCertContext, hRootStore, sError) Then
+            If pvPkiCertBuildChain(pCertContext, hCertStore, hRootStore, sError) Then
                 '--- success
                 pvPkiCertValidate = True
                 Exit Do
@@ -2721,8 +2721,9 @@ QH:
     pvPkiCertGetSubjectAltName2 = vRetVal
 End Function
 
-Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hRootStore As Long, sError As String) As Boolean
+Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hCertStore As Long, ByVal hRootStore As Long, sError As String) As Boolean
     Const FUNC_NAME     As String = "pvPkiCertBuildChain"
+    Dim hStores(0 To 1) As Long
     Dim hChainEngine    As Long
     Dim uEngineConfig   As CERT_CHAIN_ENGINE_CONFIG
     Dim pChainContext   As Long
@@ -2740,22 +2741,22 @@ Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hRootStor
     Dim vErr            As Variant
     
     On Error GoTo EH
-    '--- build custom chain engine that trusts the additional root CA certificates if provided
+    '--- build custom chain engine that trusts the additional stores if provided
+    uEngineConfig.cbSize = LenB(uEngineConfig) - IIf(OsVersion < ucsOsvWin8, 12, 0)
+    If hCertStore <> 0 Then
+        hStores(lIdx) = hCertStore: lIdx = lIdx + 1
+    End If
     If hRootStore <> 0 Then
-        If OsVersion < ucsOsvWin8 Then
-            uEngineConfig.cbSize = LenB(uEngineConfig) - 12
-            uEngineConfig.cAdditionalStore = 1
-            uEngineConfig.rghAdditionalStore = VarPtr(hRootStore)
-        Else
-            uEngineConfig.cbSize = LenB(uEngineConfig)
-            uEngineConfig.hExclusiveRoot = hRootStore
-        End If
-        uEngineConfig.dwFlags = CERT_CHAIN_CACHE_END_CERT
-        If CertCreateCertificateChainEngine(uEngineConfig, hChainEngine) = 0 Then
-            hResult = Err.LastDllError
-            sApiSource = "CertCreateCertificateChainEngine"
-            GoTo QH
-        End If
+        hStores(lIdx) = hRootStore: lIdx = lIdx + 1
+    End If
+    uEngineConfig.cAdditionalStore = lIdx
+    uEngineConfig.rghAdditionalStore = VarPtr(hStores(0))
+    uEngineConfig.dwFlags = CERT_CHAIN_CACHE_END_CERT
+    uEngineConfig.hExclusiveRoot = hRootStore
+    If CertCreateCertificateChainEngine(uEngineConfig, hChainEngine) = 0 Then
+        hResult = Err.LastDllError
+        sApiSource = "CertCreateCertificateChainEngine"
+        GoTo QH
     End If
     '--- for the matched server certificate try to build a chain of certificates from the ones in the in-memory certificate store
     '---    and check this chain for revocation, expiry or missing link to a trust anchor

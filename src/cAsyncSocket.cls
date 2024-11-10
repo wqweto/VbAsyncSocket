@@ -740,9 +740,9 @@ Public Function Connect(HostAddress As String, ByVal HostPort As Long) As Boolea
         Else
             PostEvent ucsSfdConnect
         End If
+        m_lLastError = 0
     End If
     '--- success
-    m_lLastError = 0
     Connect = True
 QH:
     Exit Function
