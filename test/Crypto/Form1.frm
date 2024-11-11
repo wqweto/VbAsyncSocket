@@ -99,15 +99,20 @@ End Sub
 Private Sub Command6_Click()
     Dim vElem       As Variant
     Dim oSocket     As cTlsSocket
-        
+    Dim lIdx        As Long
+    
+    Set oSocket = New cTlsSocket
     Text1.Text = vbNullString
     For Each vElem In JsonValue(JsonParseObject(ReadTextFile(App.Path & "\top-sites.json")), "*/rootDomain")
-        Set oSocket = New cTlsSocket
-        If Not oSocket.SyncConnect(CStr(vElem), 443, 5000) Then
-            Text1.Text = Text1.Text & vElem & vbTab & oSocket.LastError.Description & vbCrLf
-            Text1.SelStart = Len(Text1.Text)
+        lIdx = lIdx + 1
+        If lIdx > 0 Then
+            If Not oSocket.SyncConnect(CStr(vElem), 443, 5000, LocalFeatures:=ucsTlsSupportTls12) Then
+                Text1.Text = Text1.Text & vElem & vbTab & oSocket.LastError.Description & vbCrLf
+                Text1.SelStart = Len(Text1.Text)
+            End If
+            oSocket.Close_
+            DoEvents
         End If
-'''        DoEvents
     Next
 End Sub
 

@@ -633,13 +633,15 @@ Public Function InitServerTls( _
     ErrRaise vbObjectError, , ERR_NO_SERVER_COMPILED
 #Else
     Const FUNC_NAME     As String = "InitServerTls"
+    Dim uEmpty          As UcsTlsContext
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
     
+    On Error GoTo EH
+    pvSetLastError
     If m_bUseTls Then
         GoTo QH
     End If
-    pvSetLastError
     If pvCollectionCount(Certificates) > 0 And pvCollectionCount(PrivateKey) > 0 Then
         Set cCerts = Certificates
         Set cPrivKey = PrivateKey
@@ -663,6 +665,7 @@ Public Function InitServerTls( _
         GoTo QH
     End If
 StartTls:
+    m_uCtx = uEmpty
     m_bUseTls = True
     m_bIsServer = True
     m_oSocket.GetPeerName m_sRemoteHostName, 0
@@ -678,6 +681,10 @@ StartTls:
     '--- success
     InitServerTls = True
 QH:
+    Exit Function
+EH:
+    PrintError FUNC_NAME
+    Resume QH
 #End If
 End Function
 
@@ -736,8 +743,13 @@ Public Function Connect( _
             Optional RootCa As cTlsSocket, _
             Optional AlpnProtocols As String) As Boolean
     Const FUNC_NAME     As String = "Connect"
+    Dim uEmpty          As UcsTlsContext
     
     On Error GoTo EH
+    pvSetLastError
+    If UseTls Then
+        m_uCtx = uEmpty
+    End If
     m_bUseTls = UseTls
     m_sRemoteHostName = HostAddress
     m_eLocalFeatures = LocalFeatures
@@ -761,15 +773,18 @@ Public Function StartTls( _
             Optional RootCa As cTlsSocket, _
             Optional AlpnProtocols As String) As Boolean
     Const FUNC_NAME     As String = "StartTls"
+    Dim uEmpty          As UcsTlsContext
     Dim bResult         As Boolean
     Dim baEmpty()       As Byte
     Dim cCerts          As Collection
     Dim cPrivKey        As Collection
     
     On Error GoTo EH
+    pvSetLastError
     If TlsIsStarted(m_uCtx) Then
         GoTo QH
     End If
+    m_uCtx = uEmpty
     m_bUseTls = True
     m_bIsServer = False
     If LenB(RemoteHostName) <> 0 Then
@@ -824,6 +839,7 @@ Public Function ReceiveText( _
     Dim baBuffer()      As Byte
     
     On Error GoTo EH
+    pvSetLastError
     If m_bUseTls Then
         If ReceiveArray(baBuffer) Then
             ReceiveText = m_oSocket.FromTextArray(baBuffer, CodePage)
@@ -843,6 +859,7 @@ Public Function ReceiveArray( _
     Const FUNC_NAME     As String = "ReceiveArray"
     
     On Error GoTo EH
+    pvSetLastError
     If m_bUseTls Then
         If m_lRecvPos = 0 Then
             If TlsIsClosed(m_uCtx) Then
@@ -879,6 +896,7 @@ Public Function Receive( _
     Const FUNC_NAME     As String = "Receive"
     
     On Error GoTo EH
+    pvSetLastError
     If m_bUseTls Then
         If m_lRecvPos = 0 Then
             If TlsIsClosed(m_uCtx) Then
@@ -920,6 +938,7 @@ Public Function SendText( _
     Dim baTemp()        As Byte
     
     On Error GoTo EH
+    pvSetLastError
     If m_bUseTls Then
         baTemp = m_oSocket.ToTextArray(Text, CodePage)
         SendText = SendArray(baTemp, HostAddress, HostPort)
@@ -939,6 +958,7 @@ Public Function SendArray( _
     Dim lInputSize      As Long
     
     On Error GoTo EH
+    pvSetLastError
     If m_bUseTls Then
         If TlsIsClosed(m_uCtx) Then
             GoTo QH
@@ -975,6 +995,7 @@ Public Function Send( _
     Dim baBuffer()      As Byte
     
     On Error GoTo EH
+    pvSetLastError
     If BufLen = 0 Then
         '--- do nothing
     ElseIf m_bUseTls Then
@@ -996,6 +1017,7 @@ Public Function ShutDown() As Boolean
     Const FUNC_NAME     As String = "ShutDown"
     
     On Error GoTo EH
+    pvSetLastError
     If m_bUseTls Then
         If TlsIsReady(m_uCtx) And Not TlsIsShutdown(m_uCtx) Then
             If Not pvHandleShutdown() Then
@@ -1023,16 +1045,13 @@ Public Function GetErrorDescription(ByVal ErrorCode As Long) As String
 End Function
 
 Public Sub Close_()
+    pvSetLastError
     If m_bUseTls Then
         If TlsIsReady(m_uCtx) And Not TlsIsShutdown(m_uCtx) Then
-            If Not pvHandleShutdown() Then
-                GoTo QH
-            End If
+            pvHandleShutdown
         End If
-    Else
-        m_oSocket.Close_
     End If
-QH:
+    m_oSocket.Close_
 End Sub
 
 Public Sub PostEvent(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Optional ByVal Immediate As Boolean)
@@ -1070,6 +1089,7 @@ Public Function Create( _
             Optional ByVal SocketType As UcsAsyncSocketTypeEnum = ucsSckStream, _
             Optional ByVal EventMask As UcsAsyncSocketEventMaskEnum = ucsSfdAll, _
             Optional SocketAddress As String) As Boolean
+    pvSetLastError
     If m_bUseTls Then
         If IsClosed And Not m_oSocket.IsClosed Then
             m_oSocket.Close_
@@ -1079,32 +1099,39 @@ Public Function Create( _
 End Function
 
 Public Function Listen(Optional ByVal ConnectionBacklog As Long = 5) As Boolean
+    pvSetLastError
     Listen = m_oSocket.Listen(ConnectionBacklog)
 End Function
 
 Public Function GetSockName(SocketAddress As String, SocketPort As Long) As Boolean
+    pvSetLastError
     GetSockName = m_oSocket.GetSockName(SocketAddress, SocketPort)
 End Function
 
 Public Function GetPeerName(PeerAddress As String, PeerPort As Long) As Boolean
+    pvSetLastError
     GetPeerName = m_oSocket.GetPeerName(PeerAddress, PeerPort)
 End Function
 
 Public Function GetLocalHost(HostName As String, HostAddress As String, Optional AdaptersInfo As Variant, Optional ForwardTable As Variant) As Boolean
+    pvSetLastError
     GetLocalHost = m_oSocket.GetLocalHost(HostName, HostAddress, AdaptersInfo, ForwardTable)
 End Function
 
 Public Function Attach( _
             ByVal SocketHandle As Long, _
             Optional ByVal EventMask As UcsAsyncSocketEventMaskEnum = ucsSfdAll) As Boolean
+    pvSetLastError
     Attach = m_oSocket.Attach(SocketHandle, EventMask)
 End Function
 
 Public Function Detach() As Long
+    pvSetLastError
     Detach = m_oSocket.Detach()
 End Function
 
 Public Function Bind(Optional SocketAddress As String, Optional ByVal SocketPort As Long) As Boolean
+    pvSetLastError
     Bind = m_oSocket.Bind(SocketAddress, SocketPort)
 End Function
 
@@ -1121,6 +1148,7 @@ Public Sub SyncProcessMsgQueue()
 End Sub
 
 Public Sub SetLastError(ByVal lValue As Long)
+    pvSetLastError
     m_oSocket.SetLastError lValue
 End Sub
 
@@ -1353,6 +1381,7 @@ Public Function SyncWaitForEvent( _
     Dim lErrNumber      As Long
     
     On Error GoTo EH
+    pvSetLastError
     If m_bUseTls And (EventMask And LNG_MASK) <> 0 Then
         dblTimer = TimerEx
         m_oSocket.SyncProcessMsgQueue
