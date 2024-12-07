@@ -155,6 +155,8 @@ Private Const ERR_TIMEOUT                   As Long = &H800705B4
 '--- for ioctlsocket
 Private Const FIONREAD                      As Long = &H4004667F
 Private Const FIONBIO                       As Long = &H8004667E
+'--- for shutdown
+Private Const SD_SEND                       As Long = 1
 '--- for WSAGetLastError
 Private Const WSABASEERR                    As Long = 10000
 Private Const WSAEINTR                      As Long = WSABASEERR + 4
@@ -693,6 +695,8 @@ End Function
 
 Public Sub Close_()
     Const FUNC_NAME     As String = "Close_"
+    Dim baBuffer()      As Byte
+    Dim lSize           As Long
     
     On Error GoTo EH
     If pvResolveHandle <> 0 Then
@@ -700,7 +704,12 @@ Public Sub Close_()
         Erase m_uGetHostByName
     End If
     If m_hSocket <> INVALID_SOCKET Then
-        Call ws_shutdown(m_hSocket, 1)
+        Call ws_shutdown(m_hSocket, SD_SEND)
+        '--- drain
+        ReDim baBuffer(0 To 4096) As Byte
+        Do
+            lSize = ws_recv(m_hSocket, baBuffer(0), UBound(baBuffer), 0)
+        Loop While lSize > 0
         pvClose
     End If
     Exit Sub
@@ -968,7 +977,7 @@ EH:
     PrintError FUNC_NAME
 End Function
 
-Public Function ShutDown(Optional ByVal How As Long = 1) As Boolean
+Public Function ShutDown(Optional ByVal How As Long = SD_SEND) As Boolean
     Const FUNC_NAME     As String = "ShutDown"
     
     On Error GoTo EH

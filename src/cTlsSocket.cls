@@ -1024,6 +1024,7 @@ Public Function ShutDown() As Boolean
                 GoTo QH
             End If
         End If
+        m_oSocket.Close_
         '--- success
         ShutDown = True
     Else
