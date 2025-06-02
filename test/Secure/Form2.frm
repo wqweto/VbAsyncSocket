@@ -133,7 +133,7 @@ End Sub
 '=========================================================================
 
 Private Sub Form_Load()
-    Const STR_CERTFILE  As String = "" ' "eccert.pfx" ' "eccert.pem|ecprivkey.pem|fullchain2.pem"
+    Const STR_CERTFILE  As String = "C:\Work\Certificates\AlphaSSL\saas.bg-2025\saas.bg.p7b|C:\Work\Certificates\AlphaSSL\saas.bg-2025\privkey.pem " ' "eccert.pfx" ' "eccert.pem|ecprivkey.pem|fullchain2.pem"
     Const STR_PASSWORD  As String = ""
     Dim vElem           As Variant
     Dim sAddr           As String
@@ -256,7 +256,97 @@ Private Function HttpsRequest(uRemote As UcsParsedUrl, sError As String) As Stri
         End If
     End If
     pvAppendLogText txtResult, "Connecting to " & uRemote.Host & vbCrLf
-    If m_sServerName <> uRemote.Host & ":" & uRemote.Port Or m_oSocket Is Nothing Then
+    If uRemote.Port = 5900 Then
+        '--- impl secTypeTLSVnc sub-type of VeNCrypt authentication for VNC protocol
+        Set m_oSocket = New cTlsSocket
+        If Not m_oSocket.SyncConnect(uRemote.Host, uRemote.Port, UseTls:=False) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        '--- negotiate VNC protocol version
+        If Not m_oSocket.SyncReceiveArray(baRecv, 12) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        DebugLog MODULE_NAME, FUNC_NAME, "[VNC] Protocol version: " & StrConv(baRecv, vbUnicode)
+        If Not m_oSocket.SyncSendArray(baRecv) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        '--- negotiate VeNCrypt authentication
+        If Not m_oSocket.SyncReceiveArray(baRecv, 1) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        If Not m_oSocket.SyncReceiveArray(baRecv, baRecv(0)) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        DebugLog MODULE_NAME, FUNC_NAME, "[VNC] Supported authentications: " & ToHex(baRecv)
+        Debug.Assert baRecv(0) = 19  '--- rfbVeNCypt
+        ReDim Preserve baRecv(0 To 0) As Byte
+        If Not m_oSocket.SyncSendArray(baRecv) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        '--- VeNCrypt version
+        If Not m_oSocket.SyncReceiveArray(baRecv, 2) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        DebugLog MODULE_NAME, FUNC_NAME, "[VNC] VeNCypt version: " & ToHex(baRecv)
+        If Not m_oSocket.SyncSendArray(baRecv) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        If Not m_oSocket.SyncReceiveArray(baRecv, 1) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        Debug.Assert baRecv(0) = 0 ' Server reported unsupported version
+        If Not m_oSocket.SyncReceiveArray(baRecv, 1) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        If Not m_oSocket.SyncReceiveArray(baRecv, 4 * baRecv(0)) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        DebugLog MODULE_NAME, FUNC_NAME, "[VNC] Supported security sub-types: " & ToHex(baRecv)
+        Debug.Assert baRecv(2) = 1 And baRecv(3) = 2  '--- secTypeTLSVnc
+        ReDim Preserve baRecv(0 To 3) As Byte
+        If Not m_oSocket.SyncSendArray(baRecv) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        If Not m_oSocket.SyncReceiveArray(baRecv, 1) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        Debug.Assert baRecv(0) = 1 ' Server unsupported sub-type
+        If Not m_oSocket.StartTls(uRemote.Host, _
+                LocalFeatures:=IIf(pvIsKnownBadCertificate(uRemote.Host), ucsTlsIgnoreServerCertificateErrors, 0) Or ucsTlsSupportTls12, _
+                RootCa:=m_oRootCa, AlpnProtocols:="http/1.1") Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        m_sServerName = uRemote.Host & ":" & uRemote.Port
+        
+        If Not m_oSocket.SyncReceiveArray(baRecv, 16) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        DebugLog MODULE_NAME, FUNC_NAME, "[VNC] Challenge: " & ToHex(baRecv)
+        If Not m_oSocket.SyncSendArray(baRecv) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        If Not m_oSocket.SyncReceiveArray(baRecv, 4) Then
+            sError = m_oSocket.LastError.Description
+            GoTo QH
+        End If
+        DebugLog MODULE_NAME, FUNC_NAME, "[VNC] Auth result: " & ToHex(baRecv)
+    ElseIf m_sServerName <> uRemote.Host & ":" & uRemote.Port Or m_oSocket Is Nothing Then
         Set m_oSocket = New cTlsSocket
         If Not m_oSocket.SyncConnect(uRemote.Host, uRemote.Port, _
                 LocalFeatures:=IIf(pvIsKnownBadCertificate(uRemote.Host), ucsTlsIgnoreServerCertificateErrors, 0), _
