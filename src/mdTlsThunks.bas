@@ -469,7 +469,7 @@ Public Type UcsTlsContext
     IsServer            As Boolean
     RemoteHostName      As String
     LocalFeatures       As UcsTlsLocalFeaturesEnum
-    ClientCertCallback  As Long
+    CertCallback        As Long
     AlpnProtocols       As String
     '--- state
     State               As UcsTlsStatesEnum
@@ -669,7 +669,7 @@ Public Function TlsInitClient( _
             uCtx As UcsTlsContext, _
             Optional RemoteHostName As String, _
             Optional ByVal LocalFeatures As Long = ucsTlsSupportAll, _
-            Optional ClientCertCallback As Object, _
+            Optional CertCallback As Object, _
             Optional AlpnProtocols As String) As Boolean
     Dim uEmpty          As UcsTlsContext
     
@@ -682,7 +682,7 @@ Public Function TlsInitClient( _
         .State = ucsTlsStateHandshakeStart
         .RemoteHostName = RemoteHostName
         .LocalFeatures = LocalFeatures
-        .ClientCertCallback = ObjPtr(ClientCertCallback)
+        .CertCallback = ObjPtr(CertCallback)
         .AlpnProtocols = AlpnProtocols
         #If ImplCaptureTraffic <> 0 Then
             Set .TrafficDump = New Collection
@@ -704,7 +704,8 @@ Public Function TlsInitServer( _
             Optional Certificates As Collection, _
             Optional PrivateKey As Collection, _
             Optional AlpnProtocols As String, _
-            Optional ByVal LocalFeatures As Long = ucsTlsSupportAll) As Boolean
+            Optional ByVal LocalFeatures As Long = ucsTlsSupportAll, _
+            Optional CertCallback As Object) As Boolean
 #If Not ImplTlsServer Then
     ErrRaise vbObjectError, , ERR_NO_SERVER_COMPILED
 #Else
@@ -723,6 +724,7 @@ Public Function TlsInitServer( _
         Set .LocalCertificates = Certificates
         Set .LocalPrivateKey = PrivateKey
         .AlpnProtocols = AlpnProtocols
+        .CertCallback = ObjPtr(CertCallback)
         #If ImplCaptureTraffic <> 0 Then
             Set .TrafficDump = New Collection
         #End If
@@ -2839,9 +2841,6 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
     With uCtx
         Set cPrevRemoteExt = .RemoteExtensions
         Set .RemoteExtensions = New Collection
-        If Not pvAsn1DecodePrivateKey(.LocalCertificates, .LocalPrivateKey, uKeyInfo) Then
-            GoTo UnsupportedCertificate
-        End If
         .ProtocolVersion = IIf((.LocalFeatures And ucsTlsSupportTls12) <> 0 And Not .HelloRetryRequest, TLS_PROTOCOL_VERSION_TLS12, TLS_PROTOCOL_VERSION_TLS13)
         pvBufferReadLong uInput, .RemoteProtocolVersion, Size:=2
         If .RemoteProtocolVersion < TLS_PROTOCOL_VERSION_TLS12 Then
@@ -3079,6 +3078,9 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                 End If
                                 Do While uInput.Pos + 1 < lExtEnd
                                     pvBufferReadLong uInput, lSignatureScheme, Size:=2
+                                    If Not pvTlsSetupServerCertificate(uCtx, uKeyInfo) Then
+                                        GoTo UnsupportedCertificate
+                                    End If
                                     If pvTlsMatchSignatureScheme(uCtx, lSignatureScheme, uKeyInfo) Then
                                         .SignatureScheme = lSignatureScheme
                                         uInput.Pos = lExtEnd
@@ -3182,6 +3184,9 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                     GoTo InvalidSize
                 End If
             pvBufferReadBlockEnd uInput
+        End If
+        If Not pvTlsSetupServerCertificate(uCtx, uKeyInfo) Then
+            GoTo UnsupportedCertificate
         End If
         '--- match preferred ciphersuites
         For Each vElem In pvTlsGetSortedCipherSuites(.LocalFeatures And IIf(.ProtocolVersion = TLS_PROTOCOL_VERSION_TLS13, ucsTlsSupportTls13, ucsTlsSupportTls12), uKeyInfo.AlgoObjId)
@@ -3440,8 +3445,8 @@ Private Function pvTlsParseHandshakeCertificateRequest(uCtx As UcsTlsContext, uI
             Loop
             If bConfirmed Then
                 bConfirmed = False
-            ElseIf .CertRequestSignatureScheme = -1 And .ClientCertCallback <> 0 Then
-                Call vbaObjSetAddref(oCallback, .ClientCertCallback)
+            ElseIf .CertRequestSignatureScheme = -1 And .CertCallback <> 0 Then
+                Call vbaObjSetAddref(oCallback, .CertCallback)
                 bConfirmed = oCallback.FireOnCertificate(.CertRequestCaDn)
             End If
         Loop While bConfirmed
@@ -3599,6 +3604,32 @@ Private Function pvTlsCheckRemoteKey(ByVal lExchGroup As Long, baPublic() As Byt
     End Select
     '--- success
     pvTlsCheckRemoteKey = True
+QH:
+End Function
+
+Private Function pvTlsSetupServerCertificate(uCtx As UcsTlsContext, uKeyInfo As UcsKeyInfo) As Boolean
+    Dim oCallback       As Object
+    Dim cCerts          As Collection
+    Dim cPrivKey        As Collection
+    Dim bConfirmed      As Boolean
+    
+    With uCtx
+        If LenB(uKeyInfo.AlgoObjId) = 0 Then
+            If .CertCallback <> 0 Then
+                Call vbaObjSetAddref(oCallback, .CertCallback)
+                bConfirmed = oCallback.FireOnServerCertificate(cCerts, cPrivKey)
+            End If
+            If Not bConfirmed Or cCerts Is Nothing Then
+                Set cCerts = .LocalCertificates
+                Set cPrivKey = .LocalPrivateKey
+            End If
+            If Not pvAsn1DecodePrivateKey(cCerts, cPrivKey, uKeyInfo) Then
+                GoTo QH
+            End If
+        End If
+    End With
+    '--- success
+    pvTlsSetupServerCertificate = True
 QH:
 End Function
 
@@ -5668,10 +5699,17 @@ Private Function pvAsn1DecodePrivateKey(cCerts As Collection, cPrivKey As Collec
     Dim lSize           As Long
     Dim lHalfSize       As Long
     Dim uEccKeyInfo     As CRYPT_ECC_PRIVATE_KEY_INFO
+    Dim lCount          As Long
     Dim hResult         As Long
     Dim sApiSource      As String
     
-    If pvCollectionCount(cPrivKey) > 1 Then
+    lCount = pvCollectionCount(cPrivKey)
+    If lCount > 0 Then
+        If IsArray(cPrivKey.Item(lCount)) Then
+            lCount = 0
+        End If
+    End If
+    If lCount >= IDX_PROVNAME Then
         If Not SearchCollection(cCerts, 1, RetVal:=baCert) Then
             ErrRaise vbObjectError, FUNC_NAME, ERR_NO_CERTIFICATE
         End If
@@ -5681,7 +5719,7 @@ Private Function pvAsn1DecodePrivateKey(cCerts As Collection, cPrivKey As Collec
         uRetVal.AlgoObjId = uCertInfo.AlgoObjId
         uRetVal.BitLen = uCertInfo.BitLen
         With cPrivKey
-            If pvCollectionCount(cPrivKey) = IDX_PROVNAME Then
+            If lCount = IDX_PROVNAME Then
                 hResult = NCryptOpenStorageProvider(hNProv, StrPtr(.Item(IDX_PROVNAME)), 0)
                 If hResult < 0 Then
                     sApiSource = "NCryptOpenStorageProvider"

@@ -151,3 +151,6 @@ EH:
     Resume QH
 End Sub
 
+Private Sub m_oSocket_OnServerCertificate(Certificates As Object, PrivateKey As Object, Confirmed As Boolean)
+    Debug.Print "SniRequested=" & m_oSocket.SniRequested & ", AlpnNegotiated=" & m_oSocket.AlpnNegotiated, Timer
+End Sub

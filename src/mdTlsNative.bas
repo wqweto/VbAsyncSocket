@@ -394,7 +394,7 @@ Public Type UcsTlsContext
     IsServer            As Boolean
     RemoteHostName      As String
     LocalFeatures       As UcsTlsLocalFeaturesEnum
-    ClientCertCallback  As Long
+    CertCallback        As Long
     AlpnProtocols       As String
     '--- state
     State               As UcsTlsStatesEnum
@@ -470,7 +470,7 @@ Public Function TlsInitClient( _
             uCtx As UcsTlsContext, _
             Optional RemoteHostName As String, _
             Optional ByVal LocalFeatures As Long = ucsTlsSupportAll, _
-            Optional ClientCertCallback As Object, _
+            Optional CertCallback As Object, _
             Optional AlpnProtocols As String) As Boolean
     Dim uEmpty          As UcsTlsContext
     
@@ -480,7 +480,7 @@ Public Function TlsInitClient( _
         .State = ucsTlsStateHandshakeStart
         .RemoteHostName = RemoteHostName
         .LocalFeatures = LocalFeatures
-        .ClientCertCallback = ObjPtr(ClientCertCallback)
+        .CertCallback = ObjPtr(CertCallback)
         If RealOsVersion >= [ucsOsvWin8.1] Then
             .AlpnProtocols = AlpnProtocols
         End If
@@ -502,7 +502,8 @@ Public Function TlsInitServer( _
             Optional Certificates As Collection, _
             Optional PrivateKey As Collection, _
             Optional AlpnProtocols As String, _
-            Optional ByVal LocalFeatures As Long = ucsTlsSupportAll) As Boolean
+            Optional ByVal LocalFeatures As Long = ucsTlsSupportAll, _
+            Optional CertCallback As Object) As Boolean
 #If Not ImplTlsServer Then
     ErrRaise vbObjectError, , ERR_NO_SERVER_COMPILED
 #Else
@@ -517,6 +518,7 @@ Public Function TlsInitServer( _
         .LocalFeatures = LocalFeatures
         Set .LocalCertificates = Certificates
         Set .LocalPrivateKey = PrivateKey
+        .CertCallback = ObjPtr(CertCallback)
         If RealOsVersion >= [ucsOsvWin8.1] Then
             .AlpnProtocols = AlpnProtocols
         End If
@@ -572,6 +574,9 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
     Dim baAlpnBuffer()  As Byte
     Dim uAppProtocol    As SecPkgContext_ApplicationProtocol
     Dim eVersion        As UcsOsVersionEnum
+    Dim bConfirmed      As Boolean
+    Dim cCerts          As Collection
+    Dim cPrivKey        As Collection
     
     On Error GoTo EH
     With uCtx
@@ -600,8 +605,29 @@ Public Function TlsHandshake(uCtx As UcsTlsContext, baInput() As Byte, ByVal lSi
                 .LastAlertCode = baInput(6)
             End If
         End If
+        If .hTlsContext = 0 Then
+            pvInitSecDesc .InDesc, 3, .InBuffers
+            pvInitSecDesc .OutDesc, 3, .OutBuffers
+            #If ImplTlsServer Then
+                If .IsServer Then
+                    pvTlsParseHandshakeClientHello uCtx, baInput, 0
+                End If
+            #End If
+            If LenB(.AlpnProtocols) <> 0 Then
+                pvTlsBuildAlpnBuffer baAlpnBuffer, 0, .AlpnProtocols
+            End If
+        End If
 RetryCredentials:
         If .hTlsCredentials = 0 Then
+            If .IsServer And .CertCallback <> 0 Then
+                Set oCallback = Nothing
+                Call vbaObjSetAddref(oCallback, .CertCallback)
+                bConfirmed = oCallback.FireOnServerCertificate(cCerts, cPrivKey)
+            End If
+            If Not bConfirmed Or cCerts Is Nothing Then
+                Set cCerts = .LocalCertificates
+                Set cPrivKey = .LocalPrivateKey
+            End If
             uCred.dwVersion = SCHANNEL_CRED_VERSION
             If (.LocalFeatures And ucsTlsSupportAllTo12) <> ucsTlsSupportAllTo12 Then
                 uCred.grbitEnabledProtocols = IIf((.LocalFeatures And ucsTlsSupportTls10) <> 0, SP_PROT_TLS1_0, 0) Or _
@@ -611,8 +637,8 @@ RetryCredentials:
             uCred.dwFlags = uCred.dwFlags Or SCH_CRED_MANUAL_CRED_VALIDATION    ' Prevent Schannel from validating the received server certificate chain.
             uCred.dwFlags = uCred.dwFlags Or SCH_CRED_NO_DEFAULT_CREDS          ' Prevent Schannel from attempting to automatically supply a certificate chain for client authentication.
             uCred.dwFlags = uCred.dwFlags Or SCH_CRED_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT ' Force TLS certificate status request extension (commonly known as OCSP stapling) to be sent on Vista or later
-            If pvCollectionCount(.LocalCertificates) > 0 Then
-                If pvTlsImportToCertStore(.LocalCertificates, .LocalPrivateKey, sKeyName, pCertContext) And pCertContext <> 0 Then
+            If pvCollectionCount(cCerts) > 0 Then
+                If pvTlsImportToCertStore(cCerts, cPrivKey, sKeyName, pCertContext) And pCertContext <> 0 Then
                     aCred(uCred.cCreds) = pCertContext
                     uCred.cCreds = uCred.cCreds + 1
                     uCred.paCred = VarPtr(aCred(0))
@@ -646,18 +672,6 @@ RetryCredentials:
             If pCertContext <> 0 Then
                 Call CertFreeCertificateContext(pCertContext)
                 pCertContext = 0
-            End If
-        End If
-        If .hTlsContext = 0 Then
-            pvInitSecDesc .InDesc, 3, .InBuffers
-            pvInitSecDesc .OutDesc, 3, .OutBuffers
-            #If ImplTlsServer Then
-                If .IsServer Then
-                    pvTlsParseHandshakeClientHello uCtx, baInput, 0
-                End If
-            #End If
-            If LenB(.AlpnProtocols) <> 0 Then
-                pvTlsBuildAlpnBuffer baAlpnBuffer, 0, .AlpnProtocols
             End If
         End If
         Do
@@ -789,7 +803,7 @@ RetryCredentials:
                     .State = ucsTlsStatePostHandshake
                     Exit Do
                 Case SEC_I_INCOMPLETE_CREDENTIALS
-                    If .ClientCertCallback <> 0 Then
+                    If .CertCallback <> 0 Then
                         hResult = QueryContextAttributes(.hTlsContext, SECPKG_ATTR_ISSUER_LIST_EX, uIssuerInfo)
                         If hResult < 0 Then
                             pvTlsSetLastError uCtx, hResult, MODULE_NAME & "." & FUNC_NAME & vbCrLf & "QueryContextAttributes(SECPKG_ATTR_ISSUER_LIST_EX)", AlertCode:=.LastAlertCode
@@ -806,7 +820,8 @@ RetryCredentials:
                                 cIssuers.Add baCaDn
                             Next
                         End If
-                        Call vbaObjSetAddref(oCallback, .ClientCertCallback)
+                        Set oCallback = Nothing
+                        Call vbaObjSetAddref(oCallback, .CertCallback)
                         If oCallback.FireOnCertificate(cIssuers) Then
                             Call FreeCredentialsHandle(.hTlsCredentials)
                             .hTlsCredentials = 0

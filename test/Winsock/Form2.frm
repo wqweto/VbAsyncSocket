@@ -63,18 +63,18 @@ Attribute VB_Exposed = False
 Option Explicit
 
 Private Sub Command1_Click()
-    ctxWinsock.Protocol = sckTCPProtocol
+    ctxWinsock.Protocol = UcsProtocolConstants.sckTCPProtocol
     ctxWinsock.Connect "bgdev.org", 80
 End Sub
 
 Private Sub Command3_Click()
-    ctxWinsock.Protocol = sckTLSProtocol
+    ctxWinsock.Protocol = UcsProtocolConstants.sckTLSProtocol
     ctxWinsock.Connect "bgdev.org", 443
 End Sub
 
 Private Sub Command2_Click()
     ctxServer(0).Close_
-    ctxServer(0).Protocol = sckTCPProtocol
+    ctxServer(0).Protocol = UcsProtocolConstants.sckTCPProtocol
     ctxServer(0).Bind 8088, "127.0.0.1"
     ctxServer(0).Listen
     Shell "cmd /c start http://localhost:8088/"
@@ -82,14 +82,10 @@ End Sub
 
 Private Sub Command4_Click()
     ctxServer(0).Close_
-    ctxServer(0).Protocol = sckTLSProtocol
+    ctxServer(0).Protocol = UcsProtocolConstants.sckTLSProtocol
     ctxServer(0).Bind 8088, "127.0.0.1"
     ctxServer(0).Listen ' CertSubject:="68b5220077de8bbeaed8e1c2540fec6c16b418a8"
     Shell "cmd /c start https://localhost:8088/"
-End Sub
-
-Private Sub ctxServer_Error(Index As Integer, ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
-    MsgBox Description & " &H" & Hex$(Number) & " [" & Source & "]", vbCritical, "ctxServer(" & Index & ")_Error"
 End Sub
 
 Private Sub ctxWinsock_Connect()
@@ -113,11 +109,15 @@ Private Sub ctxWinsock_DataArrival(ByVal bytesTotal As Long)
     Debug.Print sBuffer;
 End Sub
 
+Private Sub ctxWinsock_Error(ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
+    MsgBox Description & " &H" & Hex$(Number) & " [" & Source & "]", vbCritical, "ctxWinsock_Error"
+End Sub
+
 Private Sub ctxServer_ConnectionRequest(Index As Integer, ByVal requestID As Long)
     Debug.Print "ctxServer(" & Index & ")_ConnectionRequest, requestID=" & requestID & ", RemoteHostIP=" & ctxServer(Index).RemoteHostIP & ", RemotePort=" & ctxServer(Index).RemotePort, Timer
     Load ctxServer(ctxServer.UBound + 1)
-    ctxServer(ctxServer.UBound).Protocol = ctxServer(Index).Protocol
     ctxServer(ctxServer.UBound).Accept requestID
+'    Debug.Print "ctxServer(" & ctxServer.UBound & ").Protocol=" & ctxServer(ctxServer.UBound).Protocol
 End Sub
 
 Private Sub ctxServer_DataArrival(Index As Integer, ByVal bytesTotal As Long)
@@ -151,6 +151,11 @@ Private Sub ctxServer_Close(Index As Integer)
     ctxServer_CloseEvent Index
 End Sub
 
-Private Sub ctxWinsock_Error(ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
-    MsgBox Description & " &H" & Hex$(Number) & " [" & Source & "]", vbCritical, "ctxWinsock_Error"
+Private Sub ctxServer_OnServerCertificate(Index As Integer, Socket As Object, Certificates As Object, PrivateKey As Object, Confirmed As Boolean)
+    Debug.Print "ctxServer(" & Index & ")_OnServerCertificate, SniRequested=" & Socket.SniRequested
 End Sub
+
+Private Sub ctxServer_Error(Index As Integer, ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
+    MsgBox Description & " &H" & Hex$(Number) & " [" & Source & "]", vbCritical, "ctxServer(" & Index & ")_Error"
+End Sub
+

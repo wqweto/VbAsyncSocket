@@ -133,7 +133,7 @@ End Sub
 '=========================================================================
 
 Private Sub Form_Load()
-    Const STR_CERTFILE  As String = "C:\Work\Certificates\AlphaSSL\saas.bg-2025\saas.bg.p7b|C:\Work\Certificates\AlphaSSL\saas.bg-2025\privkey.pem " ' "eccert.pfx" ' "eccert.pem|ecprivkey.pem|fullchain2.pem"
+    Const STR_CERTFILE  As String = "" ' "eccert.pfx" ' "eccert.pem|ecprivkey.pem|fullchain2.pem"
     Const STR_PASSWORD  As String = ""
     Dim vElem           As Variant
     Dim sAddr           As String

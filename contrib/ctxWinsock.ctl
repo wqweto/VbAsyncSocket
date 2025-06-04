@@ -60,6 +60,7 @@ Event DataArrival(ByVal bytesTotal As Long)
 Event SendProgress(ByVal bytesSent As Long, ByVal bytesRemaining As Long)
 Event SendComplete()
 Event Error(ByVal Number As Long, Description As String, ByVal Scode As UcsErrorConstants, Source As String, HelpFile As String, ByVal HelpContext As Long, CancelDisplay As Boolean)
+Event OnServerCertificate(Socket As Object, Certificates As Object, PrivateKey As Object, Confirmed As Boolean)
 
 '=========================================================================
 ' Public enums
@@ -763,6 +764,10 @@ Private Sub m_oSocket_OnError(ByVal ErrorCode As Long, ByVal EventMask As UcsAsy
     Exit Sub
 EH:
     PrintError FUNC_NAME
+End Sub
+
+Private Sub m_oSocket_OnServerCertificate(Certificates As Object, PrivateKey As Object, Confirmed As Boolean)
+    RaiseEvent OnServerCertificate(m_oSocket, Certificates, PrivateKey, Confirmed)
 End Sub
 
 '=========================================================================

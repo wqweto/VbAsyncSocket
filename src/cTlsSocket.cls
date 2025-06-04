@@ -46,6 +46,7 @@ Event OnMessagePending(Handled As Boolean)
 Event BeforeNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum, Cancel As Boolean)
 Event AfterNotify(ByVal EventMask As UcsAsyncSocketEventMaskEnum)
 Event OnCertificate(Issuers As Object, Confirmed As Boolean)
+Event OnServerCertificate(Certificates As Object, PrivateKey As Object, Confirmed As Boolean)
 
 Public Enum UcsTlsLocalFeaturesEnum '--- bitmask
     ucsTlsSupportTls10 = 2 ^ 0
@@ -681,7 +682,7 @@ StartTls:
     Else
         m_eLocalFeatures = LocalFeatures
     End If
-    If Not TlsInitServer(m_uCtx, m_sRemoteHostName, cCerts, cPrivKey, m_sAlpnProtocols, m_eLocalFeatures) Then
+    If Not TlsInitServer(m_uCtx, m_sRemoteHostName, cCerts, cPrivKey, m_sAlpnProtocols, m_eLocalFeatures, Me) Then
         GoTo QH
     End If
     '--- success
@@ -1752,6 +1753,18 @@ Attribute FireOnCertificate.VB_MemberFlags = "40"
     If Not oCallback Is Nothing Then
         On Error Resume Next
         Call oCallback.NotifyOnCertificate(Issuers, FireOnCertificate)
+        On Error GoTo 0
+    End If
+End Function
+
+Public Function FireOnServerCertificate(Certificates As Collection, PrivKey As Collection) As Boolean
+    Dim oCallback       As Object
+    
+    Set oCallback = CallbackWeakRef
+    RaiseEvent OnServerCertificate(Certificates, PrivKey, FireOnServerCertificate)
+    If Not oCallback Is Nothing Then
+        On Error Resume Next
+        Call oCallback.NotifyOnServerCertificate(Certificates, PrivKey, FireOnServerCertificate)
         On Error GoTo 0
     End If
 End Function
