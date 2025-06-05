@@ -1160,6 +1160,10 @@ Public Sub SetLastError(ByVal lValue As Long)
     m_oSocket.SetLastError lValue
 End Sub
 
+Public Function NewInstance() As Object
+    Set NewInstance = New cTlsSocket
+End Function
+
 '= sync ==================================================================
 
 #If ImplSync Then

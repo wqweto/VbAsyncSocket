@@ -1040,6 +1040,10 @@ Public Sub SetLastError(ByVal lValue As Long)
     m_lLastError = lValue
 End Sub
 
+Public Function NewInstance() As Object
+    Set NewInstance = New cAsyncSocket
+End Function
+
 '= static helpers ========================================================
 
 Public Function FromTextArray(baText() As Byte, Optional ByVal CodePage As UcsAsyncSocketCodePageEnum = ucsScpUtf8) As String
