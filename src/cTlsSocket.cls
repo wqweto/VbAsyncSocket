@@ -2107,7 +2107,6 @@ Private Function pvPkiPemImportCertificates(ByVal vPemFiles As Variant, sPasswor
         pvPkiPemGetTextPortions sPemText, "RSA PRIVATE KEY", cPrivKey
         pvPkiPemGetTextPortions sPemText, "EC PRIVATE KEY", cPrivKey
         pvPkiPemGetTextPortions sPemText, "CERTIFICATE", cCerts
-        pvPkiPemGetTextPortions sPemText, "PKCS7", cCerts
         For Each vKey In pvPkiPemGetTextPortions(sPemText, "PKCS7")
             baEncrKey = vKey
             pvPkiPemImportPkcs7CertStore baEncrKey, cCerts, cPrivKey
@@ -3068,7 +3067,7 @@ Private Function pvPkiExportPrivateKey(ByVal pCertContext As Long, ByVal bDelete
     Dim vErr            As Variant
 
     On Error GoTo EH
-    dwFlags = CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG Or CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG Or CRYPT_ACQUIRE_SILENT_FLAG
+    dwFlags = CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG Or CRYPT_ACQUIRE_SILENT_FLAG ' Or CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG
     If CryptAcquireCertificatePrivateKey(pCertContext, dwFlags, 0, hProv, lKeySpec, lFree) = 0 Then
         dwFlags = (dwFlags Or CRYPT_ACQUIRE_CACHE_FLAG) And Not CRYPT_ACQUIRE_SILENT_FLAG
         If CryptAcquireCertificatePrivateKey(pCertContext, dwFlags, 0, hProv, lKeySpec, lFree) = 0 Then
