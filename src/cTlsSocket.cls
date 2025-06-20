@@ -97,7 +97,7 @@ Private Const PRIVATEKEYBLOB                            As Long = 7
 Private Const CRYPT_ACQUIRE_CACHE_FLAG                  As Long = &H1
 Private Const CRYPT_ACQUIRE_SILENT_FLAG                 As Long = &H40
 Private Const CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG       As Long = &H10000
-Private Const CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG      As Long = &H20000
+'Private Const CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG      As Long = &H20000
 '--- for CertStrToName
 Private Const CERT_OID_NAME_STR                         As Long = 2
 '--- for CertOpenStore
@@ -350,7 +350,8 @@ Private Type CERT_CHAIN_ENGINE_CONFIG
     '--- following are Win7+ only
     hExclusiveRoot      As Long
     hExclusiveTrustedPeople As Long
-    dwExclusiveFlags    As Long
+    '--- following are Win8+ only
+'    dwExclusiveFlags    As Long
 End Type
 
 Private Type CERT_CHAIN_ELEMENT
@@ -2838,7 +2839,7 @@ Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hCertStor
     
     On Error GoTo EH
     '--- build custom chain engine that trusts the additional stores if provided
-    uEngineConfig.cbSize = LenB(uEngineConfig) - IIf(OsVersion < ucsOsvWin8, 12, 0)
+    uEngineConfig.cbSize = LenB(uEngineConfig) - IIf(OsVersion < ucsOsvWin7, 8, 0)
     If hCertStore <> 0 Then
         hStores(lIdx) = hCertStore: lIdx = lIdx + 1
     End If
