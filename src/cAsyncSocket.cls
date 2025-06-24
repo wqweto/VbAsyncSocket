@@ -1965,9 +1965,9 @@ Private Function InitAsyncSelectNotifyThunk(ByVal hWnd As Long, pObj As Object, 
     If hThunk = 0 Then
         hThunk = pvThunkGlobalData("InitAsyncSelectNotifyThunk" & App.ThreadID)
     End If
+    Call DefSubclassProc(0, 0, 0, 0)                                         '--- load comctl32
     If hThunk = 0 Then
         hThunk = pvThunkAllocate(STR_THUNK, THUNK_SIZE)
-        Call DefSubclassProc(0, 0, 0, 0)                                            '--- load comctl32
         aParams(2) = GetProcByOrdinal(GetModuleHandle("comctl32"), 410)      '--- 410 = SetWindowSubclass ordinal
         aParams(3) = GetProcByOrdinal(GetModuleHandle("comctl32"), 412)      '--- 412 = RemoveWindowSubclass ordinal
         aParams(4) = GetProcByOrdinal(GetModuleHandle("comctl32"), 413)      '--- 413 = DefSubclassProc ordinal
