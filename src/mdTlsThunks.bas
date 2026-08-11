@@ -339,6 +339,7 @@ Private Const ERR_UNSUPPORTED_PRIVATE_KEY               As String = "Unsupported
 Private Const ERR_UNSUPPORTED_CURVE_SIZE                As String = "Unsupported curve size (%1)"
 Private Const ERR_UNSUPPORTED_CURVE_TYPE                As String = "Unsupported curve type (%1)"
 Private Const ERR_UNSUPPORTED_PROTOCOL                  As String = "Invalid protocol version (%1)"
+Private Const ERR_ILLEGAL_DOWNGRADE                     As String = "Illegal TLS version downgrade detected"
 Private Const ERR_ENCRYPTION_FAILED                     As String = "Encryption failed"
 Private Const ERR_SIGNATURE_FAILED                      As String = "Certificate signature failed (%1)"
 Private Const ERR_DECRYPTION_FAILED                     As String = "Decryption failed"
@@ -1741,7 +1742,9 @@ Private Function pvTlsParseRecord(uCtx As UcsTlsContext, uInput As UcsBuffer, sE
     Dim baHmac()        As Byte
     Dim lPadding        As Long
     Dim lIdx            As Long
-    
+    Dim lBad            As Long
+    Dim lPos            As Long
+
     On Error GoTo EH
     With uCtx
     Do While uInput.Pos + 4 < uInput.Size
@@ -1826,27 +1829,35 @@ RetryDecrypt:
                     Loop
                     lRecordType = uInput.Data(lEnd)
                 ElseIf .MacSize > 0 Then
+                    lBad = 0
                     If Not .RemoteEncryptThenMac Then
-                        '--- remove padding and prepare decrypted data for MAC
                         lPadding = uInput.Data(lEnd - 1)
                         If lEnd - (lPadding + 1) - .MacSize < uInput.Pos Then
-                            GoTo RecordMacFailed
-                        End If
-                        For lIdx = 2 To lPadding + 1
-                            If uInput.Data(lEnd - lIdx) <> lPadding Then
+                            lPadding = 0
+                            lBad = 1
+                            If lEnd - 1 - .MacSize < uInput.Pos Then
                                 GoTo RecordMacFailed
                             End If
+                        End If
+                        For lIdx = 1 To 256
+                            lPos = lEnd - 1 - lIdx
+                            If lPos < uInput.Pos Then
+                                lPos = uInput.Pos
+                            End If
+                            lBad = lBad Or ((uInput.Data(lPos) Xor lPadding) And CLng(lIdx <= lPadding))
                         Next
                         lEnd = lEnd - (lPadding + 1) - .MacSize
                         uAad.Size = uAad.Size - 2
                         pvBufferWriteLong uAad, lEnd - uInput.Pos, Size:=2
                         pvBufferWriteBlob uAad, VarPtr(uInput.Data(uInput.Pos)), lEnd - uInput.Pos
                     End If
-                    '--- calc MAC and compare
                     pvTlsGetHmac baHmac, .MacAlgo, .RemoteMacKey, uAad.Data, 0, uAad.Size
                     pvArrayAllocate baRemoteIV, .MacSize, FUNC_NAME & ".baRemoteIV"
                     Call CopyMemory(baRemoteIV(0), ByVal VarPtr(uInput.Data(lEnd)), .MacSize)
                     If Not pvArrayEqual(baHmac, baRemoteIV) Then
+                        lBad = 1
+                    End If
+                    If lBad <> 0 Then
                         GoTo RecordMacFailed
                     End If
                     If .RemoteEncryptThenMac Then
@@ -2649,7 +2660,9 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
     Dim lPublicSize     As Long
     Dim lNameSize       As Long
     Dim lCookieSize     As Long
-    
+    Dim baSentinel()    As Byte
+    Dim lIdx            As Long
+
     On Error GoTo EH
     lExtType = -1
     If pvArraySize(m_baHelloRetryRandom) = 0 Then
@@ -2783,11 +2796,31 @@ Private Function pvTlsParseHandshakeServerHello(uCtx As UcsTlsContext, uInput As
                 Loop
             pvBufferReadBlockEnd uInput
         End If
+        '--- RFC 8446 section 4.1.3: a TLS 1.3-capable client MUST abort with an
+        '---   "illegal_parameter" alert when it is negotiated down to TLS 1.2 while
+        '---   the last 8 bytes of ServerHello.random carry the downgrade sentinel
+        If (.LocalFeatures And ucsTlsSupportTls13) <> 0 And .ProtocolVersion = TLS_PROTOCOL_VERSION_TLS12 And Not .HelloRetryRequest Then
+            If pvArraySize(.RemoteExchRandom) = TLS_HELLO_RANDOM_SIZE Then
+                pvArrayByte baSentinel, &H44, &H4F, &H57, &H4E, &H47, &H52, &H44, &H1
+                For lIdx = 0 To UBound(baSentinel)
+                    If .RemoteExchRandom(TLS_HELLO_RANDOM_SIZE - (UBound(baSentinel) + 1) + lIdx) <> baSentinel(lIdx) Then
+                        Exit For
+                    End If
+                Next
+                If lIdx > UBound(baSentinel) Then
+                    GoTo IllegalDowngrade
+                End If
+            End If
+        End If
     End With
     '--- success
     pvTlsParseHandshakeServerHello = True
 QH:
     Exit Function
+IllegalDowngrade:
+    sError = ERR_ILLEGAL_DOWNGRADE
+    eAlertCode = uscTlsAlertIllegalParameter
+    GoTo QH
 InvalidSize:
     sError = IIf(lExtType < 0, ERR_INVALID_SIZE, Replace(ERR_INVALID_SIZE_EXTENSION, "%1", pvTlsGetExtensionName(lExtType)))
     eAlertCode = uscTlsAlertDecodeError
@@ -3158,7 +3191,7 @@ Private Function pvTlsParseHandshakeClientHello(uCtx As UcsTlsContext, uInput As
                                 pvBufferReadArray uInput, .RemoteLegacyRenegInfo, lBlockSize
                             pvBufferReadBlockEnd uInput
                             If lBlockSize > 0 Then
-                                If Not pvArrayEqual(.RemoteLegacyRenegInfo, .RemoteLegacyVerifyData) Then
+                                If Not pvArrayFastEqual(.RemoteLegacyRenegInfo, .RemoteLegacyVerifyData) Then
                                     GoTo SecureRenegotiationFailed
                                 End If
                             End If
@@ -3570,12 +3603,12 @@ Private Function pvTlsCheckRemoteKey(ByVal lExchGroup As Long, baPublic() As Byt
         If Not pvCryptoEcdhSecp256r1UncompressKey(baUncompr, baCompr) Then
             GoTo QH
         End If
-        If Not pvArrayEqual(baUncompr, baPublic) Then
+        If Not pvArrayFastEqual(baUncompr, baPublic) Then
             baCompr(0) = 3 '--- compressed negative
             If Not pvCryptoEcdhSecp256r1UncompressKey(baUncompr, baCompr) Then
                 GoTo QH
             End If
-            If Not pvArrayEqual(baUncompr, baPublic) Then
+            If Not pvArrayFastEqual(baUncompr, baPublic) Then
                 GoTo QH
             End If
         End If
@@ -3592,12 +3625,12 @@ Private Function pvTlsCheckRemoteKey(ByVal lExchGroup As Long, baPublic() As Byt
         If Not pvCryptoEcdhSecp384r1UncompressKey(baUncompr, baCompr) Then
             GoTo QH
         End If
-        If Not pvArrayEqual(baUncompr, baPublic) Then
+        If Not pvArrayFastEqual(baUncompr, baPublic) Then
             baCompr(0) = 3 '--- compressed negative
             If Not pvCryptoEcdhSecp384r1UncompressKey(baUncompr, baCompr) Then
                 GoTo QH
             End If
-            If Not pvArrayEqual(baUncompr, baPublic) Then
+            If Not pvArrayFastEqual(baUncompr, baPublic) Then
                 GoTo QH
             End If
         End If
@@ -5350,10 +5383,25 @@ Private Function pvArrayAccumulateOr(baData() As Byte, Optional ByVal Pos As Lon
     Next
 End Function
 
-Private Function pvArrayEqual(baFirst() As Byte, baSecond() As Byte) As Boolean
+Private Function pvArrayFastEqual(baFirst() As Byte, baSecond() As Byte) As Boolean
     If pvArraySize(baFirst) = pvArraySize(baSecond) Then
-        pvArrayEqual = (InStrB(baFirst, baSecond) = 1)
+        pvArrayFastEqual = (InStrB(baFirst, baSecond) = 1)
     End If
+End Function
+
+Private Function pvArrayEqual(baFirst() As Byte, baSecond() As Byte) As Boolean
+    Dim lIdx            As Long
+    Dim lSize           As Long
+    Dim lDiff           As Long
+
+    lSize = pvArraySize(baFirst)
+    If lSize <> pvArraySize(baSecond) Then
+        Exit Function
+    End If
+    For lIdx = 0 To lSize - 1
+        lDiff = lDiff Or (baFirst(lIdx) Xor baSecond(lIdx))
+    Next
+    pvArrayEqual = (lDiff = 0)
 End Function
 
 Private Function pvToStringA(ByVal lPtr As Long) As String
@@ -5673,7 +5721,7 @@ Private Function pvCryptoEmsaPssDecode(baMessage() As Byte, baEnc() As Byte, ByV
     pvArrayAllocate baBuffer, lHashSize, FUNC_NAME & ".baBuffer"
     Call CopyMemory(baBuffer(0), baEnc(lPos), lHashSize)
     '--- 14. If |H| = |H'|, output "consistent." Otherwise, output "inconsistent."
-    If Not pvArrayEqual(baHash, baBuffer) Then
+    If Not pvArrayFastEqual(baHash, baBuffer) Then
         GoTo QH
     End If
     '--- success
@@ -6716,7 +6764,13 @@ Private Function pvCryptoBulkAesCbcDecrypt( _
 End Function
 
 Private Sub pvCryptoRandomBytes(ByVal lPtr As Long, ByVal lSize As Long)
-    Call CryptGenRandom(m_uData.hRandomProv, lSize, lPtr)
+    Const FUNC_NAME     As String = "pvCryptoRandomBytes"
+    Dim hResult         As Long
+
+    If CryptGenRandom(m_uData.hRandomProv, lSize, lPtr) = 0 Then
+        hResult = Err.LastDllError
+        ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME, Replace(ERR_CALL_FAILED, "%1", "CryptGenRandom")
+    End If
 End Sub
 
 Private Function pvCryptoRsaModExp(baBase() As Byte, baExp() As Byte, baModulus() As Byte, baRetVal() As Byte) As Boolean
@@ -7051,7 +7105,7 @@ Public Sub TestCryptoAesGcm(oJson As Object)
                         sResult = "invalid"
                     Else
                         pvArrayWriteBlob baCt, UBound(baCt) + 1, VarPtr(baTag(0)), UBound(baTag) + 1
-                        If Not pvArrayEqual(baBuffer, baCt) Then
+                        If Not pvArrayFastEqual(baBuffer, baCt) Then
                             sResult = "invalid"
                         End If
                     End If
@@ -7109,7 +7163,7 @@ Public Sub TestCryptoAesCbc(oJson As Object)
                     sResult = "valid"
                     If Not pvCryptoBulkAesCbcEncrypt(baNonce, baKey, baBuffer, 0, UBound(baBuffer) + 1) Then
                         sResult = "invalid"
-                    ElseIf Not pvArrayEqual(baBuffer, baCt) Then
+                    ElseIf Not pvArrayFastEqual(baBuffer, baCt) Then
                         sResult = "invalid"
                     End If
                     If JsonValue(oTest, "result") = sResult Then
@@ -7166,7 +7220,7 @@ Public Sub TestCryptoChacha20(oJson As Object)
                         sResult = "invalid"
                     Else
                         pvArrayWriteBlob baCt, UBound(baCt) + 1, VarPtr(baTag(0)), UBound(baTag) + 1
-                        If Not pvArrayEqual(baBuffer, baCt) Then
+                        If Not pvArrayFastEqual(baBuffer, baCt) Then
                             sResult = "invalid"
                         End If
                     End If
@@ -7241,7 +7295,7 @@ Public Sub TestCryptoEcdh(oJson As Object)
                         sResult = "valid"
                         If Not pvCryptoEcdhSecp256r1SharedSecret(baBuffer, baPrivate, baPublic) Then
                             sResult = "invalid"
-                        ElseIf Not pvArrayEqual(baBuffer, baShared) Then
+                        ElseIf Not pvArrayFastEqual(baBuffer, baShared) Then
                             sResult = "invalid"
                         End If
                         If JsonValue(oTest, "result") = "acceptable" And sResult = "valid" Then
@@ -7258,7 +7312,7 @@ Public Sub TestCryptoEcdh(oJson As Object)
                         sResult = "valid"
                         If Not pvCryptoEcdhSecp384r1SharedSecret(baBuffer, baPrivate, baPublic) Then
                             sResult = "invalid"
-                        ElseIf Not pvArrayEqual(baBuffer, baShared) Then
+                        ElseIf Not pvArrayFastEqual(baBuffer, baShared) Then
                             sResult = "invalid"
                         End If
                         If JsonValue(oTest, "result") = "acceptable" And sResult = "valid" Then
