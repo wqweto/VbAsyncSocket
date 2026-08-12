@@ -13,7 +13,7 @@ Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
 '=========================================================================
 '
-' VbAsyncSocket Project (c) 2018-2023 by wqweto@gmail.com
+' VbAsyncSocket Project (c) 2018-2026 by wqweto@gmail.com
 '
 ' Simple and thin WinSock API wrappers for VB6
 '
@@ -1459,80 +1459,333 @@ EH:
 End Sub
 
 Private Function pvParseUrl(sUrl As String, uParsed As UcsParsedUrl, Optional DefProtocol As String) As Boolean
-    With CreateObject("VBScript.RegExp")
-        .Pattern = "^(?:(?:(.+?):)?//)?(?:(?:([^:]*?):)?([^@]*)@)?([A-Za-z0-9\-\.]+)?(:[0-9]+)?(/[^?#]*?)?(\?[^#]*?)?(#.*)?$"
-        With .Execute(sUrl)
-            If .Count > 0 Then
-                With .Item(0).SubMatches
-                    uParsed.Protocol = IIf(LenB(.Item(0)) = 0, DefProtocol, .Item(0))
-                    uParsed.User = .Item(1)
-                    If LenB(uParsed.User) = 0 Then
-                        uParsed.User = .Item(2)
-                    Else
-                        uParsed.Pass = .Item(2)
-                    End If
-                    uParsed.Host = .Item(3)
-                    uParsed.UserPort = Mid$(.Item(4), 2)
-                    uParsed.Port = Val(uParsed.UserPort)
-                    If uParsed.Port = 0 Then
-                        Select Case LCase$(uParsed.Protocol)
-                        Case "https"
-                            uParsed.Port = 443
-                        Case "socks5"
-                            uParsed.Port = 1080
-                        Case Else
-                            uParsed.Port = 80
-                        End Select
-                    End If
-                    uParsed.Path = .Item(5)
-                    If LenB(uParsed.Path) = 0 Then
-                        uParsed.Path = "/"
-                    End If
-                    uParsed.QueryString = .Item(6)
-                    uParsed.Anchor = .Item(7)
-                End With
-                pvParseUrl = True
-            End If
-        End With
-    End With
+    Const STR_PATTERN   As String = "^(?:(?:([^:/?#]+):)?//)?(?:([^:@/?#]*)(?::([^@/?#]*))?@)?(\[[^\]]*\]|[A-Za-z0-9_.-]*)(?::([0-9]+))?(/[^?#]*)?(\?[^#]*)?(#.*)?$"
+    Dim uEmpty          As UcsParsedUrl
+    Dim aMatches()      As String
+    
+    uParsed = uEmpty
+    If Not pvRegExpExec(sUrl, STR_PATTERN, aMatches) Then
+        Exit Function
+    End If
+    uParsed.Protocol = aMatches(0)
+    If LenB(uParsed.Protocol) = 0 Then
+        uParsed.Protocol = DefProtocol
+    End If
+    uParsed.User = aMatches(1)
+    uParsed.Pass = aMatches(2)
+    uParsed.Host = aMatches(3)
+    uParsed.UserPort = aMatches(4)
+    uParsed.Port = Val(uParsed.UserPort)
+    If uParsed.Port = 0 Then
+        Select Case LCase$(uParsed.Protocol)
+        Case "https"
+            uParsed.Port = 443
+        Case "socks5"
+            uParsed.Port = 1080
+        Case Else
+            uParsed.Port = 80
+        End Select
+    End If
+    uParsed.Path = aMatches(5)
+    If LenB(uParsed.Path) = 0 Then
+        uParsed.Path = "/"
+    End If
+    uParsed.QueryString = aMatches(6)
+    uParsed.Anchor = aMatches(7)
+    pvParseUrl = True
 End Function
 
 Private Function pvParseHeaderAttribs(ByVal sHeader As String) As Object
-    Dim vSplit          As Variant
-    Dim vElem           As Variant
+    Const STR_PATTERN   As String = "^ *((?:""([^""]*)""|([^=;""]*))(?: *= *(?:""([^""]*)""|([^;]*)))?) *(?:;(.*))?$"
+    Dim aMatches()      As String
     Dim sKey            As String
     Dim sValue          As String
     Dim lIdx            As Long
     
-    '--- TODO: need regex parser for semi-colons in quoted values
     Set pvParseHeaderAttribs = CreateObject("Scripting.Dictionary")
     pvParseHeaderAttribs.CompareMode = vbTextCompare
-    vSplit = Split(sHeader, ";")
-    If UBound(vSplit) > 0 Then
-        For Each vElem In vSplit
-            vElem = Trim$(vElem)
-            pvParseHeaderAttribs.Item(lIdx) = vElem
-            If LenB(vElem) <> 0 Then
-                vElem = Split(vElem, "=", Limit:=2)
-                sKey = Trim$(vElem(0))
-                If Left$(sKey, 1) = """" And Right$(sKey, 1) = """" And Len(sKey) > 1 Then
-                    sKey = Trim$(Mid$(sKey, 2, Len(sKey) - 2))
-                End If
-                If UBound(vElem) > 0 Then
-                    sValue = Trim$(vElem(1))
-                    If Left$(sValue, 1) = """" And Right$(sValue, 1) = """" And Len(sValue) > 1 Then
-                        sValue = Trim$(Mid$(sValue, 2, Len(sValue) - 2))
-                    End If
-                Else
-                    sValue = vbNullString
-                End If
-                If Not pvParseHeaderAttribs.Exists(sKey) Then
-                    pvParseHeaderAttribs.Item(sKey) = sValue
-                End If
+    Do While LenB(sHeader) <> 0
+        If Not pvRegExpExec(sHeader, STR_PATTERN, aMatches) Then
+            pvParseHeaderAttribs.Item(lIdx) = Trim$(sHeader)
+            Exit Do
+        End If
+        pvParseHeaderAttribs.Item(lIdx) = Trim$(aMatches(0))
+        If LenB(Trim$(aMatches(0))) <> 0 Then
+            sKey = Trim$(aMatches(1) & aMatches(2))
+            sValue = Trim$(aMatches(3) & aMatches(4))
+            If Not pvParseHeaderAttribs.Exists(sKey) Then
+                pvParseHeaderAttribs.Item(sKey) = sValue
             End If
+        End If
+        lIdx = lIdx + 1
+        sHeader = aMatches(5)
+    Loop
+End Function
+
+Private Function pvRegExpExec(sText As String, sPattern As String, aMatches() As String) As Boolean
+    '--- matches sText (in whole) against a minimal regexp subset: literals, "\" escapes, ".",
+    '--- char classes w/ ranges and negation, "?"/"*"/"+" on atoms, capturing "(...)" and
+    '--- non-capturing "(?:...)" groups w/ alternation "|" inside and optional "?" quantifier
+    Dim aMap()          As Long
+    Dim aStack()        As Long
+    Dim aCapStart()     As Long
+    Dim aCapLen()       As Long
+    Dim lIdx            As Long
+    Dim lTop            As Long
+    Dim lCount          As Long
+    
+    ReDim aMap(0 To Len(sPattern) + 1) As Long
+    ReDim aStack(0 To Len(sPattern) + 1) As Long
+    lIdx = 1
+    Do While lIdx <= Len(sPattern)
+        Select Case Mid$(sPattern, lIdx, 1)
+        Case "\"
             lIdx = lIdx + 1
-        Next
+        Case "["
+            lIdx = pvRegExpClassEnd(sPattern, lIdx)
+        Case "("
+            aStack(lTop) = lIdx
+            lTop = lTop + 1
+            If Mid$(sPattern, lIdx + 1, 2) <> "?:" Then
+                lCount = lCount + 1
+                aMap(lIdx) = lCount
+            End If
+        Case ")"
+            lTop = lTop - 1
+            aMap(lIdx) = aMap(aStack(lTop))
+        End Select
+        lIdx = lIdx + 1
+    Loop
+    ReDim aCapStart(0 To lCount) As Long
+    ReDim aCapLen(0 To lCount) As Long
+    If Not pvRegExpMatch(sPattern, 1, sText, 1, aMap, aCapStart, aCapLen) Then
+        Exit Function
     End If
+    If lCount > 0 Then
+        ReDim aMatches(0 To lCount - 1) As String
+        For lIdx = 1 To lCount
+            If aCapLen(lIdx) > 0 Then
+                aMatches(lIdx - 1) = Mid$(sText, aCapStart(lIdx), aCapLen(lIdx))
+            End If
+        Next
+    Else
+        Erase aMatches
+    End If
+    pvRegExpExec = True
+End Function
+
+Private Function pvRegExpMatch(sPat As String, ByVal lPatPos As Long, sText As String, ByVal lTxtPos As Long, aMap() As Long, aCapStart() As Long, aCapLen() As Long) As Boolean
+    Dim lNext           As Long
+    Dim lClose          As Long
+    Dim lBody           As Long
+    Dim lGroup          As Long
+    Dim lCount          As Long
+    Dim lMin            As Long
+    Dim aSaveStart()    As Long
+    Dim aSaveLen()      As Long
+    
+    Do
+        If lPatPos > Len(sPat) Then
+            pvRegExpMatch = (lTxtPos > Len(sText))
+            Exit Function
+        End If
+        Select Case Mid$(sPat, lPatPos, 1)
+        Case "^"
+            If lTxtPos <> 1 Then
+                Exit Function
+            End If
+            lPatPos = lPatPos + 1
+        Case "$"
+            If lTxtPos <= Len(sText) Then
+                Exit Function
+            End If
+            lPatPos = lPatPos + 1
+        Case "("
+            lClose = pvRegExpGroupEnd(sPat, lPatPos + 1)
+            lGroup = aMap(lPatPos)
+            lBody = lPatPos + 1
+            If Mid$(sPat, lBody, 2) = "?:" Then
+                lBody = lBody + 2
+            End If
+            aSaveStart = aCapStart
+            aSaveLen = aCapLen
+            Do
+                If lGroup <> 0 Then
+                    aCapStart(lGroup) = lTxtPos
+                End If
+                If pvRegExpMatch(sPat, lBody, sText, lTxtPos, aMap, aCapStart, aCapLen) Then
+                    pvRegExpMatch = True
+                    Exit Function
+                End If
+                aCapStart = aSaveStart
+                aCapLen = aSaveLen
+                lBody = pvRegExpGroupEnd(sPat, lBody, StopAtPipe:=True)
+                If Mid$(sPat, lBody, 1) <> "|" Then
+                    Exit Do
+                End If
+                lBody = lBody + 1
+            Loop
+            If Mid$(sPat, lClose + 1, 1) <> "?" Then
+                Exit Function
+            End If
+            lPatPos = lClose + 2
+        Case ")"
+            If aMap(lPatPos) <> 0 Then
+                aCapLen(aMap(lPatPos)) = lTxtPos - aCapStart(aMap(lPatPos))
+            End If
+            lPatPos = lPatPos + 1
+            If Mid$(sPat, lPatPos, 1) = "?" Then
+                lPatPos = lPatPos + 1
+            End If
+        Case "|"
+            '--- current alternative matched -> close enclosing group and continue after it
+            lClose = pvRegExpGroupEnd(sPat, lPatPos + 1)
+            If aMap(lClose) <> 0 Then
+                aCapLen(aMap(lClose)) = lTxtPos - aCapStart(aMap(lClose))
+            End If
+            lPatPos = lClose + 1
+            If Mid$(sPat, lPatPos, 1) = "?" Then
+                lPatPos = lPatPos + 1
+            End If
+        Case Else
+            If Mid$(sPat, lPatPos, 1) = "\" Then
+                lNext = lPatPos + 2
+            ElseIf Mid$(sPat, lPatPos, 1) = "[" Then
+                lNext = pvRegExpClassEnd(sPat, lPatPos) + 1
+            Else
+                lNext = lPatPos + 1
+            End If
+            Select Case Mid$(sPat, lNext, 1)
+            Case "?"
+                If pvRegExpAtom(sPat, lPatPos, sText, lTxtPos) Then
+                    aSaveStart = aCapStart
+                    aSaveLen = aCapLen
+                    If pvRegExpMatch(sPat, lNext + 1, sText, lTxtPos + 1, aMap, aCapStart, aCapLen) Then
+                        pvRegExpMatch = True
+                        Exit Function
+                    End If
+                    aCapStart = aSaveStart
+                    aCapLen = aSaveLen
+                End If
+                lPatPos = lNext + 1
+            Case "*", "+"
+                If Mid$(sPat, lNext, 1) = "+" Then
+                    lMin = 1
+                Else
+                    lMin = 0
+                End If
+                lCount = 0
+                Do While pvRegExpAtom(sPat, lPatPos, sText, lTxtPos + lCount)
+                    lCount = lCount + 1
+                Loop
+                aSaveStart = aCapStart
+                aSaveLen = aCapLen
+                Do While lCount >= lMin
+                    If pvRegExpMatch(sPat, lNext + 1, sText, lTxtPos + lCount, aMap, aCapStart, aCapLen) Then
+                        pvRegExpMatch = True
+                        Exit Function
+                    End If
+                    aCapStart = aSaveStart
+                    aCapLen = aSaveLen
+                    lCount = lCount - 1
+                Loop
+                Exit Function
+            Case Else
+                If Not pvRegExpAtom(sPat, lPatPos, sText, lTxtPos) Then
+                    Exit Function
+                End If
+                lPatPos = lNext
+                lTxtPos = lTxtPos + 1
+            End Select
+        End Select
+    Loop
+End Function
+
+Private Function pvRegExpAtom(sPat As String, ByVal lPatPos As Long, sText As String, ByVal lTxtPos As Long) As Boolean
+    If lTxtPos > Len(sText) Then
+        Exit Function
+    End If
+    Select Case Mid$(sPat, lPatPos, 1)
+    Case "\"
+        pvRegExpAtom = (Mid$(sPat, lPatPos + 1, 1) = Mid$(sText, lTxtPos, 1))
+    Case "."
+        pvRegExpAtom = True
+    Case "["
+        pvRegExpAtom = pvRegExpClass(sPat, lPatPos, Mid$(sText, lTxtPos, 1))
+    Case Else
+        pvRegExpAtom = (Mid$(sPat, lPatPos, 1) = Mid$(sText, lTxtPos, 1))
+    End Select
+End Function
+
+Private Function pvRegExpClass(sPat As String, ByVal lPatPos As Long, sChar As String) As Boolean
+    Dim bNegate         As Boolean
+    Dim bFound          As Boolean
+    Dim sCh             As String
+    
+    lPatPos = lPatPos + 1
+    If Mid$(sPat, lPatPos, 1) = "^" Then
+        bNegate = True
+        lPatPos = lPatPos + 1
+    End If
+    Do While lPatPos <= Len(sPat)
+        sCh = Mid$(sPat, lPatPos, 1)
+        If sCh = "]" Then
+            Exit Do
+        ElseIf sCh = "\" Then
+            bFound = bFound Or (Mid$(sPat, lPatPos + 1, 1) = sChar)
+            lPatPos = lPatPos + 2
+        ElseIf Mid$(sPat, lPatPos + 1, 1) = "-" And Mid$(sPat, lPatPos + 2, 1) <> "]" And lPatPos + 2 <= Len(sPat) Then
+            bFound = bFound Or (sChar >= sCh And sChar <= Mid$(sPat, lPatPos + 2, 1))
+            lPatPos = lPatPos + 3
+        Else
+            bFound = bFound Or (sCh = sChar)
+            lPatPos = lPatPos + 1
+        End If
+    Loop
+    pvRegExpClass = bFound Xor bNegate
+End Function
+
+Private Function pvRegExpClassEnd(sPat As String, ByVal lPatPos As Long) As Long
+    lPatPos = lPatPos + 1
+    If Mid$(sPat, lPatPos, 1) = "^" Then
+        lPatPos = lPatPos + 1
+    End If
+    Do While lPatPos <= Len(sPat)
+        Select Case Mid$(sPat, lPatPos, 1)
+        Case "\"
+            lPatPos = lPatPos + 1
+        Case "]"
+            Exit Do
+        End Select
+        lPatPos = lPatPos + 1
+    Loop
+    pvRegExpClassEnd = lPatPos
+End Function
+
+Private Function pvRegExpGroupEnd(sPat As String, ByVal lPatPos As Long, Optional ByVal StopAtPipe As Boolean) As Long
+    Dim lDepth          As Long
+    
+    Do While lPatPos <= Len(sPat)
+        Select Case Mid$(sPat, lPatPos, 1)
+        Case "\"
+            lPatPos = lPatPos + 1
+        Case "["
+            lPatPos = pvRegExpClassEnd(sPat, lPatPos)
+        Case "("
+            lDepth = lDepth + 1
+        Case ")"
+            If lDepth = 0 Then
+                Exit Do
+            End If
+            lDepth = lDepth - 1
+        Case "|"
+            If lDepth = 0 And StopAtPipe Then
+                Exit Do
+            End If
+        End Select
+        lPatPos = lPatPos + 1
+    Loop
+    pvRegExpGroupEnd = lPatPos
 End Function
 
 Private Function pvMapCharset(sCharset As String) As UcsAsyncSocketCodePageEnum
