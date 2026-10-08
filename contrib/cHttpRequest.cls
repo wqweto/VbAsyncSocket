@@ -129,14 +129,21 @@ Private Declare Function WinHttpGetDefaultProxyConfiguration Lib "winhttp" (pPro
 Private Declare Function SHCreateMemStream Lib "shlwapi" Alias "#12" (pInit As Any, ByVal cbInit As Long) As stdole.IUnknown
 Private Declare Function UrlEscapeW Lib "shlwapi" (ByVal pszURL As Long, ByVal pszEscaped As Long, pcchEscaped As Long, ByVal dwFlags As Long) As Long
 Private Declare Function UrlEscapeA Lib "shlwapi" (ByVal pszURL As String, ByVal pszEscaped As String, pcchEscaped As Long, ByVal dwFlags As Long) As Long
-'--- libarchive
-Private Declare Function archive_read_new Lib "archiveint" Alias "_archive_read_new@0" () As Long
-Private Declare Function archive_read_free Lib "archiveint" Alias "_archive_read_free@4" (ByVal hArchive As Long) As Long
-Private Declare Function archive_read_support_filter_gzip Lib "archiveint" Alias "_archive_read_support_filter_gzip@4" (ByVal hArchive As Long) As Long
-Private Declare Function archive_read_support_format_raw Lib "archiveint" Alias "_archive_read_support_format_raw@4" (ByVal hArchive As Long) As Long
-Private Declare Function archive_read_open Lib "archiveint" Alias "_archive_read_open@20" (ByVal hArchive As Long, ByVal pClientData As Long, ByVal lOpener As Long, ByVal lReader As Long, ByVal lCloser As Long) As Long
-Private Declare Function archive_read_next_header Lib "archiveint" Alias "_archive_read_next_header@8" (ByVal hArchive As Long, pHeader As Long) As Long
-Private Declare Function archive_read_data Lib "archiveint" Alias "_archive_read_data@12" (ByVal hArchive As Long, pBuffer As Any, ByVal lSize As Long) As Long
+'--- libarchive (Win10 exports are stdcall-decorated, Win11 exports are undecorated)
+Private Declare Function archive_read_new_d Lib "archiveint" Alias "_archive_read_new@0" () As Long
+Private Declare Function archive_read_new_u Lib "archiveint" Alias "archive_read_new" () As Long
+Private Declare Function archive_read_free_d Lib "archiveint" Alias "_archive_read_free@4" (ByVal hArchive As Long) As Long
+Private Declare Function archive_read_free_u Lib "archiveint" Alias "archive_read_free" (ByVal hArchive As Long) As Long
+Private Declare Function archive_read_support_filter_gzip_d Lib "archiveint" Alias "_archive_read_support_filter_gzip@4" (ByVal hArchive As Long) As Long
+Private Declare Function archive_read_support_filter_gzip_u Lib "archiveint" Alias "archive_read_support_filter_gzip" (ByVal hArchive As Long) As Long
+Private Declare Function archive_read_support_format_raw_d Lib "archiveint" Alias "_archive_read_support_format_raw@4" (ByVal hArchive As Long) As Long
+Private Declare Function archive_read_support_format_raw_u Lib "archiveint" Alias "archive_read_support_format_raw" (ByVal hArchive As Long) As Long
+Private Declare Function archive_read_open_d Lib "archiveint" Alias "_archive_read_open@20" (ByVal hArchive As Long, ByVal pClientData As Long, ByVal lOpener As Long, ByVal lReader As Long, ByVal lCloser As Long) As Long
+Private Declare Function archive_read_open_u Lib "archiveint" Alias "archive_read_open" (ByVal hArchive As Long, ByVal pClientData As Long, ByVal lOpener As Long, ByVal lReader As Long, ByVal lCloser As Long) As Long
+Private Declare Function archive_read_next_header_d Lib "archiveint" Alias "_archive_read_next_header@8" (ByVal hArchive As Long, pHeader As Long) As Long
+Private Declare Function archive_read_next_header_u Lib "archiveint" Alias "archive_read_next_header" (ByVal hArchive As Long, pHeader As Long) As Long
+Private Declare Function archive_read_data_d Lib "archiveint" Alias "_archive_read_data@12" (ByVal hArchive As Long, pBuffer As Any, ByVal lSize As Long) As Long
+Private Declare Function archive_read_data_u Lib "archiveint" Alias "archive_read_data" (ByVal hArchive As Long, pBuffer As Any, ByVal lSize As Long) As Long
 #If Not ImplUseShared Then
     Private Declare Function QueryPerformanceCounter Lib "kernel32" (lpPerformanceCount As Currency) As Long
     Private Declare Function QueryPerformanceFrequency Lib "kernel32" (lpFrequency As Currency) As Long
@@ -188,6 +195,7 @@ Private m_vOptions(0 To sizeof_WinHttpRequestOption) As Variant
 Private m_uRequest              As UcsRequestType
 Private m_uResponse             As UcsResponseType
 Private m_oCookies              As Object '--- keyed on domains, contains collections of path + cookie per domain
+Private m_lArchiveDecorated     As Long   '--- 0 = unknown, 1 = decorated exports (Win10), 2 = undecorated (Win11)
 
 Private Enum UcsStateEnum
     ucsIdle
@@ -1852,6 +1860,76 @@ Private Function pvMapCharset(sCharset As String) As UcsAsyncSocketCodePageEnum
         '--- fallback
         pvMapCharset = ucsScpAcp
     End Select
+End Function
+
+Private Function archive_read_new() As Long
+    If m_lArchiveDecorated = 0 Then
+        '--- initial check: probe decorated export first, error 453 -> undecorated (Win11)
+        On Error Resume Next
+        archive_read_new = archive_read_new_d()
+        If Err.Number = 453 Then '--- Specified DLL function not found
+            m_lArchiveDecorated = 2
+        ElseIf Err.Number = 0 Then
+            m_lArchiveDecorated = 1
+        End If
+        On Error GoTo 0
+        If m_lArchiveDecorated = 1 Then
+            Exit Function
+        End If
+    End If
+    If m_lArchiveDecorated = 2 Then
+        archive_read_new = archive_read_new_u()
+    Else
+        archive_read_new = archive_read_new_d()
+    End If
+End Function
+
+Private Function archive_read_free(ByVal hArchive As Long) As Long
+    If m_lArchiveDecorated = 2 Then
+        archive_read_free = archive_read_free_u(hArchive)
+    Else
+        archive_read_free = archive_read_free_d(hArchive)
+    End If
+End Function
+
+Private Function archive_read_support_filter_gzip(ByVal hArchive As Long) As Long
+    If m_lArchiveDecorated = 2 Then
+        archive_read_support_filter_gzip = archive_read_support_filter_gzip_u(hArchive)
+    Else
+        archive_read_support_filter_gzip = archive_read_support_filter_gzip_d(hArchive)
+    End If
+End Function
+
+Private Function archive_read_support_format_raw(ByVal hArchive As Long) As Long
+    If m_lArchiveDecorated = 2 Then
+        archive_read_support_format_raw = archive_read_support_format_raw_u(hArchive)
+    Else
+        archive_read_support_format_raw = archive_read_support_format_raw_d(hArchive)
+    End If
+End Function
+
+Private Function archive_read_open(ByVal hArchive As Long, ByVal pClientData As Long, ByVal lOpener As Long, ByVal lReader As Long, ByVal lCloser As Long) As Long
+    If m_lArchiveDecorated = 2 Then
+        archive_read_open = archive_read_open_u(hArchive, pClientData, lOpener, lReader, lCloser)
+    Else
+        archive_read_open = archive_read_open_d(hArchive, pClientData, lOpener, lReader, lCloser)
+    End If
+End Function
+
+Private Function archive_read_next_header(ByVal hArchive As Long, pHeader As Long) As Long
+    If m_lArchiveDecorated = 2 Then
+        archive_read_next_header = archive_read_next_header_u(hArchive, pHeader)
+    Else
+        archive_read_next_header = archive_read_next_header_d(hArchive, pHeader)
+    End If
+End Function
+
+Private Function archive_read_data(ByVal hArchive As Long, pBuffer As Byte, ByVal lSize As Long) As Long
+    If m_lArchiveDecorated = 2 Then
+        archive_read_data = archive_read_data_u(hArchive, pBuffer, lSize)
+    Else
+        archive_read_data = archive_read_data_d(hArchive, pBuffer, lSize)
+    End If
 End Function
 
 Private Function pvUngzipStream(pInput As IUnknown, pOutput As IUnknown) As Boolean
