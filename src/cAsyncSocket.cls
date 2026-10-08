@@ -204,6 +204,7 @@ Private Declare Function CreateWindowEx Lib "user32" Alias "CreateWindowExA" (By
 Private Declare Function SetWindowLong Lib "user32" Alias "SetWindowLongA" (ByVal hWnd As Long, ByVal nIndex As Long, ByVal dwNewLong As Long) As Long
 Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref" (oDest As Any, ByVal lSrcPtr As Long) As Long
 Private Declare Function GetCurrentProcessId Lib "kernel32" () As Long
+Private Declare Function GetWindowThreadProcessId Lib "user32" (ByVal hWnd As Long, lpdwProcessId As Long) As Long
 Private Declare Function LoadLibrary Lib "kernel32" Alias "LoadLibraryA" (ByVal lpLibFileName As String) As Long
 Private Declare Function GetAdaptersInfo Lib "iphlpapi" (lpAdapterInfo As Any, lpSize As Long) As Long
 Private Declare Function GetIpForwardTable Lib "iphlpapi" (pIpForwardTable As Any, pdwSize As Long, ByVal bOrder As Long) As Long
@@ -252,7 +253,6 @@ Private Declare Function ws_gethostname Lib "ws2_32" Alias "gethostname" (ByVal 
     Private Declare Function GetProcAddress Lib "kernel32" (ByVal hModule As Long, ByVal lpProcName As String) As Long
     Private Declare Function GetProcByOrdinal Lib "kernel32" Alias "GetProcAddress" (ByVal hModule As Long, ByVal lpProcOrdinal As Long) As Long
     Private Declare Function DefSubclassProc Lib "comctl32" Alias "#413" (ByVal hWnd As Long, ByVal wMsg As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
-    Private Declare Function GetWindowThreadProcessId Lib "user32" (ByVal hWnd As Long, lpdwProcessId As Long) As Long
     Private Declare Function GetEnvironmentVariable Lib "kernel32" Alias "GetEnvironmentVariableA" (ByVal lpName As String, ByVal lpBuffer As String, ByVal nSize As Long) As Long
     Private Declare Function SetEnvironmentVariable Lib "kernel32" Alias "SetEnvironmentVariableA" (ByVal lpName As String, ByVal lpValue As String) As Long
     '--- end MST
@@ -1655,6 +1655,7 @@ Public Function SyncWaitForEvent( _
     Dim bBlocking       As Boolean
     Dim bHandled        As Boolean
     Dim bPeek           As Boolean
+    Dim dblTimerEx      As Double
     
     On Error GoTo EH
     '--- check if no pending resolution
@@ -1675,6 +1676,7 @@ Public Function SyncWaitForEvent( _
     If Timeout > 0 Then
         lTimerID = SetTimer(hWnd, 1, Timeout, 0)
     End If
+    dblTimerEx = TimerEx
     bPeek = True
     Do
         If PeekMessage(uMsg, hWnd, WM_SOCKET_NOTIFY + m_lIndex, WM_SOCKET_NOTIFY + m_lIndex, PM_REMOVE) <> 0 Then
@@ -1713,6 +1715,12 @@ Public Function SyncWaitForEvent( _
         If PeekMessage(uMsg, hWnd, WM_TIMER, WM_TIMER, PM_REMOVE) <> 0 Then
             m_lLastError = ERR_TIMEOUT
             Exit Do
+        End If
+        If Timeout > 0 Then
+            If TimerEx - dblTimerEx >= Timeout * 1000 Then
+                m_lLastError = ERR_TIMEOUT
+                Exit Do
+            End If
         End If
         If Not m_bBlocking Then
             m_lLastError = WSAEINTR
@@ -2105,12 +2113,19 @@ Private Sub Class_Initialize()
     Dim hWndHelper      As Long
     Dim lPtr            As Long
     Dim baWSAData()     As Byte
+    Dim lProcessId      As Long
     
     sHelperName = GetCurrentProcessId() & ":" & App.ThreadID & ":" & STR_HELPER_NAME
     hWndParent = HWND_MESSAGE
     Do
-        hWndHelper = FindWindowEx(hWndParent, 0, STR_HELPER_CLASS, sHelperName)
-        If hWndHelper = 0 And hWndParent <> 0 Then
+        hWndHelper = FindWindowEx(hWndParent, hWndHelper, STR_HELPER_CLASS, sHelperName)
+        If hWndHelper <> 0 Then
+            If GetWindowThreadProcessId(hWndHelper, lProcessId) = App.ThreadID Then
+                If GetCurrentProcessId() = lProcessId Then
+                    Exit Do
+                End If
+            End If
+        ElseIf hWndParent <> 0 Then
             hWndParent = 0
         Else
             Exit Do
@@ -2119,7 +2134,10 @@ Private Sub Class_Initialize()
     lPtr = GetWindowLong(hWndHelper, GWL_USERDATA)
     If hWndHelper = 0 Or lPtr <> 0 Then
         If hWndHelper = 0 Then
-            hWndHelper = CreateWindowEx(0, STR_HELPER_CLASS, sHelperName, 0, 0, 0, 0, 0, hWndParent, 0, App.hInstance, ByVal 0)
+            hWndHelper = CreateWindowEx(0, STR_HELPER_CLASS, sHelperName, 0, 0, 0, 0, 0, HWND_MESSAGE, 0, App.hInstance, ByVal 0)
+            If hWndHelper = 0 Then
+                hWndHelper = CreateWindowEx(0, STR_HELPER_CLASS, sHelperName, 0, 0, 0, 0, 0, 0, 0, App.hInstance, ByVal 0)
+            End If
         End If
         If lPtr <> 0 Then
             Set m_oHelperWindow = pvToSocket(lPtr)
