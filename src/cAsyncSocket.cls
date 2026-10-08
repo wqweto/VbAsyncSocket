@@ -172,7 +172,6 @@ Private Const INADDR_ANY                    As Long = 0
 Private Const INADDR_NONE                   As Long = -1
 '--- Windows Messages
 Private Const WM_PAINT                      As Long = &HF
-Private Const WM_TIMER                      As Long = &H113
 Private Const WM_USER                       As Long = &H400
 Private Const WM_SOCKET_RESOLVE             As Long = WM_USER + 4
 Private Const WM_SOCKET_NOTIFY              As Long = WM_USER + 5
@@ -227,6 +226,7 @@ Private Declare Function ws_sendto Lib "ws2_32" Alias "sendto" (ByVal lSocket As
 Private Declare Function ws_getpeername Lib "ws2_32" Alias "getpeername" (ByVal lSocket As Long, uName As SOCKADDR_IN, lpNameLen As Long) As Long
 Private Declare Function ws_getsockname Lib "ws2_32" Alias "getsockname" (ByVal lSocket As Long, uName As SOCKADDR_IN, lpNameLen As Long) As Long
 Private Declare Function ws_shutdown Lib "ws2_32" Alias "shutdown" (ByVal lSocket As Long, ByVal lHow As Long) As Long
+Private Declare Function ws_closesocket Lib "ws2_32" Alias "closesocket" (ByVal lSocket As Long) As Long
 Private Declare Function ws_listen Lib "ws2_32" Alias "listen" (ByVal lSocket As Long, ByVal lBackLog As Long) As Long
 Private Declare Function ws_accept Lib "ws2_32" Alias "accept" (ByVal lSocket As Long, lpAddr As Any, lpAddrLen As Any) As Long
 Private Declare Function ws_ioctlsocket Lib "ws2_32" Alias "ioctlsocket" (ByVal lSocket As Long, ByVal lCmd As Long, lpArg As Long) As Long
@@ -238,8 +238,6 @@ Private Declare Function ws_gethostname Lib "ws2_32" Alias "gethostname" (ByVal 
 #If ImplSync Then
     Private Declare Function PeekMessage Lib "user32" Alias "PeekMessageA" (lpMsg As APIMSG, ByVal hWnd As Long, ByVal wMsgFilterMin As Long, ByVal wMsgFilterMax As Long, ByVal wRemoveMsg As Long) As Long
     Private Declare Function DispatchMessage Lib "user32" Alias "DispatchMessageA" (lpMsg As APIMSG) As Long
-    Private Declare Function SetTimer Lib "user32" (ByVal hWnd As Long, ByVal nIDEvent As Long, ByVal uElapse As Long, ByVal lpTimerFunc As Long) As Long
-    Private Declare Function KillTimer Lib "user32" (ByVal hWnd As Long, ByVal nIDEvent As Long) As Long
 '    Private Declare Function WaitMessage Lib "user32" () As Long
     Private Declare Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
 #End If
@@ -345,7 +343,8 @@ Private m_lLastSendBytes        As Long
 Private m_uGetHostByName()      As UcsAsyncGetHostByNameType
 Private m_uWindowState()        As UcsHelperWindowStateType
 #If ImplSync Then
-    Private m_cMsgQueue         As VBA.Collection
+    Private m_lPendingEvents    As Long     '--- bitmask of ucsSfdXxx notifications consumed by SyncWaitForEvent
+    Private m_lPendingErrorParam As Long    '--- lParam of last consumed notification with error code
     Private m_bBlocking         As Boolean
 #End If
 
@@ -631,12 +630,7 @@ Public Function Accept(ConnectedSocket As cAsyncSocket, Optional SocketAddress A
     Dim uAddr           As SOCKADDR_IN
     
     On Error GoTo EH
-    If SocketPort = 0 Then
-        hTemp = ws_accept(m_hSocket, ByVal 0, ByVal 0)
-    Else
-        pvToSockAddr SocketAddress, SocketPort, uAddr
-        hTemp = ws_accept(m_hSocket, uAddr, LenB(uAddr))
-    End If
+    hTemp = ws_accept(m_hSocket, uAddr, LenB(uAddr))
     If hTemp = INVALID_SOCKET Then
         m_lLastError = Err.LastDllError
         GoTo QH
@@ -646,8 +640,12 @@ Public Function Accept(ConnectedSocket As cAsyncSocket, Optional SocketAddress A
     End If
     If Not ConnectedSocket.Attach(hTemp) Then
         m_lLastError = ConnectedSocket.LastError
+        If ConnectedSocket.SocketHandle <> hTemp Then
+            Call ws_closesocket(hTemp)
+        End If
         GoTo QH
     End If
+    pvFromSockAddr uAddr, SocketAddress, SocketPort
     '--- success
     m_lLastError = 0
     Accept = True
@@ -697,18 +695,21 @@ End Function
 
 Public Sub Close_()
     Const FUNC_NAME     As String = "Close_"
+    Const MAX_DRAIN     As Long = 65536
     Dim baBuffer()      As Byte
     Dim lSize           As Long
+    Dim lTotal          As Long
     
     On Error GoTo EH
     pvCancelResolve
     If m_hSocket <> INVALID_SOCKET Then
         Call ws_shutdown(m_hSocket, SD_SEND)
-        '--- drain
-        ReDim baBuffer(0 To 4096) As Byte
+        '--- drain (bounded so a peer that keeps sending cannot stall Close_)
+        ReDim baBuffer(0 To 4095) As Byte
         Do
-            lSize = ws_recv(m_hSocket, baBuffer(0), UBound(baBuffer), 0)
-        Loop While lSize > 0
+            lSize = ws_recv(m_hSocket, baBuffer(0), UBound(baBuffer) + 1, 0)
+            lTotal = lTotal + lSize
+        Loop While lSize > 0 And lTotal < MAX_DRAIN
         pvClose
     End If
     Exit Sub
@@ -938,6 +939,7 @@ Public Function SendArray( _
     m_lLastError = 0
     SendArray = True
 QH:
+    m_lLastSendBytes = lBytes
     Exit Function
 EH:
     PrintError FUNC_NAME
@@ -959,7 +961,6 @@ Public Function Send( _
             GoTo QH
         End If
     End If
-    m_lLastSendBytes = BufLen
     If uAddr.sin_family <> 0 Then
         Send = ws_sendto(m_hSocket, ByVal BufPtr, BufLen, Flags, uAddr, LenB(uAddr))
     Else
@@ -972,6 +973,7 @@ Public Function Send( _
     '--- success
     m_lLastError = 0
 QH:
+    m_lLastSendBytes = IIf(Send > 0, Send, 0)
     Exit Function
 EH:
     PrintError FUNC_NAME
@@ -1104,6 +1106,14 @@ Friend Function frNotifyEvent(ByVal wParam As Long, ByVal lParam As Long) As Boo
         frNotifyEvent = True
     End If
 End Function
+
+Friend Sub frNotifyMsgQueue()
+    #If ImplSync Then
+        If Not m_bBlocking Then
+            SyncProcessMsgQueue
+        End If
+    #End If
+End Sub
 
 Friend Function frNotifyGetHostByName(ByVal wParam As Long, ByVal lParam As Long) As Boolean
     If pvResolveHandle = wParam Then
@@ -1265,6 +1275,10 @@ Private Sub pvClose()
         m_hSocket = INVALID_SOCKET
         Set m_pCleanup = Nothing
     End If
+    #If ImplSync Then
+        m_lPendingEvents = 0
+        m_lPendingErrorParam = 0
+    #End If
 End Sub
 
 Private Sub pvGetAdaptersInfo(vOutput As Variant)
@@ -1478,6 +1492,10 @@ Public Function SyncReceiveArray( _
             If lBytes >= NeedLen Or NeedLen = 0 Then
                 Exit Do
             End If
+        ElseIf SockOpt(ucsSsoType) = ucsSckStream Then
+            '--- note: for TCP recv returns 0 when peer has closed the connection
+            m_lLastError = WSAENOTCONN
+            GoTo QH
         End If
         If Timeout > 0 Then
             lElapsed = Int((TimerEx - dblTimerEx) * 1000)
@@ -1517,11 +1535,14 @@ Public Function SyncReceive( _
     Const FUNC_NAME     As String = "SyncReceive"
     Dim lResult         As Long
     Dim uAddr           As SOCKADDR_IN
+    Dim dblTimerEx      As Double
+    Dim lElapsed        As Long
     
     On Error GoTo EH
     If Timeout = 0 Then
         Timeout = Znl(SockOpt(ucsSsoReceiveTimeout), DEF_TIMEOUT)
     End If
+    dblTimerEx = TimerEx
     Do
         If HostAddress <> STR_CHR1 Then
             lResult = ws_recvfrom(m_hSocket, ByVal BufPtr, BufLen, Flags, uAddr, LenB(uAddr))
@@ -1533,19 +1554,26 @@ Public Function SyncReceive( _
             If m_lLastError <> WSAEWOULDBLOCK Then
                 GoTo QH
             End If
-            If Not SyncWaitForEvent(Timeout, ucsSfdRead) Then
-                GoTo QH
-            End If
-        ElseIf lResult = 0 Then
-            If Not SyncWaitForEvent(Timeout, ucsSfdRead) Then
-                GoTo QH
-            End If
-        Else
+        ElseIf lResult > 0 Then
             If uAddr.sin_family <> 0 Then
                 pvFromSockAddr uAddr, HostAddress, HostPort
             End If
             Received = lResult
             Exit Do
+        ElseIf BufLen > 0 And SockOpt(ucsSsoType) = ucsSckStream Then
+            '--- note: for TCP recv returns 0 when peer has closed the connection
+            m_lLastError = WSAENOTCONN
+            GoTo QH
+        End If
+        If Timeout > 0 Then
+            lElapsed = Int((TimerEx - dblTimerEx) * 1000)
+            If lElapsed >= Timeout Then
+                m_lLastError = ERR_TIMEOUT
+                GoTo QH
+            End If
+        End If
+        If Not SyncWaitForEvent(Timeout - lElapsed, ucsSfdRead) Then
+            GoTo QH
         End If
     Loop
     '--- success
@@ -1601,6 +1629,8 @@ Public Function SyncSend( _
     Const FUNC_NAME     As String = "SyncSend"
     Dim uAddr           As SOCKADDR_IN
     Dim lResult         As Long
+    Dim dblTimerEx      As Double
+    Dim lElapsed        As Long
     
     On Error GoTo EH
     If Timeout = 0 Then
@@ -1608,10 +1638,10 @@ Public Function SyncSend( _
     End If
     If LenB(HostAddress) <> 0 Then
         If Not pvToSockAddr(HostAddress, HostPort, uAddr) Then
-            SyncSend = SOCKET_ERROR
             GoTo QH
         End If
     End If
+    dblTimerEx = TimerEx
     Do
         Do
             If uAddr.sin_family <> 0 Then
@@ -1626,7 +1656,14 @@ Public Function SyncSend( _
             If m_lLastError <> WSAEWOULDBLOCK Then
                 GoTo QH
             End If
-            If Not SyncWaitForEvent(Timeout, ucsSfdWrite) Then
+            If Timeout > 0 Then
+                lElapsed = Int((TimerEx - dblTimerEx) * 1000)
+                If lElapsed >= Timeout Then
+                    m_lLastError = ERR_TIMEOUT
+                    GoTo QH
+                End If
+            End If
+            If Not SyncWaitForEvent(Timeout - lElapsed, ucsSfdWrite) Then
                 GoTo QH
             End If
         Loop
@@ -1651,7 +1688,6 @@ Public Function SyncWaitForEvent( _
     Const FUNC_NAME     As String = "SyncWaitForEvent"
     Dim hWnd            As Long
     Dim uMsg            As APIMSG
-    Dim lTimerID        As Long
     Dim bBlocking       As Boolean
     Dim bHandled        As Boolean
     Dim bPeek           As Boolean
@@ -1673,19 +1709,18 @@ Public Function SyncWaitForEvent( _
     bBlocking = m_bBlocking
     m_bBlocking = True
     hWnd = m_oHelperWindow.frMessageHWnd
-    If Timeout > 0 Then
-        lTimerID = SetTimer(hWnd, 1, Timeout, 0)
-    End If
     dblTimerEx = TimerEx
     bPeek = True
     Do
         If PeekMessage(uMsg, hWnd, WM_SOCKET_NOTIFY + m_lIndex, WM_SOCKET_NOTIFY + m_lIndex, PM_REMOVE) <> 0 Then
             If uMsg.wParam <> INVALID_SOCKET And uMsg.lParam <> 0 Then
                 If uMsg.wParam = m_hSocket Then
-                    If m_cMsgQueue Is Nothing Then
-                        Set m_cMsgQueue = New VBA.Collection
+                    If (uMsg.lParam \ &H10000) <> 0 Then
+                        m_lPendingErrorParam = uMsg.lParam
+                        m_lLastError = uMsg.lParam \ &H10000
+                        Exit Do
                     End If
-                    m_cMsgQueue.Add Array(WM_SOCKET_NOTIFY, uMsg.wParam, uMsg.lParam)
+                    m_lPendingEvents = m_lPendingEvents Or (uMsg.lParam And &HFFFF&)
                     If (uMsg.lParam And EventMask) <> 0 Then
                         '--- success
                         m_lLastError = 0
@@ -1712,12 +1747,8 @@ Public Function SyncWaitForEvent( _
             End If
             bPeek = True
         End If
-        If PeekMessage(uMsg, hWnd, WM_TIMER, WM_TIMER, PM_REMOVE) <> 0 Then
-            m_lLastError = ERR_TIMEOUT
-            Exit Do
-        End If
         If Timeout > 0 Then
-            If TimerEx - dblTimerEx >= Timeout * 1000 Then
+            If (TimerEx - dblTimerEx) * 1000 >= Timeout Then
                 m_lLastError = ERR_TIMEOUT
                 Exit Do
             End If
@@ -1755,19 +1786,14 @@ Public Function SyncWaitForEvent( _
             bPeek = True
         End If
     Loop
-    If lTimerID <> 0 Then
-        Call KillTimer(hWnd, lTimerID)
-    End If
     If Not m_bBlocking Then
         m_lLastError = WSAEINTR
         GoTo QH
     End If
 QH:
     m_bBlocking = bBlocking
-    If Not m_cMsgQueue Is Nothing Then
-        If m_cMsgQueue.Count > 0 Then
-            Call PostMessage(hWnd, WM_SOCKET_NOTIFY + m_lIndex, INVALID_SOCKET, 0)
-        End If
+    If m_lPendingEvents <> 0 Or m_lPendingErrorParam <> 0 Then
+        Call PostMessage(hWnd, WM_SOCKET_NOTIFY + m_lIndex, INVALID_SOCKET, 0)
     End If
     Exit Function
 EH:
@@ -1780,21 +1806,28 @@ End Sub
 
 Public Sub SyncProcessMsgQueue()
     Const FUNC_NAME     As String = "SyncProcessMsgQueue"
-    Dim vElem           As Variant
+    Dim hSocket         As Long
+    Dim lEvents         As Long
+    Dim lErrorParam     As Long
+    Dim vEvent          As Variant
     
     On Error GoTo EH
-    If Not m_cMsgQueue Is Nothing Then
-        Do While m_cMsgQueue.Count > 0
-            vElem = m_cMsgQueue.Item(1)
-            m_cMsgQueue.Remove 1
-            Select Case vElem(0)
-            Case WM_SOCKET_NOTIFY
-                pvDoNotify vElem(1), vElem(2)
-            Case WM_SOCKET_RESOLVE
-                pvDoResolve vElem(1), vElem(2)
-            End Select
-        Loop
+    If m_lPendingEvents = 0 And m_lPendingErrorParam = 0 Then
+        Exit Sub
     End If
+    '--- note: clear before raising events as handlers can re-enter SyncWaitForEvent
+    hSocket = m_hSocket
+    lEvents = m_lPendingEvents
+    lErrorParam = m_lPendingErrorParam
+    m_lPendingEvents = 0
+    m_lPendingErrorParam = 0
+    For Each vEvent In Array(ucsSfdConnect, ucsSfdAccept, ucsSfdRead, ucsSfdOob, ucsSfdWrite, ucsSfdClose)
+        If (lErrorParam And &HFFFF&) = vEvent Then
+            pvDoNotify hSocket, lErrorParam
+        ElseIf (lEvents And vEvent) <> 0 Then
+            pvDoNotify hSocket, vEvent
+        End If
+    Next
     Exit Sub
 EH:
     PrintError FUNC_NAME
@@ -1894,12 +1927,14 @@ Private Function pvHandleNotify(ByVal wMsg As Long, ByVal wParam As Long, ByVal 
                 End If
             Next
         Case WM_SOCKET_NOTIFY To WM_SOCKET_NOTIFY + UBound(.SocketPtr)
-            If wParam <> INVALID_SOCKET Then
-                lIdx = wMsg - WM_SOCKET_NOTIFY
-                If .SocketPtr(lIdx) <> 0 Then
+            lIdx = wMsg - WM_SOCKET_NOTIFY
+            If .SocketPtr(lIdx) <> 0 Then
+                If wParam <> INVALID_SOCKET Then
                     pvToSocket(.SocketPtr(lIdx)).frNotifyEvent wParam, lParam
-                    pvHandleNotify = 1
+                Else
+                    pvToSocket(.SocketPtr(lIdx)).frNotifyMsgQueue
                 End If
+                pvHandleNotify = 1
             End If
         End Select
     End With
