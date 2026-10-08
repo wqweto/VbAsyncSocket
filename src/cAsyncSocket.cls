@@ -701,10 +701,7 @@ Public Sub Close_()
     Dim lSize           As Long
     
     On Error GoTo EH
-    If pvResolveHandle <> 0 Then
-        Call WSACancelAsyncRequest(m_uGetHostByName(0).Handle)
-        Erase m_uGetHostByName
-    End If
+    pvCancelResolve
     If m_hSocket <> INVALID_SOCKET Then
         Call ws_shutdown(m_hSocket, SD_SEND)
         '--- drain
@@ -727,6 +724,7 @@ Public Function Connect(HostAddress As String, ByVal HostPort As Long) As Boolea
     If m_hSocket = INVALID_SOCKET Then
         Create
     End If
+    pvCancelResolve
     If Not pvToSockAddr(HostAddress, HostPort, uAddr, Resolve:=False) Then
         ReDim m_uGetHostByName(0 To 0) As UcsAsyncGetHostByNameType
         m_uGetHostByName(0).Port = HostPort
@@ -1250,6 +1248,14 @@ Private Function pvToStringA(ByVal lPtr As Long) As String
         Call CopyMemory(ByVal pvToStringA, ByVal lPtr, Len(pvToStringA))
     End If
 End Function
+
+Private Sub pvCancelResolve()
+    '--- note: used in terminate -> no error handling
+    If pvResolveHandle <> 0 Then
+        Call WSACancelAsyncRequest(m_uGetHostByName(0).Handle)
+        Erase m_uGetHostByName
+    End If
+End Sub
 
 Private Sub pvClose()
     '--- note: used in terminate -> no error handling
@@ -2140,6 +2146,7 @@ End Sub
 
 Private Sub Class_Terminate()
     If frMessageHWnd = 0 Then
+        pvCancelResolve
         pvClose
         Set m_oHelperWindow = Nothing
     Else
