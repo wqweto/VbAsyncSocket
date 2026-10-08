@@ -2744,6 +2744,7 @@ Private Function pvPkiCertValidate(ByVal sHostName As String, cCerts As Collecti
     Dim lIdx            As Long
     Dim baCert()        As Byte
     Dim pCertContext    As Long
+    Dim pLeafContext    As Long
     Dim vElem           As Variant
     Dim sDnsName        As String
     Dim bMatched        As Boolean
@@ -2778,47 +2779,50 @@ Private Function pvPkiCertValidate(ByVal sHostName As String, cCerts As Collecti
                 End If
             End If
         End If
-        Call CertFreeCertificateContext(pCertContext)
+        If lIdx = 1 Then
+            pLeafContext = pCertContext
+        Else
+            Call CertFreeCertificateContext(pCertContext)
+        End If
         pCertContext = 0
     Next
-    '--- search remote host FQDN in any X.509 certificate's "Subject Alternative Name" list of DNS names (incl. wildcards)
+    '--- search remote host FQDN in server X.509 certificate's "Subject Alternative Name" list of DNS names (incl. wildcards)
+    '---   must be the first one as this is the certificate the handshake signature was verified with
     sHostName = LCase$(sHostName)
+    sError = Replace(ERR_NO_MATCHING_ALT_NAME, "%1", sHostName)
+    If pLeafContext = 0 Then
+        GoTo QH
+    End If
+    For Each vElem In pvPkiCertGetSubjectAltName2(pLeafContext, CERT_ALT_NAME_DNS_NAME)
+        sDnsName = LCase$(vElem)
+        If Left$(sDnsName, 1) = "*" Then
+            If sHostName Like sDnsName And Not sHostName Like "*." & sDnsName Then
+                bMatched = True
+                Exit For
+            End If
+        Else
+            If sHostName = sDnsName Or "www." & sHostName = sDnsName Then
+                bMatched = True
+                Exit For
+            End If
+        End If
+    Next
+    If Not bMatched Then
+        GoTo QH
+    End If
     sError = vbNullString
-    Do
-        pCertContext = CertEnumCertificatesInStore(hCertStore, pCertContext)
-        If pCertContext = 0 Then
-            If LenB(sError) = 0 Then
-                sError = Replace(ERR_NO_MATCHING_ALT_NAME, "%1", sHostName)
-            End If
-            Exit Do
-        End If
-        bMatched = False
-        For Each vElem In pvPkiCertGetSubjectAltName2(pCertContext, CERT_ALT_NAME_DNS_NAME)
-            sDnsName = LCase$(vElem)
-            If Left$(sDnsName, 1) = "*" Then
-                If sHostName Like sDnsName And Not sHostName Like "*." & sDnsName Then
-                    bMatched = True
-                    Exit For
-                End If
-            Else
-                If sHostName = sDnsName Or "www." & sHostName = sDnsName Then
-                    bMatched = True
-                    Exit For
-                End If
-            End If
-        Next
-        If bMatched Then
-            If pvPkiCertBuildChain(pCertContext, hCertStore, hRootStore, sError) Then
-                '--- success
-                pvPkiCertValidate = True
-                Exit Do
-            End If
-        End If
-    Loop
+    If Not pvPkiCertBuildChain(pLeafContext, hCertStore, hRootStore, sError) Then
+        GoTo QH
+    End If
+    '--- success
+    pvPkiCertValidate = True
 QH:
     On Error GoTo 0
     If pCertContext <> 0 Then
         Call CertFreeCertificateContext(pCertContext)
+    End If
+    If pLeafContext <> 0 Then
+        Call CertFreeCertificateContext(pLeafContext)
     End If
     If hCertStore <> 0 Then
         Call CertCloseStore(hCertStore, 0)
@@ -2889,6 +2893,8 @@ Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hCertStor
     Dim uChainElem      As CERT_CHAIN_ELEMENT
     Dim pExistContext   As Long
     Dim lIdx            As Long
+    Dim lElemIdx        As Long
+    Dim lElemStatus     As Long
     Dim hResult         As Long
     Dim sApiSource      As String
     Dim vErr            As Variant
@@ -2936,7 +2942,16 @@ Private Function pvPkiCertBuildChain(ByVal pCertContext As Long, ByVal hCertStor
             If pExistContext <> 0 Then
                 Call CertFreeCertificateContext(pExistContext)
                 pExistContext = 0
-                dwErrorStatus = dwErrorStatus And Not CERT_TRUST_IS_UNTRUSTED_ROOT And Not CERT_TRUST_IS_NOT_SIGNATURE_VALID
+                lElemStatus = 0
+                For lElemIdx = 0 To uChainSmall.cElems - 2
+                    Call CopyMemory(lPtr, ByVal UnsignedAdd(uChainSmall.rgElem, lElemIdx * LenB(lPtr)), LenB(lPtr))
+                    Call CopyMemory(uChainElem, ByVal lPtr, LenB(uChainElem))
+                    lElemStatus = lElemStatus Or uChainElem.TrustStatus.dwErrorStatus
+                Next
+                dwErrorStatus = dwErrorStatus And Not CERT_TRUST_IS_UNTRUSTED_ROOT
+                If (lElemStatus And CERT_TRUST_IS_NOT_SIGNATURE_VALID) = 0 Then
+                    dwErrorStatus = dwErrorStatus And Not CERT_TRUST_IS_NOT_SIGNATURE_VALID
+                End If
             End If
         End If
         If dwErrorStatus = 0 Then

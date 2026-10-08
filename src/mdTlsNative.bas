@@ -144,6 +144,7 @@ Private Declare Function CertAddEncodedCertificateToStore Lib "crypt32" (ByVal h
 Private Declare Function CertSetCertificateContextProperty Lib "crypt32" (ByVal pCertContext As Long, ByVal dwPropId As Long, ByVal dwFlags As Long, pvData As Any) As Long
 Private Declare Function CertFreeCertificateContext Lib "crypt32" (ByVal pCertContext As Long) As Long
 Private Declare Function CertEnumCertificatesInStore Lib "crypt32" (ByVal hCertStore As Long, ByVal pPrevCertContext As Long) As Long
+Private Declare Function CertCompareCertificate Lib "crypt32" (ByVal dwCertEncodingType As Long, ByVal pCertId1 As Long, ByVal pCertId2 As Long) As Long
 Private Declare Function CertGetCertificateContextProperty Lib "crypt32" (ByVal pCertContext As Long, ByVal dwPropId As Long, pvData As Any, pcbData As Long) As Long
 Private Declare Function CryptStringToBinary Lib "crypt32" Alias "CryptStringToBinaryW" (ByVal pszString As Long, ByVal cchString As Long, ByVal dwFlags As Long, ByVal pbBinary As Long, pcbBinary As Long, Optional ByVal pdwSkip As Long, Optional ByVal pdwFlags As Long) As Long
 '--- advapi32
@@ -772,7 +773,7 @@ RetryCredentials:
                     pvInitSecDesc .OutDesc, .TlsSizes.cBuffers, .OutBuffers
                     If QueryContextAttributes(.hTlsContext, SECPKG_ATTR_REMOTE_CERT_CONTEXT, pCertContext) = 0 And pCertContext <> 0 Then
                         Call CopyMemory(uCertContext, ByVal pCertContext, Len(uCertContext))
-                        If Not pvTlsExportFromCertStore(uCertContext.hCertStore, .RemoteCertificates, .RemoteCertStatuses) Then
+                        If Not pvTlsExportFromCertStore(pCertContext, uCertContext.hCertStore, .RemoteCertificates, .RemoteCertStatuses) Then
                             GoTo QH
                         End If
                         Call CertFreeCertificateContext(pCertContext)
@@ -1496,44 +1497,68 @@ QH:
     End If
 End Function
 
-Private Function pvTlsExportFromCertStore(ByVal hCertStore As Long, cCerts As Collection, cStatuses As Collection) As Boolean
+Private Function pvTlsExportFromCertStore(ByVal pLeafContext As Long, ByVal hCertStore As Long, cCerts As Collection, cStatuses As Collection) As Boolean
     Const FUNC_NAME     As String = "pvTlsExportFromCertStore"
+    Dim uLeafContext    As CERT_CONTEXT
     Dim uCertContext    As CERT_CONTEXT
-    Dim baCert()        As Byte
     Dim pCertContext    As Long
-    Dim lSize           As Long
     Dim hResult         As Long
     Dim sApiSource      As String
 
     '--- export server X.509 certificates from certificate store
     Set cCerts = New Collection
     Set cStatuses = New Collection
+    If Not pvTlsExportCertContext(pLeafContext, cCerts, cStatuses, hResult) Then
+        sApiSource = "CertGetCertificateContextProperty"
+        GoTo QH
+    End If
+    Call CopyMemory(uLeafContext, ByVal pLeafContext, Len(uLeafContext))
     Do
         pCertContext = CertEnumCertificatesInStore(hCertStore, pCertContext)
         If pCertContext = 0 Then
             Exit Do
         End If
         Call CopyMemory(uCertContext, ByVal pCertContext, Len(uCertContext))
-        pvWriteBuffer baCert, 0, uCertContext.pbCertEncoded, uCertContext.cbCertEncoded
-        pvArrayReallocate baCert, uCertContext.cbCertEncoded, FUNC_NAME & ".baCert"
-        cCerts.Add baCert
-        '--- collect OCSP response
-        If CertGetCertificateContextProperty(pCertContext, CERT_OCSP_RESPONSE_PROP_ID, ByVal 0, lSize) <> 0 And lSize > 0 Then
-            pvArrayReallocate baCert, lSize, FUNC_NAME & ".baCert"
-            If CertGetCertificateContextProperty(pCertContext, CERT_OCSP_RESPONSE_PROP_ID, baCert(0), lSize) = 0 Then
-                hResult = Err.LastDllError
+        If CertCompareCertificate(X509_ASN_ENCODING, uLeafContext.pCertInfo, uCertContext.pCertInfo) = 0 Then
+            If Not pvTlsExportCertContext(pCertContext, cCerts, cStatuses, hResult) Then
                 sApiSource = "CertGetCertificateContextProperty"
                 GoTo QH
             End If
-            cStatuses.Add baCert
         End If
     Loop
     '--- success
     pvTlsExportFromCertStore = True
 QH:
+    If pCertContext <> 0 Then
+        Call CertFreeCertificateContext(pCertContext)
+    End If
     If LenB(sApiSource) <> 0 Then
         ErrRaise IIf(hResult < 0, hResult, hResult Or LNG_FACILITY_WIN32), FUNC_NAME & "." & sApiSource
     End If
+End Function
+
+Private Function pvTlsExportCertContext(ByVal pCertContext As Long, cCerts As Collection, cStatuses As Collection, hResult As Long) As Boolean
+    Const FUNC_NAME     As String = "pvTlsExportCertContext"
+    Dim uCertContext    As CERT_CONTEXT
+    Dim baCert()        As Byte
+    Dim lSize           As Long
+
+    Call CopyMemory(uCertContext, ByVal pCertContext, Len(uCertContext))
+    pvWriteBuffer baCert, 0, uCertContext.pbCertEncoded, uCertContext.cbCertEncoded
+    pvArrayReallocate baCert, uCertContext.cbCertEncoded, FUNC_NAME & ".baCert"
+    cCerts.Add baCert
+    '--- collect OCSP response (empty if none so that statuses stay in sync with certificates)
+    baCert = vbNullString
+    If CertGetCertificateContextProperty(pCertContext, CERT_OCSP_RESPONSE_PROP_ID, ByVal 0, lSize) <> 0 And lSize > 0 Then
+        pvArrayReallocate baCert, lSize, FUNC_NAME & ".baCert"
+        If CertGetCertificateContextProperty(pCertContext, CERT_OCSP_RESPONSE_PROP_ID, baCert(0), lSize) = 0 Then
+            hResult = Err.LastDllError
+            Exit Function
+        End If
+    End If
+    cStatuses.Add baCert
+    '--- success
+    pvTlsExportCertContext = True
 End Function
 
 Private Function pvAsn1DecodePrivateKey(baPrivKey() As Byte, uRetVal As UcsKeyInfo) As Boolean
