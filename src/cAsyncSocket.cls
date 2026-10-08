@@ -723,7 +723,9 @@ Public Function Connect(HostAddress As String, ByVal HostPort As Long) As Boolea
     
     On Error GoTo EH
     If m_hSocket = INVALID_SOCKET Then
-        Create
+        If Not Create() Then
+            GoTo QH
+        End If
     End If
     pvCancelResolve
     If Not pvToSockAddr(HostAddress, HostPort, uAddr, Resolve:=False) Then

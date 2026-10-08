@@ -88,6 +88,8 @@ Private Const NTE_BAD_ALGID                             As Long = &H80090008
 '--- for CertGetCertificateContextProperty
 Private Const CERT_KEY_PROV_HANDLE_PROP_ID              As Long = 1
 Private Const CERT_KEY_PROV_INFO_PROP_ID                As Long = 2
+'--- for CertSetCertificateContextProperty
+Private Const CERT_STORE_NO_CRYPT_RELEASE_FLAG          As Long = 1
 '--- for PFXImportCertStore
 Private Const CRYPT_EXPORTABLE                          As Long = &H1
 Private Const PKCS12_NO_PERSIST_KEY                     As Long = &H8000&
@@ -1032,6 +1034,8 @@ Public Function ShutDown() As Boolean
                 GoTo QH
             End If
         End If
+        pvFlushSend DEF_TIMEOUT
+        pvResetSendBuffer
         m_oSocket.Close_
         '--- success
         ShutDown = True
@@ -1059,6 +1063,8 @@ Public Sub Close_()
         If TlsIsReady(m_uCtx) And Not TlsIsShutdown(m_uCtx) Then
             pvHandleShutdown
         End If
+        pvFlushSend DEF_TIMEOUT
+        pvResetSendBuffer
     End If
     m_oSocket.Close_
 End Sub
@@ -1225,6 +1231,7 @@ Public Function SyncSendArray(Buffer() As Byte, Optional ByVal Timeout As Long) 
         If Timeout = 0 Then
             Timeout = DEF_TIMEOUT
         End If
+        m_eRaisedEvent = m_eRaisedEvent And Not ucsSfdWrite
         If Not SendArray(Buffer) Then
             GoTo QH
         End If
@@ -1560,13 +1567,13 @@ Private Function pvHandleSend() As Boolean
             GoTo QH
         Else
             m_lSendActual = m_lSendActual + lBytes
-            m_eRaisedEvent = m_eRaisedEvent Or ucsSfdWrite
         End If
     Loop
     If m_lSendActual > 0 Then
         If m_lSendActual >= m_lSendPos Then
             m_lSendActual = 0
             m_lSendPos = 0
+            m_eRaisedEvent = m_eRaisedEvent Or ucsSfdWrite
         End If
     End If
     '--- success
@@ -1597,6 +1604,48 @@ EH:
     PrintError FUNC_NAME
     Resume QH
 End Function
+
+Private Function pvFlushSend(ByVal Timeout As Long) As Boolean
+    Const FUNC_NAME     As String = "pvFlushSend"
+    Dim dblTimer        As Double
+    Dim lElapsed        As Long
+    
+    On Error GoTo EH
+    dblTimer = TimerEx
+    Do While m_lSendActual < m_lSendPos
+        If Not pvHandleSend() Then
+            GoTo QH
+        End If
+        If m_lSendActual >= m_lSendPos Then
+            Exit Do
+        End If
+        #If ImplSync Then
+            lElapsed = Int((TimerEx - dblTimer) * 1000)
+            If lElapsed >= Timeout Then
+                GoTo QH
+            End If
+            If Not m_oSocket.SyncWaitForEvent(Timeout - lElapsed, ucsSfdWrite) Then
+                GoTo QH
+            End If
+        #Else
+            GoTo QH
+        #End If
+    Loop
+    '--- success
+    pvFlushSend = True
+QH:
+    Exit Function
+EH:
+    PrintError FUNC_NAME
+    Resume QH
+End Function
+
+Private Sub pvResetSendBuffer()
+    Erase m_baSendBuffer
+    m_lSendPos = 0
+    m_lSendActual = 0
+    m_lSendBytes = 0
+End Sub
 
 Private Function pvSetLastError( _
             Optional ByVal ErrNumber As Long, _
@@ -2165,7 +2214,7 @@ Private Function pvPkiPemDecryptPrivateKey(baRetVal() As Byte, baEncrKey() As By
     Const FUNC_NAME     As String = "pvPkiPemDecryptPrivateKey"
     Const szOID_PKCS_5_PBES2        As String = "1.2.840.113549.1.5.13"
     Const szOID_PKCS_5_PBKDF2       As String = "1.2.840.113549.1.5.12"
-    Const szOID_RSA_HMAC_SHA1       As String = "1.2.840.113549.2"
+    Const szOID_RSA_HMAC_SHA1       As String = "1.2.840.113549.2.7"
     Const szOID_RSA_HMAC_SHA256     As String = "1.2.840.113549.2.9"
     Const szOID_RSA_HMAC_SHA512     As String = "1.2.840.113549.2.11"
     Const szOID_RSA_DES_EDE3_CBC    As String = "1.2.840.113549.3.7"
@@ -2220,7 +2269,7 @@ Private Function pvPkiPemDecryptPrivateKey(baRetVal() As Byte, baEncrKey() As By
     End If
     sOID = cParams.Item(IDX_KDF_HASH_OID)
     Select Case sOID
-    Case szOID_RSA_HMAC_SHA1
+    Case szOID_RSA_HMAC_SHA1, vbNullString '--- note: prf is optional and defaults to hmacWithSHA1
         sHashAlg = "SHA1"
     Case szOID_RSA_HMAC_SHA256
         sHashAlg = "SHA256"
@@ -2471,12 +2520,12 @@ Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Var
                     uCertRdn.cRDNAttr = 1
                     pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING, 0, dwFindType, ByVal pvFindPara, 0)
                 End If
-                lCertRdnPtr = LocalFree(lCertRdnPtr)
-                Debug.Assert lCertRdnPtr = 0
                 If pCertContext <> 0 Then
                     Exit For
                 End If
             End If
+            lCertRdnPtr = LocalFree(lCertRdnPtr)
+            Debug.Assert lCertRdnPtr = 0
         Next
     Else
         If Not pvPkiParseSelectorString(SubjectOrIssuers, lStoreFlags, sStoreName, sCertName) Then
@@ -2550,6 +2599,10 @@ Private Function pvPkiSystemStoreImportCertificate(ByVal SubjectOrIssuers As Var
     End If
 QH:
     On Error GoTo 0
+    If lCertRdnPtr <> 0 Then
+        lCertRdnPtr = LocalFree(lCertRdnPtr)
+        Debug.Assert lCertRdnPtr = 0
+    End If
     If pCertContext <> 0 Then
         Call CertFreeCertificateContext(pCertContext)
     End If
@@ -2647,7 +2700,7 @@ Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey 
         GoTo QH
     End If
     '--- note: store temp key container to be able to call CryptGetUserKey in pvPkiExportPrivateKey
-    If CertSetCertificateContextProperty(pCertContext, CERT_KEY_PROV_HANDLE_PROP_ID, 0, ByVal hProv) = 0 Then
+    If CertSetCertificateContextProperty(pCertContext, CERT_KEY_PROV_HANDLE_PROP_ID, CERT_STORE_NO_CRYPT_RELEASE_FLAG, ByVal hProv) = 0 Then
         hResult = Err.LastDllError
         sApiSource = "CertSetCertificateContextProperty(CERT_KEY_PROV_HANDLE_PROP_ID)"
         GoTo QH
@@ -2658,6 +2711,9 @@ Private Function pvPkiGenerSelfSignedCertificate(cCerts As Collection, cPrivKey 
     End If
 QH:
     On Error GoTo 0
+    If pCertContext <> 0 Then
+        Call CertFreeCertificateContext(pCertContext)
+    End If
     If hKey <> 0 Then
         Call CryptDestroyKey(hKey)
     End If
@@ -3291,7 +3347,7 @@ Private Function pvPkiIssuerToCertRdn(vIssuer As Variant, uOutput As CERT_RDN, l
     End If
     baRDN = vIssuer
     If CryptDecodeObjectEx(X509_ASN_ENCODING Or PKCS_7_ASN_ENCODING, X509_NAME, baRDN(0), UBound(baRDN) + 1, _
-            CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_NOCOPY_FLAG Or CRYPT_DECODE_SHARE_OID_STRING_FLAG, 0, lOutputPtr, 0) = 0 Then
+            CRYPT_DECODE_ALLOC_FLAG Or CRYPT_DECODE_SHARE_OID_STRING_FLAG, 0, lOutputPtr, 0) = 0 Then
         GoTo QH
     End If
     Debug.Assert lOutputPtr <> 0
